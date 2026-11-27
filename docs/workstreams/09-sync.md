@@ -49,6 +49,7 @@
 - [x] 版本（PR C）：命名版本（`History`，同步的 Loro 文档 + `history.loro`）、任意版本的只读视图、按 Prim 的差异（新增/删除/修改/移动，含作者和时间）
 - [x] 回滚（PR F）：`History::revert_to` / `history::revert`，以新的撤销单元恢复整个工程、一个工程层或一个 Prim 子树，不改写历史；命令 `version.revert`（`bae_sync::register_commands`）供 Agent 调用
 - [x] 差异和回滚按节点身份（G0，分支与合并的前置）：`identity.rs` 的 `NodeIndex`（TreeID → 父节点、原始名、兄弟序号、spec）和 `Matching`（同一 TreeID，加"重建别名"）；`diff` 和 `revert` / `version.revert` 不再按路径匹配 Prim，镜像因并发同名新建而在客户端之间不一致时，两边算出的差异和回滚结果相同；恢复时与留下的同名兄弟冲突用旧节点自己的后缀 `<名字>_<peer>_<counter>`（按重建别名仍对上旧节点，回滚可重复执行）；`Prim` 范围也按节点判断。镜像不一致本身是 bae-model 的问题，已报给 02
+- [x] 连接管理（`collab/sync-connection`，epic #737 子任务 3 的引擎部分）：`Connection`（共享目录 / Hub 目标、后台连接、断线按退避重连、401/403/404/ClientId 被占用时停下等用户处理、读写权限、状态栏状态、在线状态、`unknown_docs`、不阻塞的关闭）；Hub 握手响应带 `x-bae-access`；只读时关掉 `SessionConfig::send_data`；`DirTransport::open_read_only`；规格见 spec 第 7 节
 - [x] 语义冲突提示（#737 子任务 5 的引擎部分，界面另做）：`ConflictTracker`（`conflicts.rs`，只观察不修改）。在线：按元素（值、表达式、某时间的关键帧）记住自己最近的修改，远端导入覆盖了它报 `Overridden`（含胜出作者、是否真正同时），我们胜出时报较轻的 `Kept`，Prim 被删报 `PrimRemoved`；只解码新到操作里写了相关 map 的部分，大导入不扫描整个工程。离线：`connection_lost` / `caught_up`（`SyncSession::is_caught_up` 判断补齐）给出 `MergeSummary`：保留的、被覆盖的、新建和删除的 Prim 的结果、别人改了什么（按节点身份的 `history::diff`）。Hub 和共享目录都可用。评审后补上：断开前没送出去的修改补齐时照样提示；本地事件晚于导入交给 `observe` 也不漏报；共享目录重连先重读目录再回 `Hello`，补齐分几次 pump 时 `is_caught_up` 不会提前为真；补齐中途又改了东西时 `merged` 不丢别人的修改；别人失败事务的回滚胜出时报告；自己也删了的 Prim 不算被别人删；连续冲突按 `repeat_quiet` 只报一次；空闲检查只比较 frontiers，不随记着的修改数和 peer 数增长。规格见 spec 6.4
 - [ ] 分支与合并
 - [x] 多客户端模拟测试：4 个客户端经 Hub、20% 丢包 + 10% 重复 + 乱序延迟，编辑 150 轮后全部收敛；两端直连；Hub 重启后补齐 + 新客户端加入；协作者新建的工程层
@@ -79,6 +80,18 @@
   - 两个清理者真正交错的单元测试（原来的集成测试里一个清理者先删完了）。
   - 修了 PR1 和清理分支交叉时漏掉的测试编译错误（`Client::collide`）。
 - 写清理的压力测试时发现一个可能属于 02 的问题（还没转给 02）：几个客户端并发创建同名的 Prim 后，两个客户端的 Loro 版本向量完全相同，镜像（`to_trees`）里的命名却不同（一个叫 `shared`，另一个叫 `shared_<peer>_<counter>`），大约每 5 次出现 1 次。猜测和"本地操作增量更新镜像、远端导入整体重建"有关，未确认。同步本身已经收敛，只是看到的路径不同；关掉清理也一样出现。压力测试里避开了同名创建。
+- 连接管理（`collab/sync-connection`，叠在 `collab/sync-hub-requests` 上）：`bae_sync::Connection`，应用（11）和 Agent 在持有 Stage 的线程上每帧 `pump`，连接、握手、丢弃断开的链路、关闭都在后台线程（spec 第 7 节）。
+  - Hub 拒绝握手改为 `SyncError::HubRefused { status, message }`；握手响应带 `x-bae-access`（`HubTransport::accept_granting` / `access()`），10 的 Hub 已经发送。
+  - 只读：会话不发任何文档数据（原来是 `SessionConfig::read_only`，合并 #808 后统一成 dev 的 `SessionConfig::send_data`）；`DirTransport::open_read_only`（`updates/` 不可写的共享目录，什么都不写）。
+  - 顺带修了一个老问题：重连后 `reset()` 没有重新发布自己的在线状态，而且 Hub 替断开的连接发"离开"用的序号正好是重连后的下一条，别人要等下一次心跳（5 秒）才重新看到我们。现在 `reset()` 立即重新发布、跳过那个序号、清空旧的在线列表（spec 6.2）。
+  - 还发现一个竞争：丢弃或关闭共享目录的连接后立即重新分享同一个目录，旧链路还没放开文件锁，新连接报 `ClientIdInUse`。现在本进程正在放开的链路按"目录 + `ClientId`"登记，连接线程先等它们放开；其他情况这个错误持续 2 秒以上才算要用户处理的失败。
+  - 评审后补的（spec 7.2、7.4、7.7）：连接中 `close` 或丢弃时，连接线程做好的链路也在后台线程丢弃；断线后交给链路、对方没确认的修改算 `unsynced`（`SyncSession::forget_unconfirmed`），退出时会提示；Hub 静默 20 秒（`hub_idle_timeout`）算断开；共享目录 I/O 卡住超过 `io_stall` 时交出去的修改算 `unsynced`（`ThreadedTransport::stalled`）；`retry()` 不连接不能用的 URL；`wake` 只在后台线程调用；闹钟不会丢掉之后的唤醒；`Debug` 不打印 URL 里的 `?token=`；Hub 地址解析出多个时逐个尝试、IPv4 优先；`Access` 移到 `transport.rs`。
+  - 合并 dev（#782、#783 已合并）：只读打开的 `DirTransport` 不清理（spec 4.5、4.7）：不压缩、不接管、不删任何文件（过期的心跳文件也不删），也不写探测服务器时钟的临时文件（`a_folder_opened_read_only_cleans_nothing_up`）。`SnapshotRequest` 照 #783 在本轮导入之后回答，只读会话不回答；回答的快照和增量一样记为"可能还在路上"（2.4）。`open` 现在自己等锁 2 秒（`lock_client`），所以另一个进程占着同一个 `ClientId` 时，连接管理要大约 4.5 秒（两次各等 2 秒的尝试，中间退避 0.5 秒）才报 `ClientIdInUse`。
+  - 合并 dev（#789、#808）：#808 的 `SessionConfig::send_data` 和本分支的 `read_only` 意思相同，只留 `send_data`（已经在 dev 里发布）。`Connection` 在对方只给 `Read` 时关掉它，配置里设成 `false` 的一直不发。不发的数据、被流量控制挡下的文档都没交给传输，不记为"在路上"（`documents_held_back_are_not_on_their_way`）。`ThreadedTransport` 的积压（#808）和本分支的 `stalled()` 合在一个 `Backlog` 里。Hub 握手按权限给上限（`client_limits`）并带 `x-bae-access`；只读令牌的 `Connection` 在 Hub 只读上限 64 KiB、本地改了 256 KiB 时也不被断开。
+  - #798 评审跟进 1（spec 7.5）：`DirTransport::open` 报 `PermissionDenied` 不再直接算只读（Windows/SMB 上"等待删除"的锁文件也是这个错误）：再在 `updates/` 里建、删一个探测文件，建不了才只读，建得了就当普通失败重试。只读的共享目录链路每隔 `Backoff::failed_retry` 再探测一次，能写了就重新连接（可写）。
+  - #798 评审跟进 2（spec 7.3、7.4）：连接超过 `ConnectionConfig::unresponsive_after`（默认 10 秒）还没在线时，状态是新的 `ConnectionState::Unresponsive { since }`（NAS 卡在打开、扫描或等旧链路放开时不再一直显示"连接中"）；连接线程照样等，闹钟按时唤醒一次。
+  - 合并 #808 后的评审跟进（spec 2.4、3.1、4.1、7.4、7.5、7.7、7.8）：`close` 把 `flush` 导出的数据交给关闭线程按 `max_backlog` 发（一次全交给链路时，大工程刚分享就关闭会超过 Hub 链路的 `max_unsent`，关闭失败）；Hub 的连接超过 2 × `hub_timeout` 加 1 秒才算 `Unresponsive`（以前每次超时重试都在 `Offline` 前闪一下）；锁文件连续 3 次被拒而目录能写时改为只读加入，只读链路的定期探测也看锁文件能不能打开（以前只读的锁文件让连接一直离线）；可写打开时删掉自己留下的探测文件（清理默认关闭，以前说"清理会删"不对）；规格 2.4 第 4 步和 3.1 改成：重发由"在路上"记录挡住，流量控制管积压，`a_slow_reader_is_not_flooded_by_its_own_hellos` 要求发出不到 1.25 倍；Hub README 写明握手用 `client_limits`。
+  - 合并 dev（#791、#806）（spec 2.4、4.1、4.3、4.5、6.4、7.4、7.5、7.8）：#791 的 `remove_leftovers`（拿到锁才删自己的 `<client-id>.tmp-*`，`updates/**` 和 `presence/`）和本分支的 `remove_own_probes`（只删 `updates/` 下的，不论有没有拿到锁）做的是同一件事，只留前者；写权限探测的文件名（`write_probe_path`）就是它删的那种，单元测试 `our_leftover_probe_files_are_removed_on_open` 覆盖。#806 的 `is_caught_up` / `remote_versions` 改读对方确认过的版本（`confirmed`），不读含"在路上"部分的 `remote`：问的是对方有的我们是否都导入了，两者结果相同（我们发出的本来就在本地版本里），确认过的这份不依赖这一点。断线（`forget_unconfirmed`）之后、下一次 `reset` 之前它还按旧链路回答，所以接在 `Connection` 上时先看 `is_online()`（spec 6.4 写了怎么接，Hub 测试 `the_offline_summary_comes_once_the_new_link_caught_up` 走了一遍断开、两边离线修改、重连补齐、汇总）。共享目录收到会话的 `Hello` 立刻重读目录（#806）对只读打开同样适用。
 
 - 同一台机器上的多进程回环测试（epic #737 子任务 7 第一部分，`collab/sync-multiprocess-tests`）：客户端是测试程序自己再启动一次，不另外发布程序。
   - Hub 模式（`services/bae-hub/tests/multiprocess.rs`）：真实的 `bae-hub` 进程，杀掉后在同一个数据目录和端口重启；客户端进程被杀后用同一个 `ClientId` 从保存的状态或从头重启；一个会断线、会延迟的代理。
@@ -108,6 +121,30 @@
   - **唤醒**：`ThreadedTransport` 以前只在积压撑过后台线程一整轮时才在清空后叫醒；最常见的"发一个大文档、其余暂停、一轮就写完"反而叫不醒。现在 `backlog()` 报告过大于 0 就记下，清空时叫醒（spec 2.6）。
   - 慢读者测试的发送量上限放宽到 3 倍工程大小：流量控制看不到系统套接字缓冲，缓冲大的平台（Windows、macOS 的自动调整）上正确的代码也会超过原来的 2 倍。
   - Hub 的清理开关和每个连接的 `max_backlog` 加了单元测试（10）。
+
+### 2026-11-27（#789、#791、#798、#806、#808 评审的跟进，`collab/sync-review-followups-2`）
+
+- **冲突提示（#806）**（spec 6.4）：
+  - `ConflictTracker::caught_up` 自己先对补齐进来的内容做一次检查，再算汇总，返回 `CaughtUp { notices, summary }`，调用顺序不会再错（以前先汇总后检查时，断开前没送出去的修改漏报冲突）。出错时离线标记保留，这次检查的提示留到下一次检查返回。
+  - `cancel_offline()` 和 `ConflictConfig::catch_up_timeout`（默认不超时，从补齐开始、不从断开时算）：补齐一直完不成（导入失败、Loro 挂起缺依赖的操作）时，在线提示不再永远静默。
+  - 评审后（`catch_up_timeout`）：补齐到一半链路又断了、应用再次调用 `connection_lost` 时，计时作废，判断"别人的操作到来"也改从这一次断开时的版本算，下一条链路补齐时重新开始。以前保留第一次的计时：Wi-Fi 时断时续之后再离线一小时，重连后的第一次检查就去掉标记，那一小时没有汇总；离线时每帧检查也会在 30 秒后去掉。离线时加进层栈的、带别人历史的工程层也不再开始计时（从第一次看到它的检查算起）。原来的超时测试在离线期间也检查，现在能分出"从补齐开始"和"从第一次检查开始"（`an_interrupted_catch_up_restarts_the_timeout`、`a_layer_added_offline_does_not_start_the_catch_up_timeout`）。
+  - 离线合并汇总要导出、导入旧版本快照（每个变了的工程层最多 3 个，加上 `history::diff` 的 2 个），文档写明不要在界面线程上算；`caught_up_detached` / `DetachedMerge` 在调用线程上只做检查、钉住工程（`Stage::snapshot_reader`，只复制句柄），汇总在后台线程上算，结果和在原 Stage 上算的相同。
+  - 给 02 的请求（02 任务书"请求"一节）：公开存储布局的名字或解析辅助函数（`ops.rs` 现在是抄的）、明确的回滚标记（现在靠 `rollback: ` 标签前缀）、导入结果带上"有挂起的操作"（可选）。
+- **流量控制和清理（#808）**（spec 2.4、2.6、4.3、4.7、7.3）：
+  - 自己的日志是更新的格式版本（降级）的文档：`DirTransport::not_written()`，`Transport::notes()`（`LinkNotes { last_error, not_written }`，`ThreadedTransport` 在每次调用内层传输后按 `notes_seq` 复制），`Connection::link_notes()` 给界面显示，这些文档上的修改算作没同步（状态和 `Closing::unsynced`）。Hub 加载工程时打 warn、`/v1/projects` 列出（10）。
+  - 会话每次 `pump` 最多回答 `SessionConfig::max_snapshots_per_pump`（默认 2）个快照请求，其余留到之后的 `pump`（不丢、同一个文档只留一个、`reset` 时丢掉）；`Connection` 有没回答的请求时由闹钟立即再唤醒。
+  - 评审后：只留会回答的请求（自己有的文档、`send_data`），对方（包括只读的 Hub 客户端）发多少，队列都不超过文档数（以前每轮收 256 个、只回答 2 个，不存在的文档的请求越积越多，去重越来越慢，拖慢工程的整个 Relay 线程）；`flush`（`Connection::close`、Hub 卸载和退出前的 `Relay::flush`）回答所有还在等的请求（以前关闭时最多再回答 2 个，其余丢掉，共享目录没等到修复快照，日志一直落后）。唤醒测试去掉了 `io_stall`、`unresponsive_after` 的闹钟（以前它们每 5、10 秒叫醒一次，去掉修复测试也通过）。Hub 加载时的 warn 由测试在加载线程上抓日志检查（`RelayThread::start`；以前测试只看 `/v1/projects`，去掉加载时的检查也通过）。
+  - 文档：50 ms 的清理时间不是硬上限（列目录、stat、删临时文件、锁文件不计时，每次至少读一块）；含读不懂记录的自己的日志永远不压缩，每长到 4 倍就追加一份快照（只在降级后）。
+  - Hub 的 `max_backlog_mib = 0` 和其他上限一样拒绝启动（10）。
+- **多进程测试（#791）**（spec 3.1）：丢弃 `Proc` 时先关标准输入、给 5 秒自己退出再杀，等 `listening` 超时的 Hub 启动不再留下 Hub 进程（新测试强制走这条路径）；杀 Hub 的测试一直编辑到重连之后再叫停（原来 400 次编辑在忙的机器上可能不够）；同一端口重启时并行测试抢到端口的极小概率写在注释里。默认测试现在 5 个，本机约 2.3 秒（1 个 CPU 约 6 秒）。
+- **按节点身份的回滚（#789）**（spec 5.3、5.4）：按 Prim 回滚时父节点已经不在、又不在范围里，报 `SyncError::RevertParentGone`，指出要先回滚的最上层祖先，什么都不改；`version.revert` 的说明写明按范围回滚会连带删掉移出范围的 Prim 下后来新建的子节点（可撤销）；补了规则 (b) 配对手动重建的同名同类型 Prim 的例子和测试。
+- **连接管理（#798 跟进 3、4）**（spec 7.5、7.9）：不发 `x-bae-access` 的旧 Hub（0.0.1）在连接线程上再 `GET /v1/status` 查权限，只读令牌也变成 `Read`；接入应用的注意事项（`wake` 不能只接 `request_repaint`、按 `Failure` 显示本地化文字、汇总放到后台线程）写进 spec 7.9 和 11 任务书的请求。
+- 体积（#808 的跟进）：`bae-hub` release 单文件（Linux x86_64，glibc）#798 分支 5,347,512 字节 → 本分支 5,363,624 字节，+15.7 KiB。应用经 `bae-agent` 只用到 bae-sync 的版本和 `version.*` 命令（不开 `hub`、`watch`），本分支里能到达的只有 `history.rs`、`commands.rs`、`error.rs` 的改动；连接管理、冲突提示、Hub 客户端都不链接进应用。
+- 没做：
+  - 应用的 `cargo xtask size`：`apps/bae` 在 Linux 上编译不过（`rfd` 只是 macOS、Windows 上的依赖，`shell/mod.rs` 却直接用它；不是本分支的改动），这里量不了，以 CI full tier 的 "Release size budget"（Windows、macOS）为准。
+  - `remove_leftovers` 那一遍列目录并进第一次扫描（#791 的可选项）：会把删除从 `open` 挪到第一次 `recv`，契约、文档和测试都要改，只省一次列目录，而 `open` 本来就在后台线程上。
+  - 按范围回滚时把移出范围的后来新建的子节点留在原处：先把它们移出要删的 Prim，可移到哪里都不是它们原来的位置，只写了说明。
+- 以后（性能，不急）：每次 `diff` / `revert` 都为整个工程层的两个版本各建一份 `NodeIndex`（`Prim` 范围的回滚也是全量建），开销和以前按路径遍历同一量级。界面要实时显示差异时，缓存当前版本的 `NodeIndex`（按 Loro frontiers 失效）。
 
 ## 请求（其他工作流在这里留言）
 

@@ -566,6 +566,75 @@ fn a_client_id_can_only_be_used_once_at_a_time() {
     DirTransport::open(&dir, id, fast()).unwrap();
 }
 
+/// Every file under `dir`.
+fn all_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in fs::read_dir(dir).unwrap().flatten() {
+        if e.metadata().unwrap().is_dir() {
+            all_files(&e.path(), out);
+        } else {
+            out.push(e.path());
+        }
+    }
+}
+
+/// A folder opened read-only (the user may not write `updates/`) is read like
+/// any other, this client's own log from an earlier session included, and
+/// nothing is written: no lock, no log, no presence file.
+#[test]
+fn a_folder_opened_read_only_is_read_but_never_written() {
+    let (_tmp, dir) = project_dir();
+    // An earlier, writable session of the same client left an edit behind.
+    let mut earlier = Client::open(&dir, "reader", fast(), 1);
+    earlier.pump();
+    set_opacity(&mut earlier, 4.0);
+    earlier.pump();
+    let expected = fingerprint(&earlier.stage);
+    drop(earlier);
+    let mut before = Vec::new();
+    all_files(&dir, &mut before);
+
+    let mut dir_t =
+        DirTransport::open_read_only(&dir, ClientId::new("reader").unwrap(), fast()).unwrap();
+    assert!(dir_t.is_read_only());
+    let mut stage = Project::open(&dir).unwrap().stage;
+    let mut config = SessionConfig::new(ClientId::new("reader").unwrap());
+    config.hello_interval = None;
+    config.send_data = false;
+    let mut session = SyncSession::new(config);
+    session.set_presence(bae_sync::PresenceState::default());
+    for _ in 0..3 {
+        session.pump(&mut stage, &mut dir_t).unwrap();
+    }
+    assert_eq!(fingerprint(&stage), expected);
+    // Local edits stay local.
+    stage.set_edit_target(&SublayerId::root()).unwrap();
+    stage
+        .transact(&author("user:reader"), "edit", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: "opacity".into(),
+                value: Some(Value::Float(9.0)),
+            })
+        })
+        .unwrap();
+    for _ in 0..3 {
+        session.pump(&mut stage, &mut dir_t).unwrap();
+    }
+    assert!(!session.unsynced(&stage).is_empty());
+    let mut after = Vec::new();
+    all_files(&dir, &mut after);
+    assert_eq!(before, after, "nothing written");
+    let root = DocKey::sublayer(&SublayerId::root());
+    let edit = bae_sync::Message::Updates {
+        doc: root.clone(),
+        version: stage.version(&root).unwrap(),
+        data: stage.export_updates(&root, &Default::default()).unwrap(),
+    };
+    assert!(dir_t.send(edit).is_err());
+    // No lock is taken: a writable session of the same client can attach.
+    DirTransport::open(&dir, ClientId::new("reader").unwrap(), fast()).unwrap();
+}
+
 /// A process killed between writing a temporary file and renaming it (a
 /// compaction, a presence heartbeat) leaves the file behind; the next session
 /// with that client ID removes it once it holds the lock. Other clients' files
@@ -1292,6 +1361,112 @@ fn leftover_temporary_and_lock_files_are_removed() {
     // g can come back.
     drop(running);
     DirTransport::open(&dir, ClientId::new("g").unwrap(), fast()).unwrap();
+}
+
+/// A client that opened the folder read-only (spec §4.5) cleans nothing up
+/// (§4.7): no departed log is deleted or taken over, no leftover file is
+/// removed, no stale heartbeat file either, and the server's clock is not
+/// probed with a file of its own. A writable client cleans up the same folder.
+#[test]
+fn a_folder_opened_read_only_cleans_nothing_up() {
+    let (_tmp, dir) = project_dir();
+    // x leaves; c compacts afterwards, so its logs hold all of x's.
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "c", fast(), 2),
+    ];
+    for c in &mut clients {
+        c.collide = false;
+    }
+    work(&mut clients, 10);
+    let mut c = clients.pop().unwrap();
+    drop(clients);
+    edit_each(&mut c);
+    c.pump();
+    compact(&mut c);
+    // y edits after that and leaves: no log holds its logs, so a writable
+    // cleaner takes them over.
+    let mut y = Client::open(&dir, "y", fast(), 3);
+    y.pump();
+    y.pump();
+    edit_each(&mut y);
+    y.pump();
+    drop(y);
+    c.pump();
+    c.pump();
+    for gone in ["x", "y"] {
+        age_client(&dir, gone, true);
+        age(&dir.join(format!("updates/{gone}.lock")));
+    }
+    // A crashed writer's temporary file, and a heartbeat file untouched for
+    // two days.
+    let tmp = dir.join("updates/root/x.tmp-1");
+    fs::write(&tmp, b"partial").unwrap();
+    age(&tmp);
+    let heartbeat = dir.join("presence/z.presence");
+    fs::write(&heartbeat, b"gone").unwrap();
+    set_mtime(
+        &heartbeat,
+        SystemTime::now() - Duration::from_secs(2 * 24 * 3600),
+    );
+    let files = |dir: &Path| {
+        let mut files = Vec::new();
+        all_files(dir, &mut files);
+        files.sort();
+        files
+            .into_iter()
+            .map(|f| {
+                let meta = fs::metadata(&f).unwrap();
+                (f, meta.len(), meta.modified().unwrap())
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = files(&dir);
+    let config = DirConfig {
+        absorb_departed: true,
+        ..cleaner()
+    };
+
+    let id = ClientId::new("r").unwrap();
+    let mut reader = DirTransport::open_read_only(&dir, id.clone(), config.clone()).unwrap();
+    let mut stage = Project::open(&dir).unwrap().stage;
+    let mut session_config = SessionConfig::new(id);
+    session_config.hello_interval = None;
+    session_config.send_data = false;
+    let mut session = SyncSession::new(session_config);
+    for _ in 0..5 {
+        let out = session.pump(&mut stage, &mut reader).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+    }
+    assert!(state(&stage) == state(&c.stage), "the reader is up to date");
+    assert!(reader.last_error().is_none(), "{:?}", reader.last_error());
+    let stats = reader.stats();
+    assert_eq!(
+        (
+            stats.cleanups,
+            stats.logs_removed,
+            stats.stale_files_removed,
+            stats.absorb_requests,
+            stats.compactions,
+            stats.records_written,
+        ),
+        (0, 0, 0, 0, 0, 0)
+    );
+    assert_eq!(files(&dir), before, "nothing written or deleted");
+    drop(reader);
+
+    // The same folder, cleaned by a writable client.
+    let mut a = Client::open(&dir, "a", config, 4);
+    for _ in 0..5 {
+        a.pump();
+    }
+    assert_eq!(has_logs(&dir, "x"), [false, false]);
+    assert_eq!(has_logs(&dir, "y"), [false, false]);
+    assert!(a.dir.stats().absorb_requests > 0);
+    assert!(!tmp.exists());
+    assert!(!heartbeat.exists());
+    assert!(!dir.join("updates/x.lock").exists());
+    assert!(state(&a.stage) == state(&c.stage));
 }
 
 /// Deleting other clients' logs is off unless asked for: the app turns it on

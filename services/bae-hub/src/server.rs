@@ -4,9 +4,9 @@
 //! request head without consuming it. Plain HTTP requests (health, info, status,
 //! project list) are answered there. A WebSocket request for
 //! `/projects/<id>` is authenticated and routed here, then the untouched socket
-//! goes to `bae_sync::HubTransport::accept` for the handshake (the same
-//! WebSocket code the clients use) and the connection is attached to the
-//! project's relay.
+//! goes to `bae_sync::HubTransport::accept_granting` for the handshake (the
+//! same WebSocket code the clients use; the response tells the client its
+//! access level) and the connection is attached to the project's relay.
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -421,11 +421,12 @@ fn sync(
         Err(e) => return Err((stream, e.into())),
     };
     // Authentication is done above (several tokens, per project), so the
-    // handshake itself checks nothing more. Read-only connections get a small
-    // incoming limit: a larger message fails as soon as its frame header
-    // arrives, before the hub buffers it.
+    // handshake itself checks nothing more. The response tells the client
+    // whether it may edit (`x-bae-access`), so the app can grey out editing.
+    // Read-only connections get a small incoming limit: a larger message
+    // fails as soon as its frame header arrives, before the hub buffers it.
     let limits = shared.config.client_limits(access);
-    let transport = match HubTransport::accept_with(stream, None, limits) {
+    let transport = match HubTransport::accept_granting(stream, None, limits, access.into()) {
         Ok(t) => t,
         Err(e) => {
             tracing::debug!(%addr, error = %e, "WebSocket handshake failed");

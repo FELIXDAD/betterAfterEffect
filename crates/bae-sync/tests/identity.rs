@@ -12,9 +12,7 @@
 mod common;
 
 use bae_model::loro::TreeID;
-use bae_model::{
-    AuthorId, ModelError, Op, PrimPath, PrimSpec, PrimType, Specifier, Stage, SublayerId, Value,
-};
+use bae_model::{AuthorId, Op, PrimPath, PrimSpec, PrimType, Specifier, Stage, SublayerId, Value};
 use bae_sync::history::{diff, revert, view_at};
 use bae_sync::{PrimChange, PrimDiff, ProjectVersion, RevertScope, SyncError};
 use common::*;
@@ -720,6 +718,57 @@ fn reverting_one_prim_whose_parent_was_replaced() {
     assert_eq!(opacity_of(spec), Some(&Value::Float(10.0)));
 }
 
+/// One prim whose parent is gone and outside the scope cannot be restored:
+/// the error names the top-most missing ancestor to roll back first (before,
+/// a bare `PrimNotFound` of the old parent), nothing changes, and rolling
+/// back that ancestor brings the prim back.
+#[test]
+fn reverting_one_prim_whose_ancestors_are_gone_names_what_to_revert_first() {
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create_typed(&mut stage, &w, layer("grp"), "Folder");
+    create_typed(&mut stage, &w, layer("grp/sub"), "Folder");
+    create(&mut stage, &w, "grp/sub/x");
+    set_opacity(&mut stage, &w, layer("grp/sub/x"), 10.0);
+    let v1 = ProjectVersion::current(&stage);
+    delete(&mut stage, &w, layer("grp"));
+    let before = content(&stage);
+
+    let err = revert(
+        &mut stage,
+        &w,
+        "revert",
+        &v1,
+        &RevertScope::Prim(layer("grp/sub/x")),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            SyncError::RevertParentGone { path, revert, .. }
+                if *path == layer("grp/sub/x") && *revert == layer("grp")
+        ),
+        "{err:?}"
+    );
+    let text = err.to_string();
+    assert!(
+        text.contains(&format!("revert {} first", layer("grp"))),
+        "{text}"
+    );
+    assert_eq!(content(&stage), before);
+
+    revert(
+        &mut stage,
+        &w,
+        "revert",
+        &v1,
+        &RevertScope::Prim(layer("grp")),
+    )
+    .unwrap();
+    let spec = root_layer(&stage).spec(&layer("grp/sub/x")).unwrap();
+    assert_eq!(opacity_of(spec), Some(&Value::Float(10.0)));
+}
+
 #[test]
 fn reverting_a_deleted_folder_with_a_collided_pair() {
     let base = base_snapshots();
@@ -748,7 +797,11 @@ fn reverting_a_deleted_folder_with_a_collided_pair() {
     )
     .unwrap_err();
     assert!(
-        matches!(&err, SyncError::Model(ModelError::PrimNotFound { path, .. }) if *path == layer("grp")),
+        matches!(
+            &err,
+            SyncError::RevertParentGone { sublayer, path, revert }
+                if *sublayer == root() && *path == layer("grp/shared") && *revert == layer("grp")
+        ),
         "{err:?}"
     );
 
@@ -818,6 +871,43 @@ fn ambiguous_or_retyped_re_creations_are_new_prims() {
     assert_eq!(
         summary,
         [("foo", &PrimChange::Added), ("foo", &PrimChange::Removed)]
+    );
+}
+
+/// Rule (b) pairs a prim deleted and then made again by hand with the same
+/// name and type (the only candidates on both sides): a difference shows a
+/// modification, not a removal and an addition, and a rollback sets it back
+/// on the new node instead of deleting it (spec 5.3).
+#[test]
+fn a_manual_re_creation_with_the_same_name_and_type_is_a_modification() {
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create(&mut stage, &w, "foo");
+    set_opacity(&mut stage, &w, layer("foo"), 10.0);
+    let v1 = ProjectVersion::current(&stage);
+    delete(&mut stage, &w, layer("foo"));
+    create(&mut stage, &w, "foo");
+    set_opacity(&mut stage, &w, layer("foo"), 20.0);
+    let made = node(&stage, &layer("foo"));
+
+    let d = diff(&stage, &v1, &ProjectVersion::current(&stage)).unwrap();
+    let summary: Vec<_> = d
+        .iter()
+        .map(|x| (x.path.clone(), x.change.clone(), x.attrs.clone()))
+        .collect();
+    assert_eq!(
+        summary,
+        [(
+            layer("foo"),
+            PrimChange::Modified,
+            vec!["opacity".to_owned()]
+        )]
+    );
+    revert(&mut stage, &w, "revert", &v1, &RevertScope::Project).unwrap();
+    assert_eq!(node(&stage, &layer("foo")), made, "set back, not replaced");
+    assert_eq!(
+        opacity_of(&spec_of(&stage, made).unwrap()),
+        Some(&Value::Float(10.0))
     );
 }
 

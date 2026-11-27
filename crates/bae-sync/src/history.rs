@@ -718,6 +718,17 @@ pub enum RevertScope {
 /// not exist then, whatever was at that path then. Not restored: sibling order
 /// of prims that exist in both versions, and sublayers no longer in the stack.
 /// A sublayer that did not exist at `to` is emptied.
+///
+/// `RevertScope::Prim` and moved prims: a prim of the scope that was moved
+/// out of it since (`/A/p` moved to `/C/p`) is deleted where it is now and
+/// restored where it was, and its whole current subtree goes with the
+/// delete. Children created under it since, which now live outside the scope
+/// (`/C/p/new`), are deleted and not restored (they did not exist at `to`);
+/// undo brings them back. For the whole project that is the version as it
+/// was; for one prim it touches more than the path suggests. A prim whose
+/// parent is gone and outside the scope, with no prim at the parent's old
+/// path either, cannot be restored: [`SyncError::RevertParentGone`] names
+/// the top-most missing ancestor to roll back first, and nothing changes.
 pub fn revert(
     stage: &mut Stage,
     author: &AuthorId,
@@ -748,6 +759,17 @@ pub(crate) fn revert_edits(
         let live = stage.sublayer(id).expect("in stack");
         let past = layer_at(live, &to.get(id))?;
         for step in revert_steps(live, past.get(), scope) {
+            if let Step::Restore {
+                parent: Parent::Gone { path, parent },
+                ..
+            } = &step
+            {
+                return Err(SyncError::RevertParentGone {
+                    sublayer: id.clone(),
+                    path: path.clone(),
+                    revert: top_missing(live, parent),
+                });
+            }
             steps.push((id.clone(), step));
         }
     }
@@ -790,9 +812,14 @@ enum Step {
 enum Parent {
     Top,
     Node(TreeID),
-    /// The old parent is gone, is not restored (outside the scope) and no prim
-    /// has its old path.
-    Gone(PrimPath),
+    /// The old parent (at old path `parent`) is gone, is not restored
+    /// (outside the scope) and no prim has its old path: the prim (old path
+    /// `path`) cannot be restored ([`SyncError::RevertParentGone`], found
+    /// before anything is applied).
+    Gone {
+        path: PrimPath,
+        parent: PrimPath,
+    },
 }
 
 enum Field {
@@ -820,7 +847,7 @@ impl Step {
                 let at = match parent {
                     Parent::Top => PrimPath::root(),
                     Parent::Node(n) => path(n).ok_or_else(|| missing(PrimPath::root()))?,
-                    Parent::Gone(old) => return Err(missing(old)),
+                    Parent::Gone { parent, .. } => return Err(missing(parent)),
                 };
                 // The name was chosen free of every remaining sibling's raw
                 // name; a mirror name can still take it only by an unlikely
@@ -946,7 +973,13 @@ fn revert_steps(live: &Sublayer, past: &Sublayer, scope: &RevertScope) -> Vec<St
                     let name = restore_name(n.name, node, names);
                     (key.map_or(Parent::Top, Parent::Node), name)
                 }
-                None => (Parent::Gone(old_parent), n.name.to_owned()),
+                None => (
+                    Parent::Gone {
+                        path: n.path.clone(),
+                        parent: old_parent,
+                    },
+                    n.name.to_owned(),
+                ),
             };
             steps.push(Step::Restore {
                 parent,
@@ -987,6 +1020,20 @@ fn revert_steps(live: &Sublayer, past: &Sublayer, scope: &RevertScope) -> Vec<St
         }
         return steps;
     }
+}
+
+/// The top-most ancestor-or-self of `path` (a path at the old version) with no
+/// prim at its path in `live` now: what to roll back first so that a prim
+/// under `path` has somewhere to go.
+fn top_missing(live: &Sublayer, path: &PrimPath) -> PrimPath {
+    let mut top = path.clone();
+    while let Some(up) = top.parent() {
+        if up.is_root() || live.node_id(&up).is_some() {
+            break;
+        }
+        top = up;
+    }
+    top
 }
 
 /// The name a restored prim (old node `id`, raw name `name`) gets among

@@ -736,3 +736,67 @@ fn one_hub_per_data_directory() {
         "{second:?}"
     );
 }
+
+/// The hub's peer timeout counts bytes, not whole messages: a client whose
+/// one large message takes longer than `peer_timeout` to upload (a first
+/// share over a slow VPN) is not cut off while its bytes keep arriving, or
+/// it would send the same message again after every reconnect. A client
+/// that stops sending is still dropped.
+#[test]
+fn a_slow_upload_of_one_large_message_is_not_cut_off() {
+    use std::io::{Read, Write};
+
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.peer_timeout = Duration::from_millis(500);
+    let hub = start(cfg);
+    let mut tcp = std::net::TcpStream::connect(hub.local_addr()).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    write!(
+        tcp,
+        "GET {}{PROJECT} HTTP/1.1\r\nHost: hub\r\nUpgrade: websocket\r\n\
+         Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+         Sec-WebSocket-Version: 13\r\nAuthorization: Bearer {WRITE}\r\n\r\n",
+        bae_hub::SYNC_PREFIX
+    )
+    .unwrap();
+    let mut response = Vec::new();
+    while !response.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        tcp.read_exact(&mut byte).unwrap();
+        response.push(byte[0]);
+    }
+    let response = String::from_utf8_lossy(&response);
+    assert!(response.starts_with("HTTP/1.1 101"), "{response}");
+
+    // One masked binary frame of 1 MiB, sent at about 40 KB/s for 2 s (four
+    // peer timeouts); the hub's own messages are not read meanwhile.
+    let len: u64 = 1 << 20;
+    let mut header = vec![0x82, 0x80 | 127];
+    header.extend_from_slice(&len.to_be_bytes());
+    header.extend_from_slice(&[0; 4]); // mask key 0: the payload as it is
+    tcp.write_all(&header).unwrap();
+    let chunk = [0u8; 2000];
+    let start = Instant::now();
+    let mut sent = 0;
+    while start.elapsed() < Duration::from_secs(2) {
+        if let Err(e) = tcp.write_all(&chunk) {
+            panic!("cut off after {:?}, {sent} bytes: {e}", start.elapsed());
+        }
+        sent += chunk.len();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Silent from now on: dropped after the timeout (end of stream or reset).
+    let silent = Instant::now();
+    let mut buf = vec![0; 1 << 16];
+    loop {
+        match tcp.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => assert!(
+                silent.elapsed() < Duration::from_secs(10),
+                "the hub kept a silent client"
+            ),
+        }
+    }
+    assert!(silent.elapsed() < Duration::from_secs(10));
+}

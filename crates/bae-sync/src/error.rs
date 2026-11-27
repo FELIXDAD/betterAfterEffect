@@ -35,11 +35,35 @@ pub enum SyncError {
     NotADirectory(PathBuf),
     #[error("hub connection: {0}")]
     Hub(String),
+    /// The hub answered the WebSocket handshake with an HTTP error instead of
+    /// accepting it. `bae-hub` uses 401 (bad or missing token), 403 (the token
+    /// may not open this project), 404 (no such project, and the token may not
+    /// create it), 400 (invalid project ID) and 503 (shutting down).
+    /// `message` is the hub's `{"error": ...}` text when it arrived with the
+    /// response, else the status' standard reason.
+    #[error("hub refused the connection: {status} {message}")]
+    HubRefused { status: u16, message: String },
     #[error("no named version {0}")]
     UnknownCheckpoint(String),
     /// The version includes ops of sublayer `.0` that have not arrived here yet.
     #[error("that version of sublayer {0} is not available locally (not synced yet)")]
     VersionNotAvailable(bae_model::SublayerId),
+    /// A rollback of one prim (`RevertScope::Prim`) would restore `path`,
+    /// but its parent at that version no longer exists, is outside the scope,
+    /// and no prim has the parent's old path: there is nowhere to put it.
+    /// `revert` names the top-most such ancestor: roll that back first (or
+    /// the whole sublayer or project). Nothing was changed.
+    #[error(
+        "cannot restore {path} in sublayer {sublayer}: its parent no longer exists; \
+         revert {revert} first (or the whole sublayer)"
+    )]
+    RevertParentGone {
+        sublayer: bae_model::SublayerId,
+        /// The prim's path at that version.
+        path: bae_model::PrimPath,
+        /// The top-most ancestor (path at that version) that is gone now.
+        revert: bae_model::PrimPath,
+    },
 }
 
 impl SyncError {

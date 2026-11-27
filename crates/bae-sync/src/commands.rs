@@ -53,7 +53,12 @@ impl Command for Revert {
         attribute opinions are set back. If a remaining sibling already has a restored prim's \
         name, the restored prim is named `<name>_<peer>_<counter>` (its own collision suffix, \
         as shown after concurrent creation of the same name); read the new paths back before \
-        editing them. Give either `sublayer` or `prim`, or neither for the whole project.";
+        editing them. With `prim`, a prim moved out of that subtree since is deleted where it \
+        is now and restored where it was, and its current subtree goes with it: children \
+        created since, now outside the scope, are deleted and not restored (undo brings them \
+        back). A prim whose parent is gone and outside the scope cannot be restored: the error \
+        names the ancestor to revert first. Give either `sublayer` or `prim`, or neither for \
+        the whole project.";
 
     fn run(
         &self,

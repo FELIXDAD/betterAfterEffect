@@ -1,16 +1,29 @@
 //! [`ThreadedTransport`]: runs a blocking transport on its own thread.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::error::SyncError;
 use crate::protocol::Message;
-use crate::transport::Transport;
+use crate::transport::{LinkNotes, Transport};
 
 type Notify = Box<dyn Fn() + Send>;
+
+/// How far the worker got with what `send` queued, in messages, for
+/// [`ThreadedTransport::stalled`].
+#[derive(Debug, Default)]
+struct Stall {
+    /// Messages `send` queued.
+    queued: u64,
+    /// Messages the worker handed to the inner transport.
+    handed: u64,
+    /// Since when messages wait without the worker handing any of them over
+    /// (`None`: nothing waits).
+    since: Option<Instant>,
+}
 
 /// What the stage thread hands the worker.
 enum Out {
@@ -34,6 +47,11 @@ struct Backlog {
     /// everything gone: a session may be holding back for it, so the worker
     /// wakes the stage thread once it all left.
     watched: AtomicBool,
+    stall: Mutex<Stall>,
+    /// The inner transport's [`Transport::notes`] as the worker last copied
+    /// them, and how often they changed ([`Transport::notes_seq`]).
+    notes: Mutex<LinkNotes>,
+    notes_seq: AtomicU64,
 }
 
 impl Backlog {
@@ -41,6 +59,31 @@ impl Backlog {
         self.queued
             .load(Ordering::Acquire)
             .saturating_add(self.inner.load(Ordering::Acquire))
+    }
+
+    fn stall(&self) -> std::sync::MutexGuard<'_, Stall> {
+        self.stall.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn notes(&self) -> std::sync::MutexGuard<'_, LinkNotes> {
+        self.notes.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Copies the inner transport's notes when its [`Transport::notes_seq`]
+/// moved: an integer comparison per call of the inner transport.
+struct NotesCopier {
+    seen: u64,
+}
+
+impl NotesCopier {
+    fn sync<T: Transport>(&mut self, inner: &T, backlog: &Backlog) {
+        let seq = inner.notes_seq();
+        if seq != self.seen {
+            self.seen = seq;
+            *backlog.notes() = inner.notes();
+            backlog.notes_seq.fetch_add(1, Ordering::AcqRel);
+        }
     }
 }
 
@@ -66,6 +109,14 @@ impl Backlog {
 /// a last write that failed is not lost silently. Dropping also waits until
 /// everything queued was handed over, but does not close the inner transport
 /// (it is dropped) and reports nothing.
+///
+/// [`stalled`](Self::stalled) tells when the worker is stuck in one call of the
+/// inner transport (a NAS that does not answer) while messages wait.
+///
+/// [`Transport::notes`] are the inner transport's as the worker last saw them:
+/// it copies them whenever they changed, after every call of the inner
+/// transport and before it hands on a message that call received (so notes
+/// from the shared folder's first scan are here once its `Hello` is).
 pub struct ThreadedTransport {
     tx: Option<Sender<Out>>,
     rx: Receiver<Result<Message, SyncError>>,
@@ -99,6 +150,17 @@ impl ThreadedTransport {
             worker: Some(worker),
             backlog,
         }
+    }
+
+    /// How long messages queued by `send` have been waiting without the
+    /// worker handing any of them to the inner transport; zero when nothing
+    /// waits. Long means the worker is stuck in one read or write (a NAS or
+    /// network that does not answer): what was sent is not on its way.
+    pub fn stalled(&self) -> Duration {
+        self.backlog
+            .stall()
+            .since
+            .map_or(Duration::ZERO, |t| t.elapsed())
     }
 
     /// Stop the worker once it handled everything queued (`close`: and closed
@@ -137,6 +199,8 @@ fn run<T: Transport>(
     on_receive: Notify,
     backlog: &Backlog,
 ) {
+    let mut notes = NotesCopier { seen: 0 };
+    notes.sync(&inner, backlog);
     loop {
         // Wait for outgoing messages or the next tick.
         let mut outgoing = Vec::new();
@@ -150,7 +214,11 @@ fn run<T: Transport>(
             let r = match m {
                 Out::Msg(m, len) => {
                     let r = inner.send(m);
+                    notes.sync(&inner, backlog);
                     backlog.queued.fetch_sub(len, Ordering::AcqRel);
+                    let mut b = backlog.stall();
+                    b.handed += 1;
+                    b.since = (b.handed < b.queued).then(Instant::now);
                     r
                 }
                 Out::Close => {
@@ -169,7 +237,9 @@ fn run<T: Transport>(
         }
         let mut got = false;
         loop {
-            match inner.recv() {
+            let r = inner.recv();
+            notes.sync(&inner, backlog);
+            match r {
                 Ok(Some(m)) => {
                     got = true;
                     if in_tx.send(Ok(m)).is_err() {
@@ -205,8 +275,20 @@ impl Transport for ThreadedTransport {
         let tx = self.tx.as_ref().ok_or(SyncError::Closed)?;
         let len = msg.approx_len();
         self.backlog.queued.fetch_add(len, Ordering::AcqRel);
+        {
+            let mut b = self.backlog.stall();
+            if b.handed >= b.queued {
+                b.since = Some(Instant::now());
+            }
+            b.queued += 1;
+        }
         tx.send(Out::Msg(msg, len)).map_err(|_| {
             self.backlog.queued.fetch_sub(len, Ordering::AcqRel);
+            let mut b = self.backlog.stall();
+            b.queued -= 1;
+            if b.handed >= b.queued {
+                b.since = None;
+            }
             SyncError::Closed
         })
     }
@@ -229,6 +311,14 @@ impl Transport for ThreadedTransport {
             self.backlog.watched.store(true, Ordering::Release);
         }
         total
+    }
+
+    fn notes(&self) -> LinkNotes {
+        self.backlog.notes().clone()
+    }
+
+    fn notes_seq(&self) -> u64 {
+        self.backlog.notes_seq.load(Ordering::Acquire)
     }
 }
 

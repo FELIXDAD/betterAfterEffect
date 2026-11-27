@@ -6,17 +6,23 @@
 //! transfers stay off the stage thread.
 
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 use tungstenite::client::IntoClientRequest;
+use tungstenite::handshake::client::Request as ClientRequest;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::{HeaderValue, StatusCode, header::AUTHORIZATION};
 use tungstenite::{Error as WsError, Message as WsMessage, WebSocket};
 
 use crate::error::SyncError;
 use crate::protocol::Message;
-use crate::transport::Transport;
+use crate::transport::{Access, Transport};
+
+/// Header of the hub's handshake response that tells the client what it may
+/// do: `read` or `write` ([`HubTransport::access`]). Hubs that do not send it
+/// leave the client at [`Access::Unknown`].
+pub const ACCESS_HEADER: &str = "x-bae-access";
 
 /// Limits of one hub connection (`docs/spec/sync.md` §3.1).
 ///
@@ -98,23 +104,32 @@ impl Default for HubLimits {
     }
 }
 
-/// The socket, counting the bytes written to it: how [`HubTransport`] tells a
-/// slow peer (bytes keep leaving) from one that stopped reading.
+/// The socket, counting the bytes written to it and read from it: how
+/// [`HubTransport`] tells a slow peer (bytes keep leaving) from one that
+/// stopped reading, and a peer sending a large message (bytes keep arriving)
+/// from one that went silent.
 #[derive(Debug)]
 struct Counted {
     stream: TcpStream,
     written: u64,
+    read: u64,
 }
 
 impl Counted {
     fn new(stream: TcpStream) -> Self {
-        Counted { stream, written: 0 }
+        Counted {
+            stream,
+            written: 0,
+            read: 0,
+        }
     }
 }
 
 impl Read for Counted {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stream.read(buf)
+        let n = self.stream.read(buf)?;
+        self.read += n as u64;
+        Ok(n)
     }
 }
 
@@ -134,6 +149,8 @@ impl Write for Counted {
 pub struct HubTransport {
     ws: WebSocket<Counted>,
     limits: HubLimits,
+    /// Client side: what the hub said we may do. Server side: what we said.
+    access: Access,
     /// About how many bytes wait in tungstenite's write buffer.
     unsent: u64,
     /// `Counted::written` when we last looked.
@@ -145,6 +162,13 @@ pub struct HubTransport {
     /// More than `max_unsent` would have waited: every later call fails with
     /// this (`recv` once what already arrived has been read).
     over: Option<String>,
+    /// [`set_idle_timeout`](HubTransport::set_idle_timeout).
+    idle_timeout: Option<Duration>,
+    /// `Counted::read` when we last looked, and when it last changed.
+    read: u64,
+    heard: Instant,
+    /// The idle timeout was reported: the link is dead, `recv` says `Closed`.
+    silent: bool,
 }
 
 impl std::fmt::Debug for HubTransport {
@@ -159,11 +183,177 @@ fn hub_err(e: impl std::fmt::Display) -> SyncError {
     SyncError::Hub(e.to_string())
 }
 
+/// Connect to the first of `addrs` that answers, IPv4 first (the hub listens
+/// on `0.0.0.0` by default, and a name like `localhost` or `nas.local` often
+/// resolves to an IPv6 address first). Each address gets an equal share of
+/// what is left of `timeout`, so one that drops packets does not use up the
+/// time of the others.
+fn connect_any(addrs: &[SocketAddr], timeout: Duration) -> io::Result<TcpStream> {
+    let mut unique: Vec<SocketAddr> = Vec::with_capacity(addrs.len());
+    for a in addrs {
+        if !unique.contains(a) {
+            unique.push(*a);
+        }
+    }
+    let mut addrs = unique;
+    addrs.sort_by_key(SocketAddr::is_ipv6);
+    let deadline = Instant::now() + timeout;
+    let mut last = None;
+    for (i, addr) in addrs.iter().enumerate() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let share = left / u32::try_from(addrs.len() - i).unwrap_or(u32::MAX);
+        match TcpStream::connect_timeout(addr, share.max(Duration::from_millis(1))) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "connect timed out")))
+}
+
+/// The handshake request for `url`, and the host and port to connect to.
+/// Checks everything that does not need the network.
+fn client_request(
+    url: &str,
+    token: Option<&str>,
+) -> Result<(ClientRequest, String, u16), SyncError> {
+    let mut request = url.into_client_request().map_err(hub_err)?;
+    match request.uri().scheme_str() {
+        Some("ws") => {}
+        Some("wss") => {
+            return Err(SyncError::Hub(
+                "wss:// is not supported yet (LAN hub only)".into(),
+            ));
+        }
+        other => return Err(SyncError::Hub(format!("unsupported scheme {other:?}"))),
+    }
+    if let Some(token) = token {
+        let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(hub_err)?;
+        request.headers_mut().insert(AUTHORIZATION, value);
+    }
+    let host = request
+        .uri()
+        .host()
+        .ok_or_else(|| SyncError::Hub(format!("no host in {url}")))?
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_owned();
+    let port = request.uri().port_u16().unwrap_or(80);
+    Ok((request, host, port))
+}
+
+/// Whether `url` and `token` can be used for [`HubTransport::connect`] at all
+/// (scheme, host, header syntax), without touching the network.
+pub(crate) fn check_url(url: &str, token: Option<&str>) -> Result<(), SyncError> {
+    client_request(url, token).map(|_| ())
+}
+
+/// The longest `GET /v1/status` reply [`status_access`] reads.
+const STATUS_MAX: usize = 64 << 10;
+
+/// What the hub's `GET /v1/status` says `token` may do (its `"access"`): the
+/// fallback for hubs that do not send [`ACCESS_HEADER`] in the handshake
+/// (bae-hub 0.0.1), whose read-only tokens would otherwise only show by edits
+/// being dropped and sent again. Same host, port, token and `?token=` query
+/// as the sync `url`. [`Access::Unknown`] if it does not say or anything
+/// fails. Blocks for at most about `timeout` per step (connect, write, each
+/// read): call it on a connect thread.
+pub(crate) fn status_access(url: &str, token: Option<&str>, timeout: Duration) -> Access {
+    status_reply(url, token, timeout)
+        .and_then(|v| Some(Access::parse(v.get("access")?.as_str()?)))
+        .unwrap_or(Access::Unknown)
+}
+
+/// The JSON body of a `200` reply to `GET /v1/status` on the hub of `url`.
+fn status_reply(url: &str, token: Option<&str>, timeout: Duration) -> Option<serde_json::Value> {
+    let (request, host, port) = client_request(url, token).ok()?;
+    let path = match request.uri().query() {
+        Some(q) => format!("/v1/status?{q}"),
+        None => "/v1/status".to_owned(),
+    };
+    let addrs: Vec<SocketAddr> = (host.as_str(), port).to_socket_addrs().ok()?.collect();
+    let mut stream = connect_any(&addrs, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let authority = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let mut head = format!(
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nAccept: application/json\r\nConnection: close\r\n"
+    );
+    // Checked by `client_request`: no line breaks in it.
+    if let Some(auth) = request.headers().get(AUTHORIZATION) {
+        head.push_str(&format!("Authorization: {}\r\n", auth.to_str().ok()?));
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).ok()?;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let (head_len, body_len) = loop {
+        let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
+        if let Some(at) = end {
+            let len = content_length(&buf[..at]);
+            if len.is_some_and(|n| buf.len() >= at + 4 + n) {
+                break (at, len);
+            }
+        }
+        if buf.len() > STATUS_MAX {
+            return None;
+        }
+        match stream.read(&mut chunk) {
+            // Closed: the body is what came (no `Content-Length`).
+            Ok(0) => break (end?, None),
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(_) => return None,
+        }
+    };
+    let head = std::str::from_utf8(&buf[..head_len]).ok()?;
+    if head.split_whitespace().nth(1) != Some("200") {
+        return None;
+    }
+    let body = &buf[head_len + 4..];
+    let body = body_len.map_or(body, |n| &body[..n]);
+    serde_json::from_slice(body).ok()
+}
+
+/// The `Content-Length` of an HTTP response head.
+fn content_length(head: &[u8]) -> Option<usize> {
+    std::str::from_utf8(head).ok()?.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse().ok())?
+    })
+}
+
+/// A refused handshake: the status, and the hub's `{"error": ...}` text if
+/// the body came with the response head.
+fn refused(resp: &tungstenite::http::Response<Option<Vec<u8>>>) -> SyncError {
+    let status = resp.status();
+    let message = resp
+        .body()
+        .as_deref()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+        .and_then(|v| v.get("error")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| status.canonical_reason().unwrap_or_default().to_owned());
+    SyncError::HubRefused {
+        status: status.as_u16(),
+        message,
+    }
+}
+
 impl HubTransport {
     /// Connect to a hub at `url` (`ws://host:port/path`; the path and query
     /// select the project, as defined by the hub). `token` is sent as
     /// `Authorization: Bearer <token>`. Blocks for at most about `timeout` per
-    /// step (connect, handshake).
+    /// step (connect, handshake); every address the host name resolves to is
+    /// tried, IPv4 first. A hub that answers with an HTTP error gives
+    /// [`SyncError::HubRefused`]; what the hub allows is in
+    /// [`access`](Self::access).
     pub fn connect(url: &str, token: Option<&str>, timeout: Duration) -> Result<Self, SyncError> {
         Self::connect_with(url, token, timeout, HubLimits::default())
     }
@@ -175,45 +365,29 @@ impl HubTransport {
         timeout: Duration,
         limits: HubLimits,
     ) -> Result<Self, SyncError> {
-        let mut request = url.into_client_request().map_err(hub_err)?;
-        match request.uri().scheme_str() {
-            Some("ws") => {}
-            Some("wss") => {
-                return Err(SyncError::Hub(
-                    "wss:// is not supported yet (LAN hub only)".into(),
-                ));
-            }
-            other => return Err(SyncError::Hub(format!("unsupported scheme {other:?}"))),
-        }
-        if let Some(token) = token {
-            let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(hub_err)?;
-            request.headers_mut().insert(AUTHORIZATION, value);
-        }
-        let host = request
-            .uri()
-            .host()
-            .ok_or_else(|| SyncError::Hub(format!("no host in {url}")))?
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .to_owned();
-        let port = request.uri().port_u16().unwrap_or(80);
-        let addr = (host.as_str(), port)
+        let (request, host, port) = client_request(url, token)?;
+        let addrs: Vec<SocketAddr> = (host.as_str(), port)
             .to_socket_addrs()
             .map_err(hub_err)?
-            .next()
-            .ok_or_else(|| SyncError::Hub(format!("cannot resolve {host}")))?;
-        let stream = TcpStream::connect_timeout(&addr, timeout).map_err(hub_err)?;
+            .collect();
+        if addrs.is_empty() {
+            return Err(SyncError::Hub(format!("cannot resolve {host}")));
+        }
+        let stream = connect_any(&addrs, timeout).map_err(hub_err)?;
         stream.set_nodelay(true).map_err(hub_err)?;
         stream.set_read_timeout(Some(timeout)).map_err(hub_err)?;
         stream.set_write_timeout(Some(timeout)).map_err(hub_err)?;
-        let (ws, _) =
+        let (ws, response) =
             tungstenite::client::client(request, Counted::new(stream)).map_err(|e| match e {
-                tungstenite::HandshakeError::Failure(WsError::Http(resp)) => {
-                    SyncError::Hub(format!("hub refused the connection: {}", resp.status()))
-                }
+                tungstenite::HandshakeError::Failure(WsError::Http(resp)) => refused(&resp),
                 other => hub_err(other),
             })?;
-        Self::ready(ws, limits)
+        let access = response
+            .headers()
+            .get(ACCESS_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map_or(Access::Unknown, Access::parse);
+        Self::ready(ws, limits, access)
     }
 
     /// Server side of an accepted TCP connection (tests and simple tools; the
@@ -229,6 +403,19 @@ impl HubTransport {
         token: Option<&str>,
         limits: HubLimits,
     ) -> Result<Self, SyncError> {
+        Self::accept_granting(stream, token, limits, Access::Unknown)
+    }
+
+    /// [`accept_with`](Self::accept_with), telling the client what it may do
+    /// in the handshake response ([`ACCESS_HEADER`]; nothing for
+    /// [`Access::Unknown`]). The hub checks access itself: a read-only client
+    /// that sends edits anyway gets them dropped.
+    pub fn accept_granting(
+        stream: TcpStream,
+        token: Option<&str>,
+        limits: HubLimits,
+        access: Access,
+    ) -> Result<Self, SyncError> {
         stream.set_nonblocking(false).map_err(hub_err)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -237,7 +424,7 @@ impl HubTransport {
         let expected = token.map(|t| format!("Bearer {t}"));
         // The callback signature (and its large error type) is tungstenite's.
         #[allow(clippy::result_large_err)]
-        let check = |req: &Request, resp: Response| -> Result<Response, ErrorResponse> {
+        let check = |req: &Request, mut resp: Response| -> Result<Response, ErrorResponse> {
             let given = req
                 .headers()
                 .get(AUTHORIZATION)
@@ -248,27 +435,39 @@ impl HubTransport {
                     *err.status_mut() = StatusCode::UNAUTHORIZED;
                     Err(err)
                 }
-                _ => Ok(resp),
+                _ => {
+                    if access != Access::Unknown {
+                        resp.headers_mut()
+                            .insert(ACCESS_HEADER, HeaderValue::from_static(access.as_str()));
+                    }
+                    Ok(resp)
+                }
             }
         };
         let ws = tungstenite::accept_hdr(Counted::new(stream), check).map_err(hub_err)?;
-        Self::ready(ws, limits)
+        Self::ready(ws, limits, access)
     }
 
-    fn ready(ws: WebSocket<Counted>, limits: HubLimits) -> Result<Self, SyncError> {
+    fn ready(ws: WebSocket<Counted>, limits: HubLimits, access: Access) -> Result<Self, SyncError> {
         let s = &ws.get_ref().stream;
         s.set_read_timeout(None).map_err(hub_err)?;
         s.set_write_timeout(None).map_err(hub_err)?;
         s.set_nonblocking(true).map_err(hub_err)?;
         let written = ws.get_ref().written;
+        let read = ws.get_ref().read;
         let mut transport = HubTransport {
             ws,
             limits,
+            access,
             unsent: 0,
             written,
             progress: Instant::now(),
             failed: None,
             over: None,
+            idle_timeout: None,
+            read,
+            heard: Instant::now(),
+            silent: false,
         };
         transport.set_limits(limits);
         Ok(transport)
@@ -290,6 +489,49 @@ impl HubTransport {
     /// The connection's limits.
     pub fn limits(&self) -> HubLimits {
         self.limits
+    }
+
+    /// Fail [`recv`](Transport::recv) once not a byte arrived for `timeout`
+    /// (`None`, the default: never). A peer that went away without closing
+    /// the connection (power loss, a dropped VPN or Wi-Fi) sends no reset, and
+    /// TCP may take many minutes to notice; the hub says `Hello` every 5
+    /// seconds, so a client can tell much sooner. A large message counts as
+    /// news while its bytes keep arriving. Reported once; later calls of
+    /// `recv` return [`SyncError::Closed`] (a [`crate::ThreadedTransport`]
+    /// stops there instead of reporting it again on every tick).
+    pub fn set_idle_timeout(&mut self, timeout: Option<Duration>) {
+        self.idle_timeout = timeout;
+        self.heard = Instant::now();
+    }
+
+    /// Fails when nothing arrived for the idle timeout.
+    fn check_idle(&mut self) -> Result<(), SyncError> {
+        let now = Instant::now();
+        let read = self.ws.get_ref().read;
+        if read != self.read {
+            self.read = read;
+            self.heard = now;
+            return Ok(());
+        }
+        match self.idle_timeout {
+            Some(t) if now.saturating_duration_since(self.heard) >= t => {
+                self.silent = true;
+                Err(SyncError::Hub(format!(
+                    "nothing received for {:.1} s",
+                    t.as_secs_f32()
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Client side: what the hub said this connection may do
+    /// ([`ACCESS_HEADER`]); [`Access::Unknown`] if it did not say (older
+    /// hubs). A read-only connection's edits are dropped by the hub, so the
+    /// client should not send them ([`crate::SessionConfig::send_data`]).
+    /// Server side: what [`accept_granting`](Self::accept_granting) announced.
+    pub fn access(&self) -> Access {
+        self.access
     }
 
     /// Account for what left since the last call (`drained`: nothing waits any
@@ -385,6 +627,9 @@ impl Transport for HubTransport {
     /// some systems (Windows) drop unread data when a reset arrives, which is
     /// why peers should end with [`Transport::close`].
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+        if self.silent {
+            return Err(SyncError::Closed);
+        }
         if self.failed.is_none() {
             let flushed = match self.ws.flush() {
                 Ok(()) => self.track(true),
@@ -407,7 +652,7 @@ impl Transport for HubTransport {
                     return match (self.failed.take(), &self.over) {
                         (Some(e), _) => Err(e),
                         (None, Some(over)) => Err(SyncError::Hub(over.clone())),
-                        (None, None) => Ok(None),
+                        (None, None) => self.check_idle().map(|()| None),
                     };
                 }
                 Err(e) => return Err(self.failed.take().unwrap_or_else(|| link_err(e))),
@@ -472,5 +717,26 @@ impl Drop for HubTransport {
     fn drop(&mut self) {
         let _ = self.ws.close(None);
         let _ = self.ws.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    /// A name that resolves to an address nobody listens on first (IPv6
+    /// `localhost` against a hub on `0.0.0.0`): the next address is tried.
+    #[test]
+    fn connect_tries_every_address() {
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused = closed.local_addr().unwrap();
+        drop(closed);
+        let live = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = live.local_addr().unwrap();
+        let stream = connect_any(&[refused, refused, addr], Duration::from_secs(20)).unwrap();
+        assert_eq!(stream.peer_addr().unwrap(), addr);
+        assert!(connect_any(&[refused], Duration::from_secs(20)).is_err());
+        assert!(connect_any(&[], Duration::from_secs(1)).is_err());
     }
 }

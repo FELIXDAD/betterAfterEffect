@@ -17,7 +17,7 @@ use crate::error::SyncError;
 use crate::presence::PresenceTable;
 use crate::protocol::Message;
 use crate::session::{SessionConfig, SyncSession};
-use crate::transport::Transport;
+use crate::transport::{LinkNotes, Transport};
 
 /// A connected client, as returned by [`Relay::connect`] and
 /// [`Relay::connect_with`].
@@ -82,7 +82,9 @@ impl Relay {
     }
 
     /// How often the relay re-announces its versions to each client (repairs lost
-    /// messages on lossy links). Applies to clients connected afterwards.
+    /// messages on lossy links). Applies to clients connected afterwards. `None`
+    /// also gives up keeping large transfers as on their way (see
+    /// [`SessionConfig::hello_interval`]).
     pub fn set_hello_interval(&mut self, every: Option<Duration>) {
         self.hello_interval = every;
     }
@@ -170,6 +172,22 @@ impl Relay {
         Some(closed)
     }
 
+    /// A peer's [`Transport::notes`] (the hub: problems its project
+    /// directory works around, documents it does not write) and their
+    /// [`Transport::notes_seq`], to copy them only when that moved. `None`
+    /// if there is no such peer.
+    pub fn peer_notes(&self, handle: PeerHandle) -> Option<(u64, LinkNotes)> {
+        let peer = self.peers.iter().find(|p| p.handle == handle)?;
+        Some((peer.transport.notes_seq(), peer.transport.notes()))
+    }
+
+    /// A peer's [`Transport::notes_seq`]: cheap, call it often, and
+    /// [`peer_notes`](Self::peer_notes) when it moved.
+    pub fn peer_notes_seq(&self, handle: PeerHandle) -> Option<u64> {
+        let peer = self.peers.iter().find(|p| p.handle == handle)?;
+        Some(peer.transport.notes_seq())
+    }
+
     /// Connected peers and the client IDs they announced.
     pub fn peers(&self) -> Vec<(PeerHandle, Option<ClientId>)> {
         self.peers
@@ -249,8 +267,9 @@ impl Relay {
     }
 
     /// Send every peer what it is missing right now, ignoring each session's
-    /// `min_send_interval` and `max_backlog` (see [`SyncSession::flush`]);
-    /// nothing is received.
+    /// `min_send_interval` and `max_backlog`, and answer every snapshot
+    /// request still waiting (see [`SyncSession::flush`]); nothing is
+    /// received.
     /// Call it after the last [`pump`](Self::pump) before dropping the relay, or
     /// edits held back for a peer connected with
     /// [`connect_with`](Self::connect_with) are never sent. Peers whose transport

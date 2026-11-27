@@ -225,9 +225,12 @@ fn hub_client() {
 /// Answers `listening addr=<address>` once the hub logged the address it got,
 /// or, if the hub exited before that (the port or the data directory's lock
 /// still held), its log as `log <line>` answers and then `listening
-/// addr=none`. Takes one command: `kill` (kill the hub, no shutdown runs in
-/// it; answers `killed`).
+/// addr=none`. With `BAE_MP_HIDE_LISTENING` set it answers `running
+/// addr=<address>` instead of `listening` (a hub that never seems to come up,
+/// for the test of a start that times out). Takes one command: `kill` (kill
+/// the hub, no shutdown runs in it; answers `killed`).
 fn hub_guard() {
+    let hide = std::env::var_os("BAE_MP_HIDE_LISTENING").is_some();
     let mut hub = Command::new(env!("CARGO_BIN_EXE_bae-hub"))
         .arg("serve")
         .arg("--data")
@@ -253,7 +256,8 @@ fn hub_guard() {
                 && let Some(addr) = line.split("addr=").nth(1)
             {
                 let addr = addr.split_whitespace().next().unwrap_or_default();
-                reply("listening", &format!("addr={addr}"));
+                let kind = if hide { "running" } else { "listening" };
+                reply(kind, &format!("addr={addr}"));
                 // Keep reading, or the hub would block on a full pipe.
                 let _ = std::io::copy(&mut stderr, &mut std::io::sink());
                 return;
@@ -665,6 +669,14 @@ fn finish(
     states
 }
 
+/// Tell clients that edit without end to stop; their versions then.
+fn stopped(clients: &mut [Client]) -> Vec<String> {
+    clients
+        .iter_mut()
+        .map(|c| field(&c.proc.ask("stop", "stopped", ANSWER), "vv").to_owned())
+        .collect()
+}
+
 fn edited(clients: &mut [Client]) -> Vec<String> {
     clients
         .iter_mut()
@@ -674,6 +686,40 @@ fn edited(clients: &mut [Client]) -> Vec<String> {
 
 fn loopback_any_port() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 0))
+}
+
+/// `Hub::start` waits for `listening` before the guard is wrapped in a
+/// `Hub`. If that times out (the hub runs but never says so, e.g. it waits
+/// for its data directory's lock), the panic drops the guard's `Proc`, and
+/// the guard must still get to kill its hub: before, `Proc::drop` killed the
+/// guard at once and the hub kept running, holding its port and data
+/// directory (and on Windows maybe the CI step's output handles).
+#[test]
+fn a_hub_start_that_times_out_leaves_no_hub_running() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().join("data");
+    let vars = [
+        ("BAE_MP_DATA", data.display().to_string()),
+        ("BAE_MP_LISTEN", loopback_any_port().to_string()),
+        ("BAE_MP_HIDE_LISTENING", "1".to_owned()),
+    ];
+    let mut guard = Proc::spawn(ENTRY, "bae-hub", "hub", &vars);
+    // The hub is up: it holds its port and the data directory's lock.
+    let running = guard.wait_for("running", START);
+    let addr: SocketAddr = field(&running, "addr").parse().unwrap();
+    assert!(TcpStream::connect_timeout(&addr, ANSWER).is_ok());
+    // What `Hub::start` does when `listening` never comes.
+    let timed_out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let mut guard = guard;
+        guard.wait_for("listening", Duration::from_millis(100));
+    }));
+    assert!(timed_out.is_err());
+    wait_until("the hub to be gone", ANSWER, || {
+        TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err()
+    });
+    // Its data directory is free again.
+    let hub = Hub::start(&data, loopback_any_port());
+    drop(hub);
 }
 
 /// Three client processes edit through the hub process and agree, with each
@@ -719,17 +765,40 @@ fn the_hub_process_is_killed_and_restarted_while_clients_edit() {
         .map(|(id, seed)| setup.start(id, id, seed, false))
         .collect();
     wait_all(&mut clients, "the clients to connect", |s| s.connected);
+    // Still editing when the hub is killed and while it is away, however slow
+    // the machine: they stop only once reconnected.
     for c in &mut clients {
-        c.proc.send("edit 400 4");
+        c.proc.send("edit 1000000 4");
     }
     wait_all(&mut clients, "edits through the hub", |s| s.made >= 40);
 
     hub.kill();
     wait_all(&mut clients, "the clients to notice", |s| !s.connected);
     wait_all(&mut clients, "offline edits", |s| s.offline >= 20);
+    // Same port: the clients reconnect to the address they know. Between the
+    // kill and this start, a test running in parallel in this process may
+    // bind port 0 and get this very port from the OS (unlikely: ports are
+    // handed out in turn); the start would then retry until `START` and fail.
     hub = Hub::start(&data, addr);
+    wait_all(&mut clients, "the clients to reconnect", |s| {
+        s.connected && s.reconnects >= 1
+    });
+    // And go on editing online for a while.
+    let online: Vec<u64> = clients
+        .iter_mut()
+        .map(|c| {
+            let s = c.state();
+            s.made - s.offline
+        })
+        .collect();
+    wait_until("edits after reconnecting", SETTLE, || {
+        clients.iter_mut().zip(&online).all(|(c, &before)| {
+            let s = c.state();
+            s.made - s.offline >= before + 20
+        })
+    });
 
-    let finals = edited(&mut clients);
+    let finals = stopped(&mut clients);
     let states = finish(&setup, clients, &[], &finals);
     for s in &states[..3] {
         assert!(
@@ -752,6 +821,7 @@ fn the_hub_process_is_killed_and_restarted_while_clients_edit() {
         includes(&logged_versions(&project), &want)
     });
     hub.kill();
+    // Same port again (see above for the unlikely race with a parallel test).
     hub = Hub::start(&data, addr);
     let mut late = setup.start("late", "late", 2, false);
     wait_until(

@@ -132,3 +132,11 @@
 1. **模块级全局动作处理。** 动效工作区的快捷键（空格播放、J/K、F9、U/P/S/R/T/A 等，`motion.*`）现在只能经过获得焦点的面板的 `on_action` 处理；焦点在历史记录、Agent 面板时这些键不生效，而 AE 里它们在任何面板都有效。希望 `bae-ui` 提供一个注册表（例如 `Registry<dyn ActionHandler>`，`fn handle(&self, inv, cx: &mut PanelContext) -> bool`），在"焦点面板"之后、"外壳动作"之前调用。
 2. **工具栏工具。** `Workbench` 的工具选择现在是内部状态；动效工作区需要读取当前工具（选取、手形、缩放、旋转、锚点、形状、钢笔、文字），并在选中工具时接收 `V`、`H`、`Z`、`W`、`Y`、`Q`、`G`、`Cmd+T` 等快捷键。希望把当前工具放进应用资源（或提供注册 / 查询接口）。
 3. 术语：12 新增的界面文字（`crates/bae-ui-motion/src/i18n.rs`）可以并入 `docs/glossary.md`，12 不直接改术语表。
+
+### 来自 09 collab/sync（2026-11-27，接入协同连接的注意事项）
+
+接入 `bae_sync::Connection`（分享、加入工程，`docs/spec/sync.md` 第 7 节，细节见 7.9）时请注意，都不急，接界面时再做：
+
+1. **`wake` 不能只接 egui 的 `request_repaint`。** `Hello` 和在线状态心跳只在 `Connection::pump` 里发，Hub 60 秒收不到客户端的任何字节就断开它。窗口最小化或被遮住时 egui 可能不出帧，只接 `request_repaint` 的话不会 `pump`，链路会断。希望外壳提供一个"尽快在主线程上调用一次"的唤醒（例如经 `EventLoopProxy` 发用户事件，在 `Shell::about_to_wait` 里处理，不依赖重绘），再加一个定时兜底（例如每秒一次 `ControlFlow::WaitUntil`），`wake` 接到前者上。`wake` 在后台线程上调用，不能阻塞。
+2. **状态和错误的文字按 `Failure` 本地化。** `ConnectionState::Offline { error }`、`Failed { reason }`、`ConnectionOutcome::errors`、关闭结果、`Connection::link_notes().last_error` 都是英文的内部错误文字。状态栏和对话框请按 `Failure`（令牌不对、没有权限、工程不存在、这个 ID 已在别处打开、地址不能用……）和状态（离线、N 秒后重试、"NAS 无响应"）显示中英文文案（i18n），原文放在可展开的详细信息里。`link_notes().not_written` 不为空时提示"这些工程层的修改没有写进共享目录，请用新版本打开"。
+3. **离线合并汇总放到后台线程。** 重连后的 `ConflictTracker::caught_up` 要导出、导入旧版本快照，大工程会卡住界面：用 `caught_up_detached`，把返回的 `DetachedMerge` 交给后台线程 `summarize()`，结果再送回界面。

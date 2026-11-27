@@ -8,7 +8,9 @@
 //! - [`ConflictTracker::connection_lost`] / [`ConflictTracker::caught_up`] (or
 //!   [`merge_summary`]): after working offline, which of our edits were kept,
 //!   which were overridden and what the others changed meanwhile
-//!   ([`MergeSummary`]).
+//!   ([`MergeSummary`]). The summary is expensive (snapshots of past
+//!   versions); [`ConflictTracker::caught_up_detached`] leaves it to a worker
+//!   thread ([`DetachedMerge`]).
 //!
 //! An *element* is the unit the CRDT merges on its own, last writer wins: an
 //! attribute's static value, its expression, or one keyframe (by time). Two
@@ -98,6 +100,25 @@ pub struct ConflictConfig {
     /// people dragging the same slider get one notice each, not one per
     /// frame. Zero reports every one.
     pub repeat_quiet: Duration,
+    /// Give up waiting for [`ConflictTracker::caught_up`] this long after the
+    /// catch-up began: the first check after the latest
+    /// [`connection_lost`](ConflictTracker::connection_lost) that finds ops
+    /// of others beyond the version the stage had at that call (only a new
+    /// link brings them; a sublayer added to the stack since counts from the
+    /// first check that sees it). Then the mark is dropped as by
+    /// [`cancel_offline`](ConflictTracker::cancel_offline): online notices
+    /// resume, and no summary comes for that reconnect. Counted from the
+    /// catch-up, not from the disconnection, so a long offline period still
+    /// ends in a summary, also after a catch-up the link dropped again
+    /// before it completed (the next `connection_lost` restarts the count).
+    /// It covers a catch-up that never completes
+    /// (`SyncSession::is_caught_up` stays false while a record that failed to
+    /// import, or ops Loro holds pending for missing dependencies, are listed
+    /// by the remote); where nothing of the others arrives at all, call
+    /// `cancel_offline` (e.g. once the connection has been online for a while
+    /// without catching up). `None` (default): wait for `caught_up` or
+    /// `cancel_offline`.
+    pub catch_up_timeout: Option<Duration>,
 }
 
 impl Default for ConflictConfig {
@@ -107,6 +128,7 @@ impl Default for ConflictConfig {
             max_recent: 1024,
             max_ops_per_edit: 2048,
             repeat_quiet: Duration::from_secs(1),
+            catch_up_timeout: None,
         }
     }
 }
@@ -231,6 +253,15 @@ type NoticeKey = (SublayerId, TreeID, String, Element, ConflictOutcome);
 struct Offline {
     since: ProjectVersion,
     at: Instant,
+    /// The version at the latest `connection_lost` (`since` stays at the
+    /// first): ops of others beyond it came over a link that is back, for
+    /// [`ConflictConfig::catch_up_timeout`]. A sublayer it does not list was
+    /// added to the stack since, maybe with others' history (a layer file);
+    /// the first check that sees it adds it as it is then.
+    lost: ProjectVersion,
+    /// When a check first found ops of others beyond `lost` (the catch-up
+    /// began).
+    catching_up: Option<Instant>,
 }
 
 /// Where the checks of one sublayer stand.
@@ -261,6 +292,13 @@ struct Seen {
 /// with (usually one), finds which newly arrived ops wrote the maps of
 /// remembered edits without decoding them, and decodes only around those.
 /// The whole project is never scanned.
+///
+/// The exception is the end of a reconnect: [`caught_up`](Self::caught_up)
+/// computes a [`MergeSummary`], which exports and imports snapshots of past
+/// versions of every sublayer that changed. On the UI thread of a large
+/// project use [`caught_up_detached`](Self::caught_up_detached) and compute
+/// the summary on a worker. If it fails the mark stays: do not retry it
+/// every frame.
 #[derive(Debug)]
 pub struct ConflictTracker {
     config: ConflictConfig,
@@ -275,6 +313,9 @@ pub struct ConflictTracker {
     /// Last notice (reported or held back) per element and outcome.
     last_notice: FxHashMap<NoticeKey, Instant>,
     offline: Option<Offline>,
+    /// Notices of a [`caught_up`](Self::caught_up) whose summary failed,
+    /// returned by the next check (or `caught_up`).
+    carried: Vec<ConcurrentEdit>,
     stats: ConflictStats,
 }
 
@@ -293,6 +334,7 @@ impl ConflictTracker {
             seen: FxHashMap::default(),
             last_notice: FxHashMap::default(),
             offline: None,
+            carried: Vec::new(),
             stats: ConflictStats::default(),
         };
         t.note_sublayers(stage);
@@ -586,6 +628,9 @@ impl ConflictTracker {
     /// change of the element still deserves a hint. Where nothing was
     /// committed or imported since the last check, it compares frontiers and
     /// stops.
+    ///
+    /// While a reconnect is pending, it also applies
+    /// [`ConflictConfig::catch_up_timeout`].
     pub fn check_at(&mut self, stage: &Stage, now: Instant) -> Vec<ConcurrentEdit> {
         let ids: Vec<SublayerId> = self.recent.keys().cloned().collect();
         self.check_sublayers(stage, &ids, now)
@@ -597,9 +642,21 @@ impl ConflictTracker {
         ids: &[SublayerId],
         now: Instant,
     ) -> Vec<ConcurrentEdit> {
+        self.catch_up_timeout(stage, now);
+        self.check_only(stage, ids, now)
+    }
+
+    /// [`check_sublayers`](Self::check_sublayers) without the catch-up
+    /// timeout.
+    fn check_only(
+        &mut self,
+        stage: &Stage,
+        ids: &[SublayerId],
+        now: Instant,
+    ) -> Vec<ConcurrentEdit> {
         let crowded = self.last_notice.len() > self.config.max_recent.max(64) * 4;
         self.prune(now, crowded);
-        let mut out = Vec::new();
+        let mut out = std::mem::take(&mut self.carried);
         for id in ids {
             if let Some(layer) = stage.sublayer(id) {
                 self.check_layer(id, layer, now, &mut out);
@@ -806,18 +863,84 @@ impl ConflictTracker {
     /// The link to the others is gone (transport error, hub unreachable,
     /// shared folder unreachable, or the app goes offline on purpose): remember
     /// the version we had. A second call before [`caught_up`](Self::caught_up)
-    /// keeps the first mark.
+    /// keeps the first mark (the summary covers the whole time), and restarts
+    /// [`ConflictConfig::catch_up_timeout`]: a catch-up the link dropped again
+    /// is not counted on, the next link's catch-up starts the timer anew.
+    ///
+    /// Until `caught_up` (or [`cancel_offline`](Self::cancel_offline), or
+    /// [`ConflictConfig::catch_up_timeout`]), edits made after the mark get
+    /// no online notices: they are left to the summary.
     ///
     /// Edits made before the mark may not have reached anyone (made after the
     /// link really dropped, or held back by `min_send_interval`). Until
     /// `caught_up` they stay as old as they were at the mark, so the catch-up
     /// still reports the ops that raced with them.
     pub fn connection_lost_at(&mut self, stage: &Stage, now: Instant) {
-        if self.offline.is_none() {
-            self.offline = Some(Offline {
-                since: ProjectVersion::current(stage),
-                at: now,
-            });
+        let lost = ProjectVersion::current(stage);
+        match &mut self.offline {
+            Some(off) => {
+                off.lost = lost;
+                off.catching_up = None;
+            }
+            None => {
+                self.offline = Some(Offline {
+                    since: lost.clone(),
+                    at: now,
+                    lost,
+                    catching_up: None,
+                });
+            }
+        }
+    }
+
+    /// Stop waiting for the catch-up of a reconnect: forget the mark of
+    /// [`connection_lost`](Self::connection_lost) without a summary. Online
+    /// notices resume for every edit from here on; edits made while the mark
+    /// was set are not reported for the remote ops that arrived meanwhile
+    /// (they were left to the summary). For a catch-up that never completes:
+    /// `SyncSession::is_caught_up` stays false while the remote lists a record
+    /// that failed to import here, or ops Loro holds pending for missing
+    /// dependencies. [`ConflictConfig::catch_up_timeout`] does this on its
+    /// own. Returns whether a reconnect was pending.
+    pub fn cancel_offline(&mut self) -> bool {
+        self.offline.take().is_some()
+    }
+
+    /// Apply [`ConflictConfig::catch_up_timeout`]: note when ops of others
+    /// beyond the latest `connection_lost` first show up, and drop the mark
+    /// that long after.
+    fn catch_up_timeout(&mut self, stage: &Stage, now: Instant) {
+        let Some(limit) = self.config.catch_up_timeout else {
+            return;
+        };
+        let Some(off) = &mut self.offline else {
+            return;
+        };
+        let began = match off.catching_up {
+            Some(t) => t,
+            None => {
+                // One version-vector comparison per sublayer, only while a
+                // reconnect is pending and until the catch-up began.
+                let mut arrived = false;
+                for layer in stage.sublayers() {
+                    let doc = layer.doc();
+                    match off.lost.sublayers.get(layer.id()) {
+                        Some(lost) => arrived |= remote_ahead(&doc.oplog_vv(), lost, doc.peer_id()),
+                        None => {
+                            off.lost
+                                .sublayers
+                                .insert(layer.id().clone(), doc.oplog_vv());
+                        }
+                    }
+                }
+                if !arrived {
+                    return;
+                }
+                *off.catching_up.insert(now)
+            }
+        };
+        if now.saturating_duration_since(began) >= limit {
+            self.offline = None;
         }
     }
 
@@ -827,38 +950,173 @@ impl ConflictTracker {
         self.offline.as_ref().map(|o| &o.since)
     }
 
-    /// Reconnected and caught up (see `SyncSession::is_caught_up`; call it
-    /// after the [`check`](Self::check) of the pump that caught up): what the
+    /// [`caught_up_at`](Self::caught_up_at) with the current time.
+    pub fn caught_up(&mut self, stage: &Stage) -> Result<Option<CaughtUp>, SyncError> {
+        self.caught_up_at(stage, Instant::now())
+    }
+
+    /// Reconnected and caught up (the first time `SyncSession::is_caught_up`
+    /// holds after the reconnect; with `crate::Connection`, while
+    /// `is_online`): first [`check_at`](Self::check_at) on what arrived (the
+    /// remote ops that raced with edits made before the mark), then what the
     /// merge did, from the version remembered by
     /// [`connection_lost`](Self::connection_lost) to now ([`merge_summary`]).
-    /// `None` if no reconnect was pending. On an error the mark is kept.
-    pub fn caught_up(&mut self, stage: &Stage) -> Result<Option<MergeSummary>, SyncError> {
-        let Some(off) = self.offline.take() else {
+    /// Both come back in [`CaughtUp`], so the check cannot come too late: a
+    /// summary first would count the catch-up's remote ops as compared, and
+    /// the edits the dead link never delivered would miss their notices.
+    /// `None` if no reconnect was pending (also after
+    /// [`cancel_offline`](Self::cancel_offline) or
+    /// [`ConflictConfig::catch_up_timeout`]).
+    ///
+    /// On an error the mark is kept; the notices of the check are not lost,
+    /// the next check (or `caught_up`) returns them.
+    ///
+    /// Costs a [`merge_summary`]: several snapshot exports and imports per
+    /// sublayer that changed. Do not call it on the UI thread of a large
+    /// project; [`caught_up_detached`](Self::caught_up_detached) leaves that
+    /// part to a worker thread.
+    pub fn caught_up_at(
+        &mut self,
+        stage: &Stage,
+        now: Instant,
+    ) -> Result<Option<CaughtUp>, SyncError> {
+        let Some(since) = self.offline.as_ref().map(|o| o.since.clone()) else {
             return Ok(None);
         };
-        match merge_summary(stage, &off.since) {
+        let notices = self.catch_up_check(stage, now);
+        match merge_summary(stage, &since) {
             Ok(summary) => {
-                // Remote ops merged so far are in the summary (or were checked
-                // against the edits made before the mark).
-                let ids: Vec<SublayerId> = self.recent.keys().cloned().collect();
-                for id in ids {
-                    if let Some(layer) = stage.sublayer(&id) {
-                        let doc = layer.doc();
-                        self.mark_checked(
-                            &id,
-                            doc.oplog_frontiers(),
-                            doc.oplog_vv(),
-                            doc.peer_id(),
-                        );
-                    }
-                }
-                Ok(Some(summary))
+                self.caught_up_done(stage);
+                Ok(Some(CaughtUp { notices, summary }))
             }
             Err(e) => {
-                self.offline = Some(off);
+                self.carried = notices;
                 Err(e)
             }
         }
+    }
+
+    /// [`caught_up_at`](Self::caught_up_at) with the merge summary left to
+    /// another thread: the check runs here, the mark is cleared, and
+    /// [`DetachedMerge::summarize`] (on any thread) computes the summary from
+    /// a pinned copy of the stage ([`Stage::snapshot_reader`]; taking it only
+    /// clones handles). An error there does not bring the mark back.
+    pub fn caught_up_detached(&mut self, stage: &Stage) -> Option<CaughtUpDetached> {
+        self.caught_up_detached_at(stage, Instant::now())
+    }
+
+    /// [`caught_up_detached`](Self::caught_up_detached) with an explicit
+    /// clock.
+    pub fn caught_up_detached_at(
+        &mut self,
+        stage: &Stage,
+        now: Instant,
+    ) -> Option<CaughtUpDetached> {
+        let since = self.offline.as_ref().map(|o| o.since.clone())?;
+        let notices = self.catch_up_check(stage, now);
+        let merge = DetachedMerge::new(stage, since);
+        self.caught_up_done(stage);
+        Some(CaughtUpDetached { notices, merge })
+    }
+
+    /// The check of a catch-up: like [`check_at`](Self::check_at) (with the
+    /// mark still set, so edits made before it only meet the ops that raced
+    /// with them), without the catch-up timeout.
+    fn catch_up_check(&mut self, stage: &Stage, now: Instant) -> Vec<ConcurrentEdit> {
+        let ids: Vec<SublayerId> = self.recent.keys().cloned().collect();
+        self.check_only(stage, &ids, now)
+    }
+
+    /// The reconnect is summarized: clear the mark; the remote ops merged so
+    /// far are in the summary (or were checked against the edits made before
+    /// the mark).
+    fn caught_up_done(&mut self, stage: &Stage) {
+        self.offline = None;
+        let ids: Vec<SublayerId> = self.recent.keys().cloned().collect();
+        for id in ids {
+            if let Some(layer) = stage.sublayer(&id) {
+                let doc = layer.doc();
+                self.mark_checked(&id, doc.oplog_frontiers(), doc.oplog_vv(), doc.peer_id());
+            }
+        }
+    }
+}
+
+/// What [`ConflictTracker::caught_up`] found once a reconnect caught up.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CaughtUp {
+    /// Online notices of the check that ran first: edits made before the
+    /// connection was lost, met by remote ops that raced with them (or that
+    /// the dead link never delivered).
+    pub notices: Vec<ConcurrentEdit>,
+    /// What the merge did to the edits made since.
+    pub summary: MergeSummary,
+}
+
+/// [`CaughtUp`] with the summary still to compute
+/// ([`ConflictTracker::caught_up_detached`]).
+#[derive(Debug)]
+pub struct CaughtUpDetached {
+    pub notices: Vec<ConcurrentEdit>,
+    /// Send it to a worker thread and call [`DetachedMerge::summarize`].
+    pub merge: DetachedMerge,
+}
+
+/// [`merge_summary`] of a pinned copy of a stage, to compute on another
+/// thread: a large project's summary (several snapshot exports and imports
+/// per changed sublayer) does not stall the thread that owns the stage.
+///
+/// Paths come from the copy's own mirror, built from scratch: where
+/// concurrently created prims share a name, a client's live mirror may show
+/// them under other paths than a rebuilt one (`docs/spec/sync.md` 5.3); the
+/// prims, nodes and changes are the same.
+pub struct DetachedMerge {
+    since: ProjectVersion,
+    /// The stage's Loro peer per sublayer: the copy's documents get new ones,
+    /// and "ours" are the ops of these.
+    peers: Vec<(SublayerId, PeerID)>,
+    read: Box<dyn FnOnce() -> Result<Stage, bae_model::ModelError> + Send>,
+}
+
+impl std::fmt::Debug for DetachedMerge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DetachedMerge")
+            .field("since", &self.since)
+            .field("peers", &self.peers)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DetachedMerge {
+    /// Pin `stage` now (cheap: no export happens here) for the summary of
+    /// what merged since `since` (a version of this stage, like
+    /// [`merge_summary`]'s).
+    pub fn new(stage: &Stage, since: ProjectVersion) -> Self {
+        DetachedMerge {
+            since,
+            peers: stage
+                .sublayers()
+                .map(|l| (l.id().clone(), l.doc().peer_id()))
+                .collect(),
+            read: stage.snapshot_reader(),
+        }
+    }
+
+    /// The version the summary starts from.
+    pub fn since(&self) -> &ProjectVersion {
+        &self.since
+    }
+
+    /// Materialize the pinned stage and compute [`merge_summary`] on it. Runs
+    /// on any thread; costs a copy of the project plus the summary.
+    pub fn summarize(self) -> Result<MergeSummary, SyncError> {
+        let stage = (self.read)()?;
+        for (id, peer) in &self.peers {
+            if let Some(layer) = stage.sublayer(id) {
+                layer.doc().set_peer_id(*peer)?;
+            }
+        }
+        merge_summary(&stage, &self.since)
     }
 }
 
@@ -1180,8 +1438,14 @@ struct MyEdit {
 /// stage's own Loro peers made after `since` (local edits, undo and redo, by
 /// any author on this client); everything else after `since` is the others'.
 /// Works the same for hub and shared-folder sessions: it only reads version
-/// vectors and history. Costs like `history::diff` (read-only snapshots of the
-/// versions involved), so call it once per reconnect, not per frame.
+/// vectors and history.
+///
+/// Expensive: for every sublayer that changed since `since`, up to three
+/// read-only snapshots of past versions (paths of prims that are gone, built
+/// on demand: an `ExportMode::SnapshotAt` export plus an import and a mirror
+/// build each) and the two of the `history::diff` for `merged`. Call it once
+/// per reconnect, never per frame, and not on the UI thread of a large
+/// project: [`DetachedMerge`] runs it on a worker thread.
 ///
 /// The stage's peers change when the project is reopened, so `since` must
 /// come from this stage, not from before a restart.

@@ -30,6 +30,10 @@ pub struct ProjectSummary {
     pub disk_bytes: u64,
     /// `false` when the project directory could not be written recently.
     pub saving: bool,
+    /// Documents whose edits are relayed but not saved (only while loaded):
+    /// the hub's own log of them is of a newer format version, written by a
+    /// newer bae-hub on this data directory (spec 4.3). Run that one again.
+    pub not_saved: Vec<String>,
     /// Protocol messages received from / sent to clients since loaded.
     pub messages_received: u64,
     pub messages_sent: u64,
@@ -148,6 +152,10 @@ impl Registry {
                     peers: status.as_ref().map(|s| s.peers.clone()).unwrap_or_default(),
                     disk_bytes,
                     saving: status.as_ref().is_none_or(|s| s.store_ok),
+                    not_saved: status
+                        .as_ref()
+                        .map(|s| s.not_saved.clone())
+                        .unwrap_or_default(),
                     messages_received: status.as_ref().map_or(0, |s| s.messages_received),
                     messages_sent: status.as_ref().map_or(0, |s| s.messages_sent),
                 }
