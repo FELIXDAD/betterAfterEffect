@@ -43,6 +43,10 @@ pub(crate) struct ViewOptions {
     /// directions in the viewer's lower-left corner when the comp has 3D
     /// layers.
     pub axes: bool,
+    /// View ▸ Use Display Color Management (AE's default: on).
+    pub display_color_management: bool,
+    /// View ▸ Simulate Output.
+    pub simulate_output: crate::display_color::SimulateOutput,
 }
 
 impl Default for ViewOptions {
@@ -59,6 +63,8 @@ impl Default for ViewOptions {
             layer_controls: true,
             paths: true,
             axes: true,
+            display_color_management: true,
+            simulate_output: Default::default(),
         }
     }
 }
@@ -77,7 +83,22 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     ("motion.view.show_layer_controls", "Show Layer Controls"),
     ("motion.view.import_guides", "Import Guides..."),
     ("motion.view.export_guides", "Export Guides..."),
+    (
+        "motion.view.use_display_color_management",
+        "Use Display Color Management",
+    ),
+    (SIMULATE_OUTPUT, "Simulate Output"),
 ];
+
+/// View ▸ Simulate Output (`{"profile": …}`).
+pub(crate) const SIMULATE_OUTPUT: &str = "motion.view.simulate_output";
+
+/// Whether Simulate Output is set to `profile` (menu check marks).
+pub(crate) fn simulate_checked(resources: &bae_app::Resources, profile: &str) -> bool {
+    let session = common::session(resources);
+    let current = session.lock().view_options.simulate_output;
+    crate::display_color::SimulateOutput::from_param(profile) == Some(current)
+}
 
 /// The guides as AE's guide files write them: `{"guides": [{"orientationType":
 /// 0 horizontal / 1 vertical, "positionType": 0 pixels, "position": …}]}`.
@@ -168,6 +189,7 @@ fn option<'a>(o: &'a mut ViewOptions, id: &str) -> Option<&'a mut bool> {
         "motion.view.proportional_grid" => &mut o.proportional,
         "motion.view.title_action_safe" => &mut o.safe,
         "motion.view.show_layer_controls" => &mut o.layer_controls,
+        "motion.view.use_display_color_management" => &mut o.display_color_management,
         _ => return None,
     })
 }
@@ -197,6 +219,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
     if inv.id == "motion.view.clear_guides" {
         if let Some(info) = common::active_comp(cx.stage, &session) {
             set_guides(cx, &info.path, &[]);
+        }
+        return true;
+    }
+    if inv.id == SIMULATE_OUTPUT {
+        if let Some(sim) = inv.params["profile"]
+            .as_str()
+            .and_then(crate::display_color::SimulateOutput::from_param)
+        {
+            session.lock().view_options.simulate_output = sim;
         }
         return true;
     }

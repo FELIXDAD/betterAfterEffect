@@ -88,3 +88,50 @@ fn guide_files_round_trip_like_ae() {
     );
     assert_eq!(parse_guides("not json", &info), None);
 }
+
+/// View ▸ Use Display Color Management (on by default) and View ▸ Simulate
+/// Output: a managed project's viewers convert to the display; off, or an
+/// unmanaged project, shows the numbers as they are.
+#[test]
+fn display_color_management_and_simulate_output() {
+    use crate::display_color::{SimulateOutput, update};
+    let mut h = H::new();
+    let now = |h: &H| {
+        let o = h.session().lock().view_options;
+        update(&h.stage, o.display_color_management, o.simulate_output)
+    };
+    assert!(h.session().lock().view_options.display_color_management);
+    // Unmanaged (no working space): nothing to convert.
+    assert!(now(&h).1.is_none());
+    h.run(
+        "project.set_settings",
+        json!({"working_space": "HDTV (Rec. 709)"}),
+    );
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(now(&h).1.is_some(), "Rec. 709 converts to the sRGB display");
+    tool_action(&h, "motion.view.use_display_color_management", json!({}));
+    assert!(!h.session().lock().view_options.display_color_management);
+    assert!(now(&h).1.is_none(), "off: the numbers as they are");
+    tool_action(&h, "motion.view.use_display_color_management", json!({}));
+    tool_action(
+        &h,
+        "motion.view.simulate_output",
+        json!({"profile": "legacy_mac"}),
+    );
+    assert_eq!(
+        h.session().lock().view_options.simulate_output,
+        SimulateOutput::LegacyMac
+    );
+    assert!(crate::viewer::guides::simulate_checked(
+        &h.resources,
+        "legacy_mac"
+    ));
+    let mac = now(&h);
+    assert!(mac.1.is_some());
+    tool_action(
+        &h,
+        "motion.view.simulate_output",
+        json!({"profile": "none"}),
+    );
+    assert_ne!(now(&h).0, mac.0, "another transform");
+}
