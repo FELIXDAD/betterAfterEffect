@@ -138,7 +138,7 @@ pub fn apply(prefs: &Preferences) {
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
     crate::theme::set_gradients(prefs.bool("appearance.use_gradients"));
-    crate::theme::set_accessible_contrast(prefs.bool("appearance.accessibility_color_contrast"));
+    crate::theme::set_accessible_contrast(prefs.bool("appearance.use_accessible_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
     ));
@@ -797,7 +797,13 @@ impl SettingsDialog {
                 } else {
                     draft.bool(p.key)
                 };
-                if widgets::checkbox(ui, &mut v, label).changed() && !p.unsupported {
+                // AE 26 draws Accessibility Color Contrast as a switch.
+                let r = if p.key == "appearance.use_accessible_contrast" {
+                    widgets::switch(ui, &mut v, label)
+                } else {
+                    widgets::checkbox(ui, &mut v, label)
+                };
+                if r.changed() && !p.unsupported {
                     self.set(p.key, v);
                 }
             }

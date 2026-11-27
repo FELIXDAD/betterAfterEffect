@@ -1,5 +1,13 @@
 {
-  "milestone": "0.1.0",
+  "milestone": "0.2.0",
+  "releases": {
+    "0.2.0": "milestones-0.2.0.tsv",
+    "0.1.0": "milestones.tsv"
+  },
+  "new_item_groups": {
+    "bug-": "用户实测 bug",
+    "perf-": "用户实测 bug"
+  },
   "issues": {
     "400": {
       "title": "P0 易用性交互",

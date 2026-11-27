@@ -453,6 +453,7 @@ pub(crate) struct Shared {
     pub masks: Arc<Mutex<Option<MaskPipelines>>>,
     pub mix: Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>>,
     pub dof: Arc<Mutex<Option<crate::exec::dof::DofPipelines>>>,
+    pub display_color: Arc<crate::display_color::DisplayColorPipelines>,
     pub mesh: Arc<Mutex<Option<crate::exec::mesh::MeshPipelines>>>,
     pub shadow_map: Arc<Mutex<Option<crate::exec::shadowmap::ShadowMapPipeline>>>,
 }
@@ -479,6 +480,7 @@ impl Shared {
             masks: Arc::new(Mutex::new(None)),
             mix: Arc::new(Mutex::new(None)),
             dof: Arc::new(Mutex::new(None)),
+            display_color: Default::default(),
             mesh: Arc::new(Mutex::new(None)),
             shadow_map: Arc::new(Mutex::new(None)),
         });
@@ -605,6 +607,11 @@ impl Shared {
         if self.shadow_map.lock().is_none() {
             let pipeline = crate::exec::shadowmap::ShadowMapPipeline::new(&self.device);
             self.shadow_map.lock().get_or_insert(pipeline);
+        }
+        // Viewer display colour management for the usual working spaces.
+        for t in crate::display_color::common_transforms() {
+            self.display_color
+                .warm(&self.device, &self.base.output_layout, &t);
         }
     }
 }
@@ -819,7 +826,11 @@ impl Pipelines {
 
         let output_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.output"),
-            source: wgpu::ShaderSource::Wgsl(wgsl!("output.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                [wgsl!("output.wgsl"), crate::display_color::IDENTITY]
+                    .concat()
+                    .into(),
+            ),
         });
         let output_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("bae-render.output"),
@@ -913,6 +924,14 @@ impl Pipelines {
     }
 
     /// The shared depth-of-field pipelines (created on first use).
+    /// The shared display colour pipelines.
+    pub(crate) fn display_color(&self) -> Arc<crate::display_color::DisplayColorPipelines> {
+        self.shared
+            .as_ref()
+            .map(|s| s.display_color.clone())
+            .unwrap_or_default()
+    }
+
     pub fn dof(&self) -> Arc<Mutex<Option<crate::exec::dof::DofPipelines>>> {
         self.shared
             .as_ref()
@@ -1275,7 +1294,7 @@ fn mask_pipeline(
 }
 
 /// A full-screen pass converting a working buffer into `format` (`output.wgsl`).
-fn output_pipeline(
+pub(crate) fn output_pipeline(
     device: &wgpu::Device,
     module: &wgpu::ShaderModule,
     layout: &wgpu::PipelineLayout,

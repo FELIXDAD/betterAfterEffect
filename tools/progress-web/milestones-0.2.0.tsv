@@ -1,0 +1,21 @@
+用户实测 bug	bug-audio-stop	停止后音频仍在播放	todo
+用户实测 bug	bug-camera-layer	摄像机 / 灯光图层：双击打开设置、只显示适用开关	todo
+用户实测 bug	bug-drag-feedback	拖放反馈：拖动轮廓、落点提示、禁止光标	todo
+用户实测 bug	bug-effects-panel	效果和预设面板：点击高亮、方向键、双击应用	todo
+用户实测 bug	bug-timeline-input	时间轴输入与编辑	todo
+用户实测 bug	bug-accessible-contrast	无障碍色彩对比度	todo
+用户实测 bug	bug-render-queue-ui	渲染队列界面	todo
+用户实测 bug	bug-timeline-style	时间轴外观	todo
+用户实测 bug	perf-video-playback	视频播放流畅度	todo
+用户实测 bug	perf-ui-responsive	界面响应速度	todo
+0.1.0 留下的	ae-proxies	代理	todo
+0.1.0 留下的	roto-content-fill	Roto 笔刷和内容识别填充	todo
+0.1.0 留下的	camera-tracker	3D 摄像机跟踪器	todo
+0.1.0 留下的	warp-stabilizer	变形稳定器	todo
+0.1.0 留下的	ae-script-compat	AE 脚本兼容	todo
+0.1.0 留下的	disk-cache	磁盘预览缓存	todo
+0.1.0 留下的	collab	多人协同（#737）	todo
+M2 交接与协同	m2-ae-project	导入和导回 AE 工程	todo
+M2 交接与协同	m2-pack-trim	打包时裁切视频	todo
+M2 交接与协同	m2-agent-mcp	Agent 通过 MCP 操作	todo
+M2 交接与协同	m2-history	历史和命名版本	todo

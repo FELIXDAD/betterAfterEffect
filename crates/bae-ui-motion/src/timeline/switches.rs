@@ -77,10 +77,7 @@ fn set_switch(
             .into(),
         ),
     };
-    cx.invoke_with(
-        "layer.set_attr",
-        json!({"layers": paths, "attr": attr, "value": value}),
-    );
+    crate::actions::set_layer_switch(cx, paths, attr, value);
 }
 
 /// Whether `layer` has the `attr` switch and can change it.
@@ -88,14 +85,25 @@ fn switch_applies(stage: &Stage, layer: &PrimPath, attr: &str) -> bool {
     if !bae_model::editable_on_locked_layer(attr) && query::is_locked(stage, layer) {
         return false;
     }
+    has_switch(stage, layer, attr)
+}
+
+/// Whether `layer`'s row shows the switch `attr` (AE leaves the cell empty
+/// otherwise). A camera or light has only Video, Solo, Lock and Shy: its 3D
+/// column shows a fixed axis icon, and it has no Mode or Track Matte.
+pub(crate) fn has_switch(stage: &Stage, layer: &PrimPath, attr: &str) -> bool {
+    let kind = query::layer_kind(stage, layer);
     match attr {
-        "audio_enabled" => matches!(
-            query::layer_kind(stage, layer).as_deref(),
-            Some("footage" | "audio" | "pre_comp")
-        ),
+        "enabled" | "solo" | "locked" | "shy" => true,
+        "audio_enabled" => matches!(kind.as_deref(), Some("footage" | "audio" | "pre_comp")),
+        _ if is_camera_or_light(kind.as_deref()) => false,
         "effects_enabled" => !bae_motion::effect::effects_of(stage, layer).is_empty(),
         _ => true,
     }
+}
+
+pub(super) fn is_camera_or_light(kind: Option<&str>) -> bool {
+    matches!(kind, Some("camera" | "light"))
 }
 
 impl TimelinePanel {

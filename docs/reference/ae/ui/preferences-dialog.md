@@ -235,7 +235,7 @@
 | 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
 |---|---|---|---|---|---|---|
 | `color_theme` | `theme_picker` | 颜色主题 | Color Theme | 最暗 (`Darkest`) | 最暗 (Darkest) / 深色 (Dark) / 灯光 (Light)；3 个缩略图卡片单选（AE 26 取代旧版亮度连续滑块；zh_CN 将 Light 译作“灯光”） | `[Main Pref Section v2] User Interface Brightness (4) [0.0..1.0]` |
-| `accessibility_color_contrast` | `checkbox` | 无障碍色彩对比度 | Accessibility Color Contrast | 勾选 | — | — |
+| `use_accessible_contrast` | `checkbox` | 无障碍色彩对比度 | Accessibility Color Contrast | 不勾选 | AE 26 画成开关；默认关闭（Mac 26.2 与 Windows 26 实测）。打开后输入框、下拉框、按钮边框变亮（#303030 → #8d8d8d），文字变亮（#b0 → #eb，#d0 → #ff） | `[Main Pref Section v2] Use Accessible Contrast` |
 
 #### 颜色 / Colors
 

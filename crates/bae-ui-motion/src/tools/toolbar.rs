@@ -719,7 +719,7 @@ fn paint_swatch(ui: &Ui, rect: Rect, paint: &Paint, stroke: bool, hovered: bool)
     let border = if hovered {
         color::TEXT_STRONG
     } else {
-        color::FIELD_BORDER
+        theme::field_border()
     };
     p.rect_stroke(
         rect,

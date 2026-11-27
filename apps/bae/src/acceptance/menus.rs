@@ -105,6 +105,8 @@ const BAE_ONLY: &[&str] = &[
     "shell.window.agent_activity",
     "shell.window.agent_proposals",
     "shell.window.workspace.agent",
+    // File ▸ Scripts ▸ Open Script Editor... (#763).
+    "motion.file.script_editor",
 ];
 
 /// The rest of AE's menu bar (`menu.*` ids) comes from the AE command catalog,

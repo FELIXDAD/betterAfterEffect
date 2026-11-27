@@ -478,6 +478,14 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
         }
 
+        crate::viewer::guides::SIMULATE_OUTPUT => {
+            let profile = spec_param(item.params, "profile")
+                .unwrap_or_default()
+                .to_owned();
+            spec.checked_when(move |cx| {
+                crate::viewer::guides::simulate_checked(cx.resources, &profile)
+            })
+        }
         id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
             && !matches!(
                 id,
@@ -545,6 +553,14 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 })
             })
         }
+        actions::ids::LOCK_MARKERS => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let layers = session.lock().selected_layers.clone();
+            !layers.is_empty()
+                && layers
+                    .iter()
+                    .all(|l| bae_motion::markers::markers_locked(cx.stage, l))
+        }),
         actions::ids::TIME_REMAP => spec.checked_when(|cx| {
             let session = common::session(cx.resources);
             let first = session.lock().selected_layers.first().cloned();

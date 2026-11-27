@@ -57,6 +57,7 @@ mod panel_parity;
 mod preference_controls;
 mod preview_preferences;
 mod preview_properties;
+mod preview_switches;
 mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
@@ -64,6 +65,8 @@ mod render_autosave;
 #[cfg(target_os = "macos")]
 mod render_queue;
 mod render_templates;
+#[cfg(target_os = "macos")]
+mod responsiveness;
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;

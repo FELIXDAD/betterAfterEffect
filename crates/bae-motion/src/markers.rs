@@ -35,6 +35,30 @@ fn check_owner(tx: &Transaction<'_>, owner: &PrimPath) -> Result<(), CommandErro
     Ok(())
 }
 
+/// Whether the markers of `owner` (a comp or layer) are locked (Lock Markers).
+pub fn markers_locked(stage: &bae_model::Stage, owner: &PrimPath) -> bool {
+    stage
+        .prim(owner)
+        .and_then(|v| query::static_value(&v, "markers_locked"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Refuses markers whose owner has its markers locked.
+fn ensure_markers_unlocked<'a>(
+    tx: &Transaction<'_>,
+    markers: impl IntoIterator<Item = &'a PrimPath>,
+) -> Result<(), CommandError> {
+    for m in markers {
+        if let Some(owner) = owner_of(m)
+            && markers_locked(tx.stage(), &owner)
+        {
+            return Err(fail(format!("{owner}: its markers are locked")));
+        }
+    }
+    Ok(())
+}
+
 fn check_marker(tx: &Transaction<'_>, path: &PrimPath) -> Result<(), CommandError> {
     let prim = tx.stage().require_prim(path)?;
     if prim.prim_type() != Some(&PrimType::MARKER) {
@@ -186,6 +210,7 @@ impl Command for EditMarker {
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         check_marker(tx, &p.path)?;
         ensure_unlocked(tx.stage(), [&p.path])?;
+        ensure_markers_unlocked(tx, [&p.path])?;
         if let Some(t) = p.time {
             set(tx, &p.path, "time", Value::Time(t))?;
         }
@@ -217,6 +242,7 @@ impl Command for MoveMarkers {
             check_marker(tx, m)?;
         }
         ensure_unlocked(tx.stage(), p.markers.iter())?;
+        ensure_markers_unlocked(tx, p.markers.iter())?;
         for m in &p.markers {
             let t = marker_time(tx.stage(), m);
             set(tx, m, "time", Value::Time(t.saturating_add(p.delta)))?;
@@ -259,7 +285,37 @@ impl Command for DeleteMarkers {
             }
         }
         ensure_unlocked(tx.stage(), p.markers.iter())?;
+        ensure_markers_unlocked(tx, p.markers.iter())?;
         crate::layer::delete_prims(tx, &p.markers, Time::ZERO)
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+pub struct LockMarkers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LockMarkersParams {
+    /// Comps (their own markers) or layers.
+    pub owners: Vec<PrimPath>,
+    pub locked: bool,
+}
+
+impl Command for LockMarkers {
+    type Params = LockMarkersParams;
+    type Output = ();
+    const ID: &'static str = "marker.lock";
+    const TITLE: &'static str = "Lock Markers";
+    const DESCRIPTION: &'static str = "Lock or unlock the markers of comps or layers (AE: Layer > Markers > Lock Markers, the marker menu): locked markers cannot be moved, edited or deleted.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        for o in &p.owners {
+            check_owner(tx, o)?;
+        }
+        for o in &p.owners {
+            set(tx, o, "markers_locked", Value::Bool(p.locked))?;
+        }
+        Ok(())
     }
 }
 

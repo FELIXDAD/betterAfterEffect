@@ -32,6 +32,7 @@ mod context_menu;
 pub mod demo;
 pub mod dialogs;
 pub mod disk_frames;
+mod display_color;
 pub mod effects;
 mod expr;
 mod expr_menu;
@@ -264,6 +265,7 @@ impl AppModule for MotionUiModule {
                 .map(|d| d.config_file("recent-scripts.json")),
         );
         recent.publish(&menu, &owner);
+        recent.check_files();
         let script_actions: std::sync::Arc<dyn ActionHandler> =
             std::sync::Arc::new(scripts::ScriptActions {
                 recent: std::sync::Mutex::new(recent),
