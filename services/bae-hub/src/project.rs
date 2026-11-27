@@ -707,7 +707,10 @@ impl RelayThread {
     /// client is logged when it is skipped, and again only when a retry does
     /// not fit either (spec 2.4 step 3), with what helps
     /// ([`too_large_hint`]); so is another client's presence that does not
-    /// fit for it.
+    /// fit for it. A snapshot a client asked for (BAE clients do not; the
+    /// protocol allows it) that does not fit gets the same warning, though
+    /// the layer's updates still reach it and the snapshot is tried again
+    /// only after it reconnects.
     fn log_skipped(
         &self,
         errors: impl IntoIterator<Item = (PeerHandle, SyncError)>,
