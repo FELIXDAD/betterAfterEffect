@@ -50,7 +50,7 @@ const SNAPSHOT_EXT: &str = "loro";
 /// one of that client's files (a few round trips to the file server, which may
 /// be far away over a VPN), so `open` retries a held lock for this long before
 /// it reports [`SyncError::ClientIdInUse`].
-const LOCK_WAIT: Duration = Duration::from_secs(2);
+pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(2);
 const LOCK_RETRY: Duration = Duration::from_millis(50);
 /// `len: u32` + 8 checksum bytes.
 const RECORD_HEADER: usize = 12;

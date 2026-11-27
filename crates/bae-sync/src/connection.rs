@@ -1235,6 +1235,7 @@ impl Closing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dir::LOCK_WAIT;
     use crate::docs::{DocSet, MemDocs};
     use crate::protocol::Message;
     use crate::transport::MemoryTransport;
@@ -1373,8 +1374,9 @@ mod tests {
 
     /// Stop sharing a folder and share it again at once while the old link
     /// is still letting go (its I/O stuck on the NAS for longer than
-    /// [`CLIENT_ID_GRACE`]): the new connection waits for it instead of
-    /// reporting our own lock as another session's.
+    /// [`CLIENT_ID_GRACE`] and the lock wait of [`DirTransport::open`]): the
+    /// new connection waits for it instead of trying the lock, so no attempt
+    /// fails, and our own lock is never reported as another session's.
     #[test]
     fn sharing_again_waits_until_our_old_link_let_go() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1404,12 +1406,16 @@ mod tests {
         };
         let mut new = Connection::start(Target::Folder(dir), config);
         let mut docs = MemDocs::new();
-        let until = Instant::now() + CLIENT_ID_GRACE + Duration::from_millis(1500);
+        // An attempt that tried the lock would go offline once the lock wait
+        // ran out, and fail once the grace did: watch past both. The attempt
+        // waits for the old link before it tries the lock, so it is still
+        // connecting all along.
+        let until = Instant::now() + CLIENT_ID_GRACE.max(LOCK_WAIT) + Duration::from_millis(1500);
         while Instant::now() < until {
             new.pump(&mut docs);
             let status = new.status();
             assert!(
-                !matches!(status.state, ConnectionState::Failed { .. }),
+                matches!(status.state, ConnectionState::Connecting),
                 "{status:?}"
             );
             std::thread::sleep(Duration::from_millis(5));
