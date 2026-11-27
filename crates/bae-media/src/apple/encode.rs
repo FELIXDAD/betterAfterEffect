@@ -536,7 +536,9 @@ fn video_settings(settings: &EncodeSettings) -> Retained<NSDictionary<NSString, 
         let quality = settings
             .quality
             .map(|q| NSNumber::new_f32(q.clamp(0.0, 1.0)));
-        let keyframes = settings.keyframe_interval.map(NSNumber::new_u32);
+        let keyframes = settings
+            .effective_keyframe_interval()
+            .map(NSNumber::new_u32);
         let alpha_mode = if settings.alpha == AlphaMode::Premultiplied {
             kVTAlphaChannelMode_PremultipliedAlpha
         } else {
