@@ -244,11 +244,19 @@ impl Editing {
                 if let Some((_, b)) = self.text_box {
                     params["box_size"] = json!(b);
                 }
+                if let Some(info) = query::comp_info(stage, &self.comp) {
+                    crate::prefs::apply_layer_defaults(
+                        cx.resources,
+                        session,
+                        &info,
+                        bae_model::LayerKind::Text,
+                        &mut params,
+                    );
+                }
+                // The Character and Paragraph panels' settings for new text.
                 if let Some(d) = session.lock().text_defaults.clone() {
-                    params["font"] = json!(d.style.font);
-                    params["font_size"] = json!(d.style.font_size);
-                    params["fill_color"] = json!(d.style.fill_color);
-                    params["justification"] = json!(d.paragraph.justification);
+                    params["style"] = json!(d.style);
+                    params["paragraph"] = json!(d.paragraph);
                 }
                 cx.invoke_with("text.create", params);
                 if let Ok(path) = folder.child(&query::unique_child_name(stage, &folder, &name)) {
@@ -523,6 +531,27 @@ pub(super) fn frame(
             i.consume_key(egui::Modifiers::COMMAND, Key::Enter),
         )
     });
+    // Character panel menu ▸ Use Smart Quotes (on by default, as in AE):
+    // typed straight quotes become curly ones.
+    if !session.lock().straight_quotes && ui.memory(|m| m.has_focus(text_id())) {
+        let caret = egui::text_edit::TextEditState::load(ui.ctx(), text_id())
+            .and_then(|s| s.cursor.char_range())
+            .map_or_else(
+                || e.buffer.chars().count(),
+                |r| usize::from(r.primary.index.min(r.secondary.index)),
+            );
+        let mut prior = caret.checked_sub(1).and_then(|i| e.buffer.chars().nth(i));
+        ui.input_mut(|i| {
+            for event in &mut i.events {
+                if let egui::Event::Text(txt) = event {
+                    if txt == "\"" || txt == "'" {
+                        *txt = smart_quote(txt == "\"", prior).into();
+                    }
+                    prior = txt.chars().last().or(prior);
+                }
+            }
+        });
+    }
     let size = (e.font_size as f32 * e.scale(view)).max(4.0);
     let scale = e.scale(view);
     let template = e
@@ -663,5 +692,30 @@ mod replace_tests {
             (edits[0].range.clone(), edits[0].text.as_str()),
             (6..12, "")
         );
+    }
+}
+
+/// The curly quote for a typed straight one: opening after a space, an
+/// opening bracket or at the start, else closing.
+fn smart_quote(double: bool, prior: Option<char>) -> &'static str {
+    let opening = prior.is_none_or(|c| {
+        c.is_whitespace() || matches!(c, '(' | '[' | '{' | '\u{2014}' | '\u{201c}' | '\u{2018}')
+    });
+    match (double, opening) {
+        (true, true) => "\u{201c}",
+        (true, false) => "\u{201d}",
+        (false, true) => "\u{2018}",
+        (false, false) => "\u{2019}",
+    }
+}
+
+#[cfg(test)]
+mod smart_quote_tests {
+    #[test]
+    fn quotes_open_after_spaces_and_brackets_and_close_after_text() {
+        assert_eq!(super::smart_quote(true, None), "\u{201c}");
+        assert_eq!(super::smart_quote(true, Some('a')), "\u{201d}");
+        assert_eq!(super::smart_quote(false, Some('(')), "\u{2018}");
+        assert_eq!(super::smart_quote(false, Some('t')), "\u{2019}");
     }
 }

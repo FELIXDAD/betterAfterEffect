@@ -9,6 +9,8 @@ pub(crate) fn register(registry: &mut Registry) {
         [
             Kind::World,
             Kind::Systems,
+            Kind::Classic,
+            Kind::ClassicLe,
             Kind::Rain,
             Kind::Snow,
             Kind::Bubbles,

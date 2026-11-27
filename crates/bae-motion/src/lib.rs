@@ -70,6 +70,7 @@
 
 pub mod camera;
 pub mod comp;
+pub mod comp_from_items;
 pub mod content;
 pub mod dimensions;
 pub mod effect;
@@ -105,13 +106,13 @@ use bae_model::{CommandRegistry, DynCommand};
 
 pub use camera::{CameraSettings, LightSettings, SetCameraSettings, SetLightSettings};
 pub use comp::{
-    CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
+    CompOutput, CreateComp, CreateFolder, CropComp, ResizeAnchor, SetCompSettings, SetWorkArea,
     TrimCompToWorkArea,
 };
 pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
-pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
+pub use import::{ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind, ReplaceFile};
 pub use interpret::InterpretFootage;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
@@ -143,21 +144,26 @@ pub use time::{
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
+        r.register(paint::ExtendStroke),
         r.register(tracker::CreateTracker),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
         r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
+        r.register(CropComp),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(NewItem),
         r.register(photoshop::ImportPhotoshop),
         r.register(ReplaceFile),
         r.register(CreateLayer),
         r.register(Precompose),
+        r.register(precompose::ReplaceWithPrecomp),
         r.register(SetSolidSettings),
         r.register(SetCameraSettings),
         r.register(SetLightSettings),
@@ -201,6 +207,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InterpretFootage),
         r.register(AutoOrient),
         r.register(SetProjectSettings),
+        r.register(project_settings::SetMetadata),
         r.register(SetText),
         r.register(SetTextStyle),
         r.register(SetExpressions),

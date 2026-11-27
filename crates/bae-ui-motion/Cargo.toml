@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 bae-interop-psd.workspace = true
 bae-effects.workspace = true
 bae-app.workspace = true
@@ -31,6 +32,8 @@ bae-render = { workspace = true, default-features = false }
 # Probing files for File > Import (the app links bae-media through bae-render's
 # `media` feature already).
 bae-media.workspace = true
+# Same XML parser as bae-effects, for XMP sidecar fields on import.
+roxmltree = "0.21.2"
 # The installed font list of the Character panel (the app links bae-text already).
 bae-text.workspace = true
 egui.workspace = true

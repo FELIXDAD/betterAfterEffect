@@ -95,31 +95,11 @@ impl FileDialogs for Native {
 
     fn ask_unsaved(&mut self, name: &str) -> UnsavedChoice {
         let question = tr("Save changes to “{}” before closing?").replace("{}", name);
-        let dialog = self
-            .message(rfd::MessageLevel::Warning)
-            .set_title(question.as_str());
-        // macOS: custom buttons in the HIG order (Save is the default, Don't Save
-        // on the far side). Windows: a MessageBox's Yes / No / Cancel (custom
-        // labels would need comctl32 v6, which the executable does not declare).
         #[cfg(target_os = "macos")]
-        {
-            let (save, dont_save) = (tr("Save").to_owned(), tr("Don't Save").to_owned());
-            let result = dialog
-                .set_description(tr("If you don't save, your changes will be lost."))
-                .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-                    save.clone(),
-                    tr("Cancel").to_owned(),
-                    dont_save.clone(),
-                ))
-                .show();
-            match result {
-                rfd::MessageDialogResult::Custom(c) if c == save => UnsavedChoice::Save,
-                rfd::MessageDialogResult::Custom(c) if c == dont_save => UnsavedChoice::DontSave,
-                _ => UnsavedChoice::Cancel,
-            }
-        }
+        return super::mac_panels::confirm(self.parent.as_deref(), &question);
         #[cfg(windows)]
         {
+            let dialog = self.message(rfd::MessageLevel::Warning);
             let result = dialog
                 .set_title(bae_platform::APP_NAME)
                 .set_description(question.as_str())
@@ -263,6 +243,11 @@ impl NativePicker {
 }
 
 impl bae_ui::files::FilePicker for NativePicker {
+    #[cfg(target_os = "macos")]
+    fn import(&self, request: &bae_ui::files::OpenRequest) -> bae_ui::files::ImportSelection {
+        super::mac_panels::import(self.parent.as_deref(), &request.title)
+    }
+
     #[cfg(any(target_os = "macos", windows))]
     fn open(&self, request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
         let mut dialog = Native::new(self.parent.clone())

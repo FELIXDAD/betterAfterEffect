@@ -77,3 +77,62 @@ fn movie_has_decodable_audio_aligned_with_ntsc_frames() {
         );
     }
 }
+
+/// #793: ProRes with uncompressed audio longer than the writer's interleave
+/// window. The movie writer takes a frame only once audio past it is in; the
+/// export hands audio over ahead of the video and says when it ends.
+#[cfg(target_os = "macos")]
+#[test]
+fn prores_with_pcm_audio_finishes_past_the_interleave_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("long.mov");
+    let rate = FrameRate::FPS_24;
+    let codec = VideoCodec::ProRes(bae_media::export::ProResProfile::Standard);
+    let mut settings = EncodeSettings::new(&path, codec, 160, 96, rate);
+    settings.audio = Some(AudioEncodeSettings {
+        codec: "pcm_s24le".into(),
+        ..AudioEncodeSettings::aac_stereo()
+    });
+    let frames = 72;
+    let lead = 24;
+    let (done, result) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut writer = MediaEncoders::builtin().create(&settings).unwrap();
+        let frame = CpuFrame {
+            width: 160,
+            height: 96,
+            format: PixelFormat::Bgra8,
+            data: [32, 32, 32, 255].repeat(160 * 96),
+            pixel_aspect: settings.pixel_aspect,
+            alpha: AlphaMode::Opaque,
+            color: ColorInfo::default(),
+        };
+        let audio = |f: i64| {
+            let start = time_to_sample(rate.frame_to_time(f), 48000);
+            let end = time_to_sample(rate.frame_to_time(f + 1), 48000);
+            AudioBuffer {
+                sample_rate: 48000,
+                channels: 2,
+                samples: vec![0.25; ((end - start) * 2) as usize],
+            }
+        };
+        let mut next = 0;
+        for f in 0..frames {
+            while next < (f + lead).min(frames) {
+                writer.push_audio(&audio(next)).unwrap();
+                next += 1;
+                if next == frames {
+                    writer.end_audio().unwrap();
+                }
+            }
+            writer.push_frame(&frame).unwrap();
+        }
+        let _ = done.send(writer.finish().unwrap().frames);
+    });
+    let written = result
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the movie writer stalled");
+    assert_eq!(written, frames as u64);
+    let pcm = FileAudio::open(&path).unwrap().read(0, 200_000).unwrap();
+    assert!(pcm.frames().abs_diff(144_000) <= 2048, "{}", pcm.frames());
+}

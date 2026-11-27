@@ -18,7 +18,19 @@ const CUSTOM_PREFIX: &str = "user:";
 pub(super) struct Dialogs {
     pub edit_open: bool,
     pub role_picker: bool,
-    new_title: String,
+    new_title: Option<String>,
+    focus_name: bool,
+}
+
+impl Dialogs {
+    pub(super) fn naming_workspace(&self) -> bool {
+        self.new_title.is_some()
+    }
+
+    pub(super) fn start_naming(&mut self) {
+        self.new_title = Some(String::new());
+        self.focus_name = true;
+    }
 }
 
 impl Workbench {
@@ -87,8 +99,29 @@ impl Workbench {
             },
         );
         self.rebuild_workspaces();
+        self.register_workspace_menu(&id, title);
         self.switch_workspace(&id);
         Some(id)
+    }
+
+    pub(super) fn register_workspace_menu(&self, id: &str, title: &str) {
+        use crate::menu::{MenuItemSpec, MenuPos};
+        let workspace = id.to_owned();
+        let item = MenuItemSpec::new(
+            &["Window", "Workspace"],
+            title,
+            crate::action::ids::SWITCH_WORKSPACE,
+        )
+        .params(serde_json::json!({"id":id}))
+        .at(vec![MenuPos::new(0, 1), MenuPos::new(0, 0).sorted()])
+        .checked_when(move |cx| cx.workspace == workspace);
+        self.menus
+            .replace(
+                bae_app::Owner::Core,
+                format!("menu.window.workspace.{id}"),
+                Arc::new(item),
+            )
+            .expect("valid custom workspace menu id");
     }
 
     /// Delete a user-created workspace (not the active one).
@@ -96,12 +129,21 @@ impl Workbench {
         if id == self.active || self.state.custom.remove(id).is_none() {
             return false;
         }
+        self.menus
+            .unregister(&format!("menu.window.workspace.{id}"));
         for map in [&mut self.state.current, &mut self.state.saved] {
             map.remove(id);
         }
         self.state.order.retain(|o| o != id);
         self.state.hidden.retain(|o| o != id);
+        for overrides in self.state.keymaps.values_mut() {
+            overrides.add.retain(|b| {
+                b.action != crate::action::ids::SWITCH_WORKSPACE
+                    || b.params["id"].as_str() != Some(id)
+            });
+        }
         self.rebuild_workspaces();
+        self.rebuild_keymap();
         true
     }
 
@@ -139,6 +181,35 @@ impl Workbench {
                 .default_width(380.0)
                 .show(ctx, |ui| self.edit_workspaces_ui(ui));
             self.dialogs.edit_open &= open;
+        }
+        if let Some(title) = self.dialogs.new_title.as_mut() {
+            let mut save = false;
+            let mut cancel = false;
+            let modal = egui::Modal::new(egui::Id::new("new-workspace")).show(ctx, |ui| {
+                ui.set_min_width(280.0);
+                ui.heading(tr("New Workspace"));
+                let label = ui.label(tr("Name"));
+                let edit = ui.text_edit_singleline(title).labelled_by(label.id);
+                if std::mem::take(&mut self.dialogs.focus_name) {
+                    edit.request_focus();
+                }
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.horizontal(|ui| {
+                    cancel = ui.button(tr("Cancel")).clicked();
+                    save = (ui
+                        .add_enabled(!title.trim().is_empty(), egui::Button::new(tr("OK")))
+                        .clicked()
+                        || enter)
+                        && !title.trim().is_empty();
+                });
+            });
+            if save {
+                let title = self.dialogs.new_title.take().unwrap();
+                self.save_as_new_workspace(&title);
+                self.save_requested = true;
+            } else if cancel || modal.should_close() {
+                self.dialogs.new_title = None;
+            }
         }
     }
 
@@ -246,31 +317,8 @@ impl Workbench {
                 }
             });
         ui.separator();
-        ui.horizontal(|ui| {
-            ui.label(tr("New Workspace"));
-            let edit = ui.add(
-                egui::TextEdit::singleline(&mut self.dialogs.new_title)
-                    .desired_width(160.0)
-                    .hint_text(tr("Name")),
-            );
-            let submit = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let can_save = !self.dialogs.new_title.trim().is_empty();
-            if (ui
-                .add_enabled(can_save, egui::Button::new(tr("Save")))
-                .clicked()
-                || submit)
-                && can_save
-            {
-                let title = std::mem::take(&mut self.dialogs.new_title);
-                self.save_as_new_workspace(&title);
-            }
-        });
-        ui.label(
-            RichText::new(tr(
-                "Saves the current layout and shortcuts as a new workspace.",
-            ))
-            .size(10.5)
-            .color(color::TEXT_DIM),
-        );
+        if ui.button(tr("Save as New Workspace...")).clicked() {
+            self.dialogs.start_naming();
+        }
     }
 }
