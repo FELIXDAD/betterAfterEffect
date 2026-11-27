@@ -32,6 +32,8 @@ pub(crate) mod ids {
 
     /// `{"views": 1 | 2 | 4}`: View ▸ Switch View Layout.
     pub const LAYOUT: &str = "motion.view.view_layout";
+    /// View ▸ Switch View Layout ▸ Share View Options (a toggle).
+    pub const SHARE: &str = "motion.view.share_view_options";
 }
 
 /// `(action id, English title)` for the action registry.
@@ -43,6 +45,7 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     (ids::RESET, "Reset 3D View"),
     (ids::CREATE_CAMERA, "Create Camera from 3D View"),
     (ids::LAYOUT, "Switch View Layout"),
+    (ids::SHARE, "Share View Options"),
 ];
 
 /// The 3D view shortcut commands, named as in AE's Keyboard Shortcuts.
@@ -225,6 +228,9 @@ pub struct Views {
     /// the active view is at `active`.
     others: Vec<View3d>,
     active: usize,
+    /// Share View Options off: each view's own View menu toggles, by position
+    /// in the layout (the active view's are the session's while it is active).
+    own: Option<Vec<super::guides::ViewOptions>>,
 }
 
 impl Views {
@@ -235,8 +241,11 @@ impl Views {
 
     /// 1, 2 or 4 views. The active view keeps its 3D view and comes last;
     /// the others start as AE's (Top; Top, Front, Right, 待核).
-    pub fn set_layout(&mut self, n: usize) {
+    pub fn set_layout(&mut self, n: usize, current: super::guides::ViewOptions) {
         use OrthoView::*;
+        if self.own.is_some() {
+            self.own = Some(vec![current; n.max(1)]);
+        }
         let others: &[View3d] = match n {
             2 => &[View3d::Ortho(Top)],
             4 => &[
@@ -262,11 +271,36 @@ impl Views {
         self.active
     }
 
-    /// Make view `i` of the layout the active one (a click in it).
-    pub fn activate(&mut self, i: usize) {
+    /// Whether the views share their View menu toggles (AE's Share View
+    /// Options; on until turned off, 待核).
+    pub fn shares(&self) -> bool {
+        self.own.is_none()
+    }
+
+    /// Share View Options on or off; `current` is the active view's toggles.
+    pub fn set_share(&mut self, share: bool, current: super::guides::ViewOptions) {
+        self.own = (!share).then(|| vec![current; self.layout()]);
+    }
+
+    /// View `i`'s own toggles when the views do not share them.
+    pub fn options_of(&self, i: usize) -> Option<super::guides::ViewOptions> {
+        self.own.as_ref().and_then(|own| own.get(i).copied())
+    }
+
+    /// Make view `i` of the layout the active one (a click in it); with
+    /// unshared view options, `options` (the session's) becomes view `i`'s.
+    pub fn activate(&mut self, i: usize, options: &mut super::guides::ViewOptions) {
         let mut panes = self.panes();
         if i >= panes.len() || i == self.active {
             return;
+        }
+        let active = self.active;
+        if let Some(own) = self.own.as_mut()
+            && i < own.len()
+            && active < own.len()
+        {
+            own[active] = *options;
+            *options = own[i];
         }
         self.current = panes.remove(i);
         self.others = panes;
@@ -347,6 +381,13 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         return true;
     }
     let shortcuts = s.view_shortcuts;
+    let current = s.view_options;
+    if inv.id == ids::SHARE {
+        let views = s.views3d.entry(comp.clone()).or_default();
+        let share = !views.shares();
+        views.set_share(share, current);
+        return true;
+    }
     let views = s.views3d.entry(comp.clone()).or_default();
     match inv.id.as_str() {
         ids::SWITCH => {
@@ -404,7 +445,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
                 .get("views")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(1);
-            views.set_layout(n as usize);
+            views.set_layout(n as usize, current);
         }
         _ => {}
     }
@@ -415,6 +456,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
 /// view other than Active Camera.
 pub(crate) fn can_create_camera(resources: &bae_app::Resources) -> bool {
     common::session(resources).lock().active_comp.is_some() && current(resources) != View3d::Active
+}
+
+/// Whether the active comp's views share their view options (menu check).
+pub(crate) fn shares_options(resources: &bae_app::Resources) -> bool {
+    let session = common::session(resources);
+    let s = session.lock();
+    s.active_comp
+        .as_ref()
+        .and_then(|c| s.views3d.get(c))
+        .is_none_or(Views::shares)
 }
 
 /// The active comp's view layout: 1, 2 or 4 views.

@@ -371,3 +371,39 @@ fn view_layouts_show_more_views_and_a_click_makes_one_active() {
     tool_action(&h, ids::LAYOUT, json!({"views": 1}));
     assert_eq!(panes(&h), (vec![View3d::Custom(2)], 0));
 }
+
+/// Share View Options (on by default): off, each view of the layout keeps its
+/// own View menu toggles; a click on a view brings its own back.
+#[test]
+fn unshared_views_keep_their_own_view_options() {
+    use crate::viewer::view3d::ids;
+    let mut h = H::new();
+    h.frame(Vec::new(), Modifiers::NONE);
+    tool_action(&h, ids::LAYOUT, json!({"views": 2}));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(crate::viewer::view3d::shares_options(&h.resources));
+    tool_action(&h, ids::SHARE, json!({}));
+    assert!(!crate::viewer::view3d::shares_options(&h.resources));
+    // Show Grid in the active (right) view only.
+    tool_action(&h, "motion.view.show_grid", json!({}));
+    assert!(h.session().lock().view_options.grid);
+    // A click in the left view: its own options, no grid.
+    let left = Pos2::new(300.0, 400.0);
+    h.move_to(left, Modifiers::NONE, Vec::new());
+    h.pointer_button(left, true, Modifiers::NONE);
+    h.pointer_button(left, false, Modifiers::NONE);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let comp = h.comp.clone();
+    assert_eq!(h.session().lock().views3d[&comp].active(), 0);
+    assert!(!h.session().lock().view_options.grid, "the left view's own");
+    // Back to the right view: its grid again.
+    let right = Pos2::new(980.0, 400.0);
+    h.move_to(right, Modifiers::NONE, Vec::new());
+    h.pointer_button(right, true, Modifiers::NONE);
+    h.pointer_button(right, false, Modifiers::NONE);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(h.session().lock().view_options.grid);
+    // Sharing again: one set for all views.
+    tool_action(&h, ids::SHARE, json!({}));
+    assert!(crate::viewer::view3d::shares_options(&h.resources));
+}

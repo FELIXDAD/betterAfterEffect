@@ -490,6 +490,9 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         }
         crate::path_menu::GROUP => spec.enabled_when(crate::path_menu::can_group),
         crate::path_menu::UNGROUP => spec.enabled_when(crate::path_menu::can_ungroup),
+        crate::viewer::view3d::ids::SHARE => {
+            spec.checked_when(|cx| crate::viewer::view3d::shares_options(cx.resources))
+        }
         crate::viewer::view3d::ids::LAYOUT => {
             let n = item
                 .params
