@@ -1,7 +1,7 @@
 //! Panel and dialog interactions through the real workbench.
 
 use super::*;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 /// Enter commits the active number. Tab commits and selects the next number.
 #[test]
@@ -75,4 +75,59 @@ fn builtin_preset_applies_keys_and_effect_controls_edit_the_instance() {
     assert_eq!(effects(&h).len(), 2);
     key(&mut h, Modifiers::COMMAND, Key::Z);
     assert_eq!(effects(&h), vec![effect]);
+}
+
+/// Effects & Presets: a click selects an effect (highlighted), Down moves the
+/// selection, a double-click applies it to the selected layer in one undo
+/// step (AE).
+#[test]
+fn effects_panel_selects_and_applies_on_double_click() {
+    let mut h = gui_with(Gui::with_app(crate::app_builder().build()));
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let layer = h.state().layers()[0].clone();
+    h.state_mut().invoke(Invocation::with_params(
+        bae_ui::action::ids::OPEN_PANEL,
+        serde_json::json!({"id":"effects"}),
+    ));
+    settle(&mut h);
+    let category = find_text(&h, "Blur & Sharpen").expect("category");
+    click_at(
+        &mut h,
+        egui::pos2(category.left() - 9.0, category.center().y),
+    );
+    let toggled = |h: &Ui| -> Vec<String> {
+        h.query_all_by(|n| {
+            n.role() == egui::accesskit::Role::Button
+                && n.toggled() == Some(egui::accesskit::Toggled::True)
+        })
+        .filter_map(|n| n.accesskit_node().label())
+        .collect()
+    };
+    // The highlighted rows: what is on now and was not before a row was picked.
+    let before = toggled(&h);
+    let selected = |h: &Ui| -> Vec<String> {
+        toggled(h)
+            .into_iter()
+            .filter(|l| !before.contains(l))
+            .collect()
+    };
+    let blur = h.get_by_label("Gaussian Blur").rect();
+    click_at(&mut h, blur.center());
+    assert_eq!(selected(&h), ["Gaussian Blur"]);
+    let position = |h: &Ui| {
+        h.state()
+            .stage()
+            .prim(&layer)
+            .and_then(|p| p.attr("transform:position").cloned())
+    };
+    let at = position(&h);
+    key(&mut h, Modifiers::NONE, Key::ArrowDown);
+    let next = selected(&h);
+    assert!(next.len() == 1 && next[0] != "Gaussian Blur", "{next:?}");
+    assert_eq!(position(&h), at, "Down moved the selection, not the layer");
+    double_click_at(&mut h, blur.center());
+    let effects = |h: &Ui| bae_motion::effect::effects_of(h.state().stage(), &layer);
+    assert_eq!(effects(&h).len(), 1);
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert!(effects(&h).is_empty(), "one undo step");
 }

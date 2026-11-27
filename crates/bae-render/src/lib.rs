@@ -37,6 +37,7 @@ mod assets;
 pub mod blend;
 pub mod cache;
 pub mod camera;
+mod display_color;
 pub mod effect;
 mod error;
 pub mod eval;

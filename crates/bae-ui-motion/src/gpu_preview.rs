@@ -90,6 +90,8 @@ pub(super) struct RenderEngine {
         bae_model::PrimPath,
         Vec<(bae_model::PrimPath, std::time::Duration)>,
     )>,
+    /// The display transform set on the renderer (its key).
+    color: u64,
 }
 
 impl RenderEngine {
@@ -105,6 +107,7 @@ impl RenderEngine {
             ),
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
             layer_times: None,
+            color: 0,
         }
     }
 
@@ -142,6 +145,13 @@ impl RenderEngine {
         roi: Option<IRect>,
         reuse: Option<OutputTarget>,
     ) -> Result<(OutputTarget, Option<bae_render::GpuImage>, bool), bae_render::RenderError> {
+        // Display colour management (View ▸ Use Display Color Management,
+        // Simulate Output): the viewers' current transform.
+        let (color, transform) = crate::display_color::current();
+        if color != self.color {
+            self.renderer.set_display_transform(transform.as_deref());
+            self.color = color;
+        }
         let request = RenderRequest {
             resolution: match resolution {
                 0 | 1 => Resolution::Full,
@@ -237,6 +247,8 @@ pub(crate) struct GpuPreview {
     pub roi: Option<IRect>,
     /// The display and region of the published frame.
     last_view: Option<(bae_render::Display, Option<IRect>)>,
+    /// The display transform of the published frame (its key).
+    color: u64,
     /// Snapshots 1–4 (AE's Take Snapshot): a published frame.
     snapshots: [Option<(wgpu::Texture, IRect, Option<Hold>)>; 4],
     /// The registry shows `target`'s view (not a snapshot).
@@ -309,6 +321,7 @@ impl GpuPreview {
             display: bae_render::Display::default(),
             roi: None,
             last_view: None,
+            color: 0,
             snapshots: Default::default(),
             target_shown: false,
             cached: None,
@@ -467,6 +480,12 @@ impl GpuPreview {
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
             });
+        }
+        // Another display transform redraws the frame.
+        let color = crate::display_color::current().0;
+        if color != self.color {
+            self.color = color;
+            self.last = None;
         }
         let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         let view = (self.display, self.roi);
