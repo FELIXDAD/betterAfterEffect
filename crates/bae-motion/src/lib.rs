@@ -136,7 +136,9 @@ pub use layer::{
     SetLayerAttr, SetParent, ShapePreset, ShiftLayers, SlipLayers, SplitLayers, TrimLayers,
     copy_layers,
 };
-pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
+pub use markers::{
+    AddMarker, DeleteMarkers, EditMarker, LockMarkers, MarkerFields, MarkerOutput, MoveMarkers,
+};
 pub use matte::SetTrackMatte;
 pub use orient::AutoOrient;
 pub use path::{DeleteVertex, EditWhole, InsertVertex, SetVertices};
@@ -220,6 +222,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(EditMarker),
         r.register(MoveMarkers),
         r.register(DeleteMarkers),
+        r.register(LockMarkers),
         r.register(AddShape),
         r.register(AddShapeItem),
         r.register(CreateMask),

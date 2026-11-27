@@ -147,6 +147,13 @@ pub mod ids {
     pub const ADD_MARKER_DIALOG: &str = "motion.timeline.add_marker_with_dialog";
     /// Layer > Markers > Delete All Markers (of the selected layers).
     pub const DELETE_ALL_MARKERS: &str = "motion.layer.delete_all_markers";
+    /// Layer > Markers > Lock Markers (of the selected layers, a toggle).
+    pub const LOCK_MARKERS: &str = "motion.layer.lock_markers";
+    /// Composition > Responsive Design — Time: a protected-region comp marker
+    /// from the comp start to the CTI, from the CTI to the end, over the work area.
+    pub const CREATE_INTRO: &str = "motion.comp.create_intro";
+    pub const CREATE_OUTRO: &str = "motion.comp.create_outro";
+    pub const PROTECT_WORK_AREA: &str = "motion.comp.create_protected_region_from_work_area";
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
@@ -572,6 +579,13 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::GO_TO_COMP_MARKER, "Go to Composition Marker"),
     (ids::ADD_MARKER_DIALOG, "Add Marker with Dialog"),
     (ids::DELETE_ALL_MARKERS, "Delete All Markers"),
+    (ids::LOCK_MARKERS, "Lock Markers"),
+    (ids::CREATE_INTRO, "Create Intro"),
+    (ids::CREATE_OUTRO, "Create Outro"),
+    (
+        ids::PROTECT_WORK_AREA,
+        "Create Protected Region from Work Area",
+    ),
     // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
     // so the Keyboard Shortcuts window shows a name, not the id (#136).
     ("timeline.zoom_in", "Zoom In Time"),
@@ -2657,9 +2671,29 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 ),
             )));
         }
+        ids::LOCK_MARKERS if !layers.is_empty() => {
+            let all = layers
+                .iter()
+                .all(|l| bae_motion::markers::markers_locked(stage, l));
+            cx.invoke_with("marker.lock", json!({"owners": layers, "locked": !all}));
+        }
+        ids::CREATE_INTRO | ids::CREATE_OUTRO | ids::PROTECT_WORK_AREA => {
+            let (start, end) = match id {
+                ids::CREATE_INTRO => (Time::ZERO, now),
+                ids::CREATE_OUTRO => (now, info.duration),
+                _ => (info.work_area.start, info.work_area.end),
+            };
+            if end > start && !bae_motion::markers::markers_locked(stage, &info.path) {
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owner": info.path, "time": start, "duration": end - start, "protected_region": true}),
+                );
+            }
+        }
         ids::DELETE_ALL_MARKERS if !layers.is_empty() => {
             let all: Vec<PrimPath> = layers
                 .iter()
+                .filter(|l| !bae_motion::markers::markers_locked(stage, l))
                 .flat_map(|l| bae_motion::markers::markers_of(stage, l))
                 .map(|(p, _)| p)
                 .collect();

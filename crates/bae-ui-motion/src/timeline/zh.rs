@@ -22,6 +22,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Exponential Scale", "指数比例"),
+    ("Create Intro", "创建开场"),
+    ("Create Outro", "创建结尾"),
+    (
+        "Create Protected Region from Work Area",
+        "通过工作区域创建受保护区域",
+    ),
     ("Composition Flowchart", "合成流程图"),
     ("Reveal Composition in Project", "在项目中显示合成"),
     ("Zoom In to Frames", "放大到帧间隔"),
