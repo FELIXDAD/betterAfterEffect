@@ -658,6 +658,19 @@ pub(crate) fn set_proxy_file(cx: &mut PanelContext<'_>, session: &SharedSession)
     }
 }
 
+/// `file` (probed as for import) becomes `item`'s proxy and is used (the
+/// Render Queue's Post-Render Action ▸ Set Proxy).
+pub(crate) fn set_proxy_to(cx: &mut PanelContext<'_>, item: &PrimPath, file: &std::path::Path) {
+    let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    if let Some(file) = probe(&[file.to_owned()], &defaults)
+        .files
+        .into_iter()
+        .next()
+    {
+        cx.invoke_with("item.set_proxy", json!({"items": [item], "file": file}));
+    }
+}
+
 /// File > Replace Footage > File… (Cmd/Ctrl+H): the item takes another file.
 pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
     let Some(item) = replace_target(cx, session) else {

@@ -1483,6 +1483,62 @@ fn render_button_activates_with_space_and_enter() {
     }
 }
 
+/// File ▸ Create Proxy ▸ Movie…: the comp queued at half resolution as a PNG
+/// sequence with alpha over the whole comp; once rendered, the Render Queue
+/// makes it the comp's proxy (Post-Render Action ▸ Set Proxy).
+#[test]
+fn create_proxy_queues_a_draft_png_and_sets_it_when_rendered() {
+    let mut h = Harness::new();
+    let queue = crate::render_queue::SharedRenderQueue::default();
+    h.resources.insert(queue.clone());
+    let (comp, _, _) = h.comp_with_layers();
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let id = queue
+        .lock()
+        .add_proxy(&info, &dir.path().join("p.png"), None);
+    {
+        let q = queue.lock();
+        let item = q.items().iter().find(|i| i.id == id).unwrap();
+        assert_eq!(item.resolution, crate::render_queue::QueueResolution::Half);
+        assert_eq!(item.proxy_use, bae_render::ProxyUse::Current);
+        assert!(
+            item.outputs[0].output.ends_with("p_[####].png"),
+            "{}",
+            item.outputs[0].output
+        );
+        assert_eq!(
+            item.outputs[0].channels,
+            crate::render_queue::Channels::RgbAlpha
+        );
+        assert_eq!((item.start, item.end), (0, info.frame_count() - 1));
+    }
+    let file = dir.path().join("p_0000.png");
+    // A 1×1 PNG.
+    const PNG: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 96, 0, 0, 0, 6, 0,
+        2, 48, 129, 208, 47, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    std::fs::write(&file, PNG).unwrap();
+    queue.lock().item_mut(id).unwrap().status = crate::render_queue::ItemStatus::Done {
+        files: 1,
+        first: file,
+        seconds: 0.1,
+    };
+    let mut panel = crate::RenderQueuePanel::default();
+    let r = h.frame("render_queue", &mut panel, Vec::new());
+    let set = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "item.set_proxy")
+        .expect("Set Proxy after rendering");
+    assert_eq!(set.params["items"], json!([comp]));
+    // Once only.
+    let r = h.frame("render_queue", &mut panel, Vec::new());
+    assert!(r.invocations.iter().all(|i| i.id != "item.set_proxy"));
+}
+
 /// The 5090 keyboard run: Enter on a focused button (Render Queue ▸ Stop) is
 /// that button's; the Project panel holding the dock focus must not also start
 /// renaming its selected item. Without a focused widget, Enter renames (AE).

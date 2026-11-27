@@ -375,6 +375,9 @@ pub struct QueueItem {
     pub(crate) resolution: QueueResolution,
     /// Render Settings ▸ Proxy Use (Best Settings: none).
     pub(crate) proxy_use: ProxyUse,
+    /// Post-Render Action ▸ Set Proxy (File ▸ Create Proxy): once rendered,
+    /// the output becomes this item's proxy.
+    pub(crate) set_proxy: Option<PrimPath>,
     /// Current state.
     pub status: ItemStatus,
     /// The Render column's check box: unchecked items stay in the queue but
@@ -574,6 +577,7 @@ impl RenderQueue {
             end,
             resolution: QueueResolution::Full,
             proxy_use: ProxyUse::None,
+            set_proxy: None,
             status: ItemStatus::Queued,
             render: true,
             comment: String::new(),
@@ -612,6 +616,41 @@ impl RenderQueue {
             item.outputs[0].naming.pattern = None;
             item.start = f;
             item.end = f;
+        }
+        id
+    }
+
+    /// File ▸ Create Proxy ▸ Still… / Movie…: `comp` at Draft Settings (half
+    /// resolution, Current Settings proxies) into `output`, lossless with alpha (PNG; a numbered
+    /// sequence for a movie, the whole comp); once rendered it becomes the
+    /// comp's proxy (AE's Post-Render Action: Set Proxy). `still`: the frame.
+    pub(crate) fn add_proxy(&mut self, comp: &CompInfo, output: &Path, still: Option<i64>) -> u64 {
+        let dir = output.parent().unwrap_or(Path::new(""));
+        let id = match still {
+            Some(frame) => self.add_frame(comp, dir, frame),
+            None => self.add_with_format(comp, dir, ExportFormat::Png),
+        };
+        let output = match still {
+            Some(_) => output.to_owned(),
+            None if output.to_string_lossy().contains("[#") => output.to_owned(),
+            None => {
+                let stem = output.file_stem().unwrap_or_default().to_string_lossy();
+                output.with_file_name(format!("{stem}_[####].png"))
+            }
+        };
+        if let Some(item) = self.item_mut(id) {
+            if still.is_none() {
+                item.start = 0;
+                item.end = (comp.frame_count() - 1).max(0);
+            }
+            // Draft Settings: half resolution, Current Settings proxies.
+            item.resolution = QueueResolution::Half;
+            item.proxy_use = ProxyUse::Current;
+            item.set_proxy = Some(comp.path.clone());
+            let module = &mut item.outputs[0];
+            module.output = output.to_string_lossy().into_owned();
+            module.naming.pattern = None;
+            module.channels = Channels::RgbAlpha;
         }
         id
     }
@@ -1368,6 +1407,47 @@ const COLUMNS: &[Column] = &[
     Column::new("Estimated Time", 100.0, false, false),
 ];
 
+/// File ▸ Create Proxy ▸ Still… / Movie…: asks where (a PNG), queues the
+/// selected comp (or the active one) to render its proxy and shows the Render
+/// Queue. A still is the comp's current frame.
+pub(crate) fn create_proxy(cx: &mut PanelContext<'_>, session: &crate::SharedSession, still: bool) {
+    let comp = {
+        let s = session.lock();
+        s.selected_items
+            .iter()
+            .find(|p| {
+                cx.stage
+                    .prim(p)
+                    .is_some_and(|v| v.is_a(&bae_model::PrimType::COMP))
+            })
+            .cloned()
+            .or_else(|| s.active_comp.clone())
+    };
+    let Some(info) = comp.and_then(|c| bae_motion::query::comp_info(cx.stage, &c)) else {
+        return;
+    };
+    let name = sanitize(&info.name);
+    let request = bae_ui::files::SaveRequest {
+        title: tr("Create Proxy").to_owned(),
+        filters: vec![(tr("PNG Sequence").to_owned(), vec!["png".to_owned()])],
+        directory: Some(default_output_dir().join(&name)),
+        file_name: format!("{name}_Proxy.png"),
+    };
+    let Some(path) = cx
+        .resources
+        .get::<bae_ui::files::SharedFilePicker>()
+        .and_then(|picker| picker.0.save(&request))
+    else {
+        return;
+    };
+    let frame = still.then(|| {
+        let t = session.lock().time(&info.path);
+        info.frame_rate.time_to_frame(t)
+    });
+    shared(cx.resources).lock().add_proxy(&info, &path, frame);
+    cx.open_panel("render_queue");
+}
+
 /// The Render Queue panel.
 #[derive(Debug, Default)]
 pub struct RenderQueuePanel {
@@ -1499,6 +1579,19 @@ impl RenderQueuePanel {
             q.repaint = Some(ui.ctx().clone());
             (q.running, q.queued())
         };
+        // Post-Render Action ▸ Set Proxy (File ▸ Create Proxy).
+        let proxies: Vec<(PrimPath, PathBuf)> = queue
+            .lock()
+            .items
+            .iter_mut()
+            .filter_map(|i| match &i.status {
+                ItemStatus::Done { first, .. } => i.set_proxy.take().map(|c| (c, first.clone())),
+                _ => None,
+            })
+            .collect();
+        for (item, file) in proxies {
+            crate::import::set_proxy_to(cx, &item, &file);
+        }
         let store = cx.resources.get::<Arc<Store>>();
         let library = store.and_then(|s| s.snapshot());
         if let (Some(editor), Some(store)) = (&mut self.file_editor, store)
