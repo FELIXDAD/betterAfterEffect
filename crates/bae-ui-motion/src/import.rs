@@ -313,15 +313,7 @@ pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
             .resources
             .get::<crate::SharedSession>()
             .and_then(|s| s.lock().active_comp.clone());
-        import_into(
-            cx,
-            &paths,
-            None,
-            comp,
-            SequenceMode::Sequence,
-            false,
-            Default::default(),
-        );
+        drop_paths(cx, &paths, None, comp);
     }
 }
 
@@ -337,6 +329,25 @@ pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent:
         false,
         Default::default(),
     );
+}
+
+pub(crate) fn drop_paths(
+    cx: &mut PanelContext<'_>,
+    paths: &[PathBuf],
+    parent: Option<PrimPath>,
+    comp: Option<PrimPath>,
+) {
+    use bae_motion::photoshop::ImportKind;
+    let kind = if paths.len() > 1 {
+        match crate::prefs::current(cx.resources).str("import.drag_import_multiple_items_as") {
+            "composition" => ImportKind::Composition,
+            "composition_retain_layer_sizes" => ImportKind::RetainSize,
+            _ => ImportKind::Footage,
+        }
+    } else {
+        ImportKind::Footage
+    };
+    import_into(cx, paths, parent, comp, SequenceMode::Sequence, false, kind);
 }
 
 fn import_into(
@@ -376,6 +387,7 @@ fn import_into(
         }
         if let Some(c) = comp {
             params["comp"] = json!(c);
+            params["precompose"] = json!(photoshop_kind != bae_model::psd::ImportKind::Footage);
         }
         cx.invoke_with("item.import", params);
     }

@@ -55,6 +55,9 @@ pub struct ImportParams {
     /// Timeline panel (AE), in the same undo step.
     #[serde(default)]
     pub comp: Option<PrimPath>,
+    /// Put multiple dropped footage layers into one nested composition.
+    #[serde(default)]
+    pub precompose: bool,
     /// Create a composition matching the first imported source.
     #[serde(default)]
     pub create_comp: bool,
@@ -215,6 +218,19 @@ impl Command for ImportItems {
                     LayerKind::Footage
                 };
                 layers.insert(0, add_imported_layer(tx, &comp, kind, &item)?);
+            }
+            if p.precompose && layers.len() > 1 {
+                let result = crate::precompose::Precompose.run(
+                    tx,
+                    crate::precompose::PrecomposeParams {
+                        layers,
+                        name: None,
+                        mode: Default::default(),
+                        adjust_duration: false,
+                        time: None,
+                    },
+                )?;
+                layers = vec![result.layer];
             }
         }
         Ok(ImportOutput { items, layers })

@@ -882,7 +882,11 @@ impl Shell {
             return None;
         }
         let prefs = self.prefs.current();
-        match self.autosave.tick(Instant::now(), &prefs, &self.document) {
+        let queue = self.app.resource::<bae_ui_motion::SharedRenderQueue>();
+        match self
+            .autosave
+            .tick(Instant::now(), &prefs, &self.document, queue)
+        {
             Some(Ok(path)) => tracing::info!("auto-saved {}", path.display()),
             Some(Err(error)) => tracing::warn!("auto-save failed: {error:#}"),
             None => {}
