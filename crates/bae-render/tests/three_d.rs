@@ -1087,3 +1087,56 @@ fn transparency_shows_what_is_behind() {
     let tilted = render(&mut r, &scene(50.0, 100.0, 60.0)).px(100, 100);
     assert!(tilted[0] > half[0] + 20, "{tilted:?} vs {half:?}");
 }
+
+/// Advanced 3D reflections: a 3D layer with Reflection Intensity reflects
+/// the picture of an environment light that reaches it.
+#[test]
+fn layers_reflect_the_environment_picture() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    use bae_render::light::{EnvironmentSource, Falloff, Light, LightKind};
+    let scene = |intensity: f32| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut plane = solid_3d(
+            "plane",
+            [1.0; 4],
+            [200, 200],
+            DVec3::new(100.0, 100.0, 0.0),
+            DVec3::ZERO,
+        );
+        plane.material.reflection_intensity = intensity;
+        let mut picture = solid("picture", RED, [400, 200]);
+        picture.visible = false;
+        comp.layers = vec![plane, picture];
+        comp.lights = vec![Light {
+            kind: LightKind::Environment,
+            world: DMat4::IDENTITY,
+            point_of_interest: DVec3::ZERO,
+            color: [1.0, 1.0, 1.0],
+            intensity: 100.0,
+            cone_angle: 90.0,
+            cone_feather: 50.0,
+            falloff: Falloff::None,
+            radius: 500.0,
+            falloff_distance: 500.0,
+            casts_shadows: false,
+            shadow_darkness: 100.0,
+            shadow_diffusion: 0.0,
+            scope_below: None,
+            environment: Some(EnvironmentSource {
+                layer: 1,
+                background: None,
+            }),
+        }];
+        comp
+    };
+    let plain = render(&mut r, &scene(0.0)).px(100, 100);
+    assert!(plain[1] > 200 && plain[2] > 200, "lit white: {plain:?}");
+    let mirror = render(&mut r, &scene(100.0)).px(100, 100);
+    assert!(
+        mirror[0] > 200 && mirror[1] < 30 && mirror[2] < 30,
+        "reflects the red picture: {mirror:?}"
+    );
+    let half = render(&mut r, &scene(50.0)).px(100, 100);
+    assert!(half[1] > 60 && half[1] < 200, "half: {half:?}");
+}

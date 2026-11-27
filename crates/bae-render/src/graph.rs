@@ -233,7 +233,7 @@ pub struct Occlusion {
 }
 
 /// An environment light's picture as a node input (`exec/env.rs`).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnvironmentInput {
     /// The source layer's pixels (equirectangular).
     pub input: NodeId,
@@ -335,6 +335,9 @@ impl NodeKind {
                     }
                     if let Some(o) = &op.occlusion {
                         f(o.mesh);
+                    }
+                    if let Some(r) = op.lighting.as_ref().and_then(|l| l.reflection) {
+                        f(r.environment.input);
                     }
                 }
             }
@@ -2222,9 +2225,38 @@ impl Builder<'_, '_> {
                         rect: content_rect,
                         shadow_map: None,
                         models: Arc::new([]),
+                        reflection: None,
                     })
                 })
             });
+        // Advanced 3D reflections of the picture of an environment light
+        // that reaches the layer.
+        let lighting = match lighting {
+            Some(l) if l.material.reflection_intensity > 0.0 => {
+                let light = l.lights.iter().find(|x| x.environment.is_some()).copied();
+                let environment = match light {
+                    Some(light) => self.environment_input(comp, &light, depth)?,
+                    None => None,
+                };
+                Some(match environment {
+                    Some(environment) => {
+                        let m = &l.material;
+                        Arc::new(Lighting {
+                            reflection: Some(crate::light::Reflection {
+                                environment,
+                                intensity: (m.reflection_intensity / 100.0).clamp(0.0, 1.0),
+                                sharpness: (m.reflection_sharpness / 100.0).clamp(0.0, 1.0),
+                                rolloff: (m.reflection_rolloff / 100.0).clamp(0.0, 1.0),
+                                linear: self.linear,
+                            }),
+                            ..(*l).clone()
+                        })
+                    }
+                    None => l,
+                })
+            }
+            other => other,
+        };
         let (transform, projection, motion) = match placement {
             Placement::Affine(t) => (t, None, None),
             Placement::General {
