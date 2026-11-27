@@ -223,9 +223,10 @@ impl TimelinePanel {
             }
         }
         let graph = Rect::from_min_max(pos2(axis.left, rect.top()), rect.max);
+        // AE: the bar fills the row down to its rule.
         let bar = Rect::from_min_max(
-            pos2(axis.x(a), rect.top() + 2.0),
-            pos2(axis.x(b), rect.bottom() - 2.0),
+            pos2(axis.x(a), rect.top()),
+            pos2(axis.x(b), rect.bottom() - 1.0),
         )
         .intersect(graph);
         let locked = query::is_locked(stage, layer);
@@ -287,7 +288,17 @@ impl TimelinePanel {
         #[cfg(test)]
         self.last_bars.push((layer.clone(), bar));
         let c = theme::layer_bar_color(label_of(stage, layer), selected);
-        ui.painter().with_clip_rect(graph).rect_filled(bar, 1.0, c);
+        let p = ui.painter().with_clip_rect(graph);
+        p.rect_filled(bar, 0.0, c);
+        // AE's bevel: a lighter top edge (much lighter when selected), a darker
+        // bottom edge.
+        let top = theme::lerp(c, Color32::WHITE, if selected { 0.35 } else { 0.02 });
+        p.hline(bar.x_range(), bar.top() + 0.5, Stroke::new(1.0, top));
+        p.hline(
+            bar.x_range(),
+            bar.bottom() - 0.5,
+            Stroke::new(1.0, theme::lerp(c, Color32::BLACK, 0.2)),
+        );
         let edge = 5.0;
         let resp = ui
             .interact(

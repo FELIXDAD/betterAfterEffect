@@ -225,7 +225,7 @@ fn ui_frame_times_on_a_heavy_project() {
 
     // Scrub: drag the current-time indicator along the time ruler.
     let head = timeline_header(&h).expect("timeline");
-    let tick = find_texts(&h, |t| t == "2s")
+    let tick = find_texts(&h, |t| t == "02s" || t == "02:00f")
         .into_iter()
         .find(|r| r.left() > head.right())
         .unwrap_or_else(|| panic!("no ruler label in {:?}", painted_texts(&h)));
