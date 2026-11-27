@@ -65,8 +65,14 @@ fn scriptui_panels_folder_opens_a_docked_script_with_live_callbacks() {
     app.resource::<bae_script::ScriptWindows>()
         .unwrap()
         .prewarm_panels();
-    // Opening the panel and clicking its controls must use the prepared bytecode.
-    std::fs::remove_file(folder.join("Count comps.jsx")).unwrap();
+    // Editing the file after the warm-up: opening the panel runs the new code
+    // (recompiled off the UI thread), not the stale bytecode.
+    std::fs::write(
+        folder.join("Count comps.jsx"),
+        include_str!("../../../../crates/bae-script/tests/compat/scriptui-panel.jsx")
+            .replace("Add numbered comp", "Add next comp"),
+    )
+    .unwrap();
     let mut h = gui_with(Gui::with_app(app));
     let id = h
         .state()
@@ -76,9 +82,17 @@ fn scriptui_panels_folder_opens_a_docked_script_with_live_callbacks() {
         .unwrap()
         .id;
     assert!(h.state_mut().menu(&id));
-    settle(&mut h);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while h.query_by_label("Add next comp").is_none() {
+        assert!(
+            std::time::Instant::now() < until,
+            "edited panel never opened"
+        );
+        settle(&mut h);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     for _ in 0..2 {
-        let button = h.get_by_label("Add numbered comp").rect().center();
+        let button = h.get_by_label("Add next comp").rect().center();
         click_at(&mut h, button);
         settle(&mut h);
     }

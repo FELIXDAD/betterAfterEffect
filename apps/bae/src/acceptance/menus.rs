@@ -99,12 +99,14 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
 ];
 
 /// BAE-only items (no AE counterpart): the History and Agent panels, the Agent
-/// workspace.
+/// workspace, and File ▸ Scripts ▸ Choose Script Folder… (the folder JSX
+/// File/Folder objects may use; AE scripts have the whole disk).
 const BAE_ONLY: &[&str] = &[
     "shell.window.history",
     "shell.window.agent_activity",
     "shell.window.agent_proposals",
     "shell.window.workspace.agent",
+    "motion.file.choose_script_directory",
 ];
 
 /// The rest of AE's menu bar (`menu.*` ids) comes from the AE command catalog,

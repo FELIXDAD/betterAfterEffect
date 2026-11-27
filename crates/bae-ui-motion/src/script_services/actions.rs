@@ -1,7 +1,10 @@
 use super::{Desktop, Result};
+use bae_app::Registry;
 use bae_script::{ScriptWindow, ScriptWindows};
 use bae_ui::files::{OpenRequest, SharedFilePicker};
-use bae_ui::{ActionHandler, Invocation, MenuItemSpec, PanelContext, tr};
+use bae_ui::{
+    ActionHandler, ActionInfo, Invocation, MenuContext, MenuItemSpec, PanelContext, PanelKind, tr,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -80,7 +83,17 @@ impl Requests {
 pub(crate) fn install(app: &mut bae_app::AppBuilder, desktop: Desktop) {
     let reqs = Requests::default();
     app.insert_resource(reqs.clone());
-    let actions: Arc<dyn ActionHandler> = Arc::new(Actions { desktop, reqs });
+    let menus = Menus {
+        items: app.registry::<MenuItemSpec>(),
+        handlers: app.registry::<dyn ActionHandler>(),
+        infos: app.registry::<ActionInfo>(),
+        panels: app.registry::<PanelKind>(),
+    };
+    let actions: Arc<dyn ActionHandler> = Arc::new(Actions {
+        desktop,
+        reqs,
+        menus,
+    });
     let _ = app.register_arc("bae.script.application", actions);
     let item = MenuItemSpec::new(&["File", "Scripts"], "Choose Script Folder...", CHOOSE)
         .workspace(crate::menus::WORKSPACE)
@@ -95,6 +108,33 @@ pub(crate) fn install(app: &mut bae_app::AppBuilder, desktop: Desktop) {
 struct Actions {
     desktop: Desktop,
     reqs: Requests,
+    menus: Menus,
+}
+/// What the menu bar looks at to grey items, so `executeCommand` runs only what
+/// the user could click.
+struct Menus {
+    items: Arc<Registry<MenuItemSpec>>,
+    handlers: Arc<Registry<dyn ActionHandler>>,
+    infos: Arc<Registry<ActionInfo>>,
+    panels: Arc<Registry<PanelKind>>,
+}
+impl Menus {
+    fn enabled(&self, cx: &PanelContext<'_>, item: &crate::catalog::Item, params: &Value) -> bool {
+        let actions = bae_ui::menu::handled_actions(
+            &self.handlers.snapshot(),
+            &self.infos.snapshot(),
+            &self.panels.snapshot(),
+        );
+        let mcx = MenuContext::new(cx.stage, cx.resources, crate::menus::WORKSPACE)
+            .with_actions(&actions);
+        self.items.snapshot().iter().any(|e| {
+            let spec = e.item();
+            spec.title == item.title
+                && spec.action == item.action
+                && spec.params == *params
+                && spec.is_enabled(&mcx)
+        })
+    }
 }
 impl Actions {
     fn choose(&self, cx: &PanelContext<'_>, title: Option<&str>) -> Result<Value> {
@@ -142,7 +182,10 @@ impl Actions {
                 } else {
                     serde_json::from_str(item.params).map_err(|e| e.to_string())?
                 };
-                cx.invoke_with(item.action, params);
+                // Like AE: a greyed command does nothing.
+                if self.menus.enabled(cx, &item, &params) {
+                    cx.invoke_with(item.action, params);
+                }
                 Ok(Some(Value::Null))
             }
             Some("save") => {

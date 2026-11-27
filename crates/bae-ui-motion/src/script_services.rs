@@ -63,6 +63,50 @@ impl Grant {
         Ok(self.root.join(resolved))
     }
 
+    /// Rendering frames and importing a sequence open the files next to `path`
+    /// through `std`, which follows links: refuse when one named like them (or
+    /// inside a folder named like them) leads outside the selected folder.
+    fn siblings_stay_inside(&self, path: &Path) -> Result<()> {
+        let rel = self.relative(path)?;
+        let dir = rel
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let name = rel.file_name().unwrap_or_default().to_string_lossy();
+        let prefix: String = name
+            .chars()
+            .take_while(|c| !matches!(c, '[' | '#') && !c.is_ascii_digit())
+            .collect();
+        self.links_stay_inside(dir, &prefix, 1)
+    }
+
+    fn links_stay_inside(&self, dir: &Path, prefix: &str, depth: u8) -> Result<()> {
+        let Ok(entries) = self.dir.read_dir(dir) else {
+            return Ok(());
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if !name.to_string_lossy().starts_with(prefix) {
+                continue;
+            }
+            let rel = dir.join(&name);
+            let Ok(meta) = self.dir.symlink_metadata(&rel) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                if self.dir.canonicalize(&rel).is_err() {
+                    return Err(format!(
+                        "{} links outside the selected script folder",
+                        rel.display()
+                    ));
+                }
+            } else if meta.is_dir() && depth > 0 {
+                self.links_stay_inside(&rel, "", depth - 1)?;
+            }
+        }
+        Ok(())
+    }
+
     fn file(&self, op: &str, args: &Value) -> Result<Value> {
         let path = Path::new(args["path"].as_str().unwrap_or("."));
         let rel = self.relative(path)?;
@@ -209,13 +253,11 @@ impl Desktop {
     }
 
     pub fn output(&self, path: &Path) -> Result<PathBuf> {
-        self.0
-            .grant
-            .lock()
-            .unwrap()
-            .as_ref()
-            .ok_or("choose a script folder first")?
-            .external(path, true)
+        let guard = self.0.grant.lock().unwrap();
+        let grant = guard.as_ref().ok_or("choose a script folder first")?;
+        let out = grant.external(path, true)?;
+        grant.siblings_stay_inside(path)?;
+        Ok(out)
     }
     fn setting(&self, op: &str, args: &Value) -> Result<Value> {
         let section = args["section"]
@@ -363,10 +405,11 @@ impl bae_script::ScriptApplication for Desktop {
                 let guard = self.0.grant.lock().unwrap();
                 let grant = guard.as_ref().ok_or("choose a script folder first")?;
                 if op == "import" {
-                    let path = grant.external(
-                        Path::new(args["path"].as_str().ok_or("expected file")?),
-                        false,
-                    )?;
+                    let requested = Path::new(args["path"].as_str().ok_or("expected file")?);
+                    let path = grant.external(requested, false)?;
+                    if args["sequence"] == true {
+                        grant.siblings_stay_inside(requested)?;
+                    }
                     let file = crate::import::script_footage(&path, args["sequence"] == true)?;
                     Ok(json!(file))
                 } else {
@@ -374,5 +417,33 @@ impl bae_script::ScriptApplication for Desktop {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_next_to_a_link_out_of_the_folder_are_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("notes.txt");
+        std::fs::write(&secret, "keep").unwrap();
+        let granted = root.path().join("granted");
+        std::fs::create_dir(&granted).unwrap();
+        let grant = Grant {
+            root: granted.clone(),
+            dir: Dir::open_ambient_dir(&granted, cap_std::ambient_authority()).unwrap(),
+        };
+        let frames = Path::new("shot_[####].png");
+        assert!(grant.siblings_stay_inside(frames).is_ok());
+        std::os::unix::fs::symlink(&secret, granted.join("shot_0000.png")).unwrap();
+        assert!(grant.siblings_stay_inside(frames).is_err());
+        assert!(grant.siblings_stay_inside(Path::new("other.png")).is_ok());
+        std::fs::remove_file(granted.join("shot_0000.png")).unwrap();
+        std::fs::create_dir(granted.join("shot_0001")).unwrap();
+        std::os::unix::fs::symlink(&secret, granted.join("shot_0001/a.png")).unwrap();
+        assert!(grant.siblings_stay_inside(frames).is_err());
     }
 }
