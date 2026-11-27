@@ -116,6 +116,9 @@ enum Target {
     New,
     /// File ▸ Import ▸ Solid…: a solid item, no layer.
     NewItem,
+    /// File ▸ Replace Footage ▸ Solid…: a new solid item takes this item's
+    /// place (its layers show the solid).
+    Replace(PrimPath),
     Edit {
         /// The layer or the solid item that was asked for.
         target: PrimPath,
@@ -184,6 +187,19 @@ impl SolidSettings {
         };
         s.values.name = default_name(stage, color);
         Some(s)
+    }
+
+    /// File ▸ Replace Footage ▸ Solid…: Solid Settings for the solid that
+    /// takes `item`'s place.
+    pub(crate) fn replace_item(
+        stage: &Stage,
+        session: &SharedSession,
+        memory: &SolidSettingsMemory,
+        item: PrimPath,
+    ) -> Self {
+        let mut s = Self::new_item(stage, session, memory);
+        s.target = Target::Replace(item);
+        s
     }
 
     /// File ▸ Import ▸ Solid…: a solid item in the Project panel. Without an
@@ -259,7 +275,10 @@ impl SolidSettings {
     }
 
     pub fn is_new(&self) -> bool {
-        matches!(self.target, Target::New | Target::NewItem)
+        matches!(
+            self.target,
+            Target::New | Target::NewItem | Target::Replace(_)
+        )
     }
 
     /// Draw the dialog; returns whether it stays open.
@@ -297,18 +316,19 @@ impl SolidSettings {
         let v = &self.values;
         let name = v.name.trim().to_owned();
         match &self.target {
-            Target::NewItem => {
-                cx.invoke_with(
-                    "item.new",
-                    json!({
-                        "kind": "solid",
-                        "name": name,
-                        "width": v.width,
-                        "height": v.height,
-                        "pixel_aspect": v.pixel_aspect,
-                        "color": v.color,
-                    }),
-                );
+            Target::NewItem | Target::Replace(_) => {
+                let mut params = json!({
+                    "kind": "solid",
+                    "name": name,
+                    "width": v.width,
+                    "height": v.height,
+                    "pixel_aspect": v.pixel_aspect,
+                    "color": v.color,
+                });
+                if let Target::Replace(old) = &self.target {
+                    params["replace"] = json!(old);
+                }
+                cx.invoke_with("item.new", params);
                 let mut d = dialogs.lock();
                 d.solid.color = Some(v.color);
                 d.solid.lock_aspect = self.lock_aspect;
