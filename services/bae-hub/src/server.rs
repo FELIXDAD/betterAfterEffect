@@ -423,18 +423,14 @@ fn sync(
     // Authentication is done above (several tokens, per project), so the
     // handshake itself checks nothing more. The response tells the client
     // whether it may edit (`x-bae-access`), so the app can grey out editing.
-    let granted = match access {
-        Access::Read => bae_sync::Access::Read,
-        Access::Write => bae_sync::Access::Write,
-    };
-    let transport = match HubTransport::accept_granting(stream, None, HubLimits::default(), granted)
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::debug!(%addr, error = %e, "WebSocket handshake failed");
-            return Ok(());
-        }
-    };
+    let transport =
+        match HubTransport::accept_granting(stream, None, HubLimits::default(), access.into()) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::debug!(%addr, error = %e, "WebSocket handshake failed");
+                return Ok(());
+            }
+        };
     let link = PeerLink::new(transport, access, shared.config.peer_timeout);
     let info = PeerInfo {
         token: grant.name.clone(),

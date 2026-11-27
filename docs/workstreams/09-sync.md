@@ -71,7 +71,8 @@
   - Hub 拒绝握手改为 `SyncError::HubRefused { status, message }`；握手响应带 `x-bae-access`（`HubTransport::accept_granting` / `access()`），10 的 Hub 已经发送。
   - 只读：`SessionConfig::read_only`（不发任何文档数据）；`DirTransport::open_read_only`（`updates/` 不可写的共享目录，什么都不写）。
   - 顺带修了一个老问题：重连后 `reset()` 没有重新发布自己的在线状态，而且 Hub 替断开的连接发"离开"用的序号正好是重连后的下一条，别人要等下一次心跳（5 秒）才重新看到我们。现在 `reset()` 立即重新发布、跳过那个序号、清空旧的在线列表（spec 6.2）。
-  - 还发现一个竞争：丢弃或关闭共享目录的连接后立即重新分享同一个目录，旧链路还没放开文件锁，新连接报 `ClientIdInUse`。现在这个错误持续 2 秒以上才算要用户处理的失败。
+  - 还发现一个竞争：丢弃或关闭共享目录的连接后立即重新分享同一个目录，旧链路还没放开文件锁，新连接报 `ClientIdInUse`。现在本进程正在放开的链路按"目录 + `ClientId`"登记，连接线程先等它们放开；其他情况这个错误持续 2 秒以上才算要用户处理的失败。
+  - 评审后补的（spec 7.2、7.4、7.7）：连接中 `close` 或丢弃时，连接线程做好的链路也在后台线程丢弃；断线后交给链路、对方没确认的修改算 `unsynced`（`SyncSession::forget_unconfirmed`），退出时会提示；Hub 静默 20 秒（`hub_idle_timeout`）算断开；共享目录 I/O 卡住超过 `io_stall` 时交出去的修改算 `unsynced`（`ThreadedTransport::stalled`）；`retry()` 不连接不能用的 URL；`wake` 只在后台线程调用；闹钟不会丢掉之后的唤醒；`Debug` 不打印 URL 里的 `?token=`；Hub 地址解析出多个时逐个尝试、IPv4 优先；`Access` 移到 `transport.rs`。
 
 ## 请求（其他工作流在这里留言）
 

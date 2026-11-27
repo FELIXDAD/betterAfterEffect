@@ -199,7 +199,10 @@ fn two_apps_share_a_project_through_the_hub() {
 /// The hub stops (backoff while it is away, edits go on offline), then a new
 /// hub starts on the same port and data directory: both apps reconnect on
 /// their own, everything converges, and presence is back at once although
-/// heartbeats are a minute apart (it is re-published on reconnect).
+/// heartbeats are a minute apart and presence lasts three: it is
+/// re-published on reconnect (a newcomer sees both at once), and who was
+/// online before is forgotten (carol, who quit while the hub was away, is
+/// not shown).
 #[test]
 fn the_hub_goes_away_and_comes_back_on_the_same_port() {
     let data = tempfile::tempdir().unwrap();
@@ -217,10 +220,12 @@ fn the_hub_goes_away_and_comes_back_on_the_same_port() {
     };
     let mut a = App::join_with(addr, PROJECT, Some(WRITE), config("alice"), &base);
     let mut b = App::join_with(addr, PROJECT, Some(WRITE), config("bob"), &base);
-    wait("both online and visible", LONG, || {
+    let mut c = App::join_with(addr, PROJECT, Some(WRITE), config("carol"), &base);
+    wait("all online and visible", LONG, || {
         a.pump();
         b.pump();
-        a.conn.status().peers == 1 && b.conn.status().peers == 1
+        c.pump();
+        [&a, &b, &c].iter().all(|x| x.conn.status().peers == 2)
     });
     a.set_opacity(1.0);
     wait("first edit", LONG, || {
@@ -230,13 +235,16 @@ fn the_hub_goes_away_and_comes_back_on_the_same_port() {
     });
 
     hub.shutdown();
-    wait("both offline", LONG, || {
+    wait("all offline", LONG, || {
         a.pump();
         b.pump();
-        [&a, &b]
+        c.pump();
+        [&a, &b, &c]
             .iter()
             .all(|x| matches!(x.conn.status().state, ConnectionState::Offline { .. }))
     });
+    // Carol quits while the hub is away: her "left" never goes out.
+    drop(c);
     let status = a.conn.status();
     assert_eq!(status.peers, 0);
     assert!(a.conn.presence().is_empty());
@@ -284,7 +292,73 @@ fn the_hub_goes_away_and_comes_back_on_the_same_port() {
     assert!(a.has_layer("offline_bob"));
     assert_eq!(b.conn.presence()[0].state.name, "alice");
     assert_eq!(a.conn.presence()[0].state.name, "bob");
+    // A newcomer sees both at once: they re-published on reconnect.
+    let mut d = App::join_with(addr, PROJECT, Some(WRITE), config("dave"), &base);
+    wait("the newcomer sees both", Duration::from_secs(10), || {
+        a.pump();
+        b.pump();
+        d.pump();
+        d.conn.status().peers == 2
+    });
     drop(hub);
+}
+
+/// A link that stayed up longer than `stable_after` and then dropped is
+/// retried after `first` again, however many attempts failed before it.
+#[test]
+fn backoff_starts_over_after_a_stable_link() {
+    // A port nobody listens on yet.
+    let addr = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let base = base_snapshots();
+    let mut cfg = conn_config("alice");
+    cfg.backoff.first = Duration::from_millis(50);
+    cfg.backoff.stable_after = Duration::from_millis(300);
+    let mut a = App::join_with(addr, PROJECT, Some(WRITE), cfg, &base);
+    // Three failed attempts: the next wait would be 400 ms.
+    wait("failed attempts", LONG, || {
+        a.pump();
+        a.conn.connect_attempts() >= 4
+    });
+    let hub = restart(data.path(), addr);
+    wait("online", LONG, || {
+        a.pump();
+        a.conn.is_online()
+    });
+    pump_for(&mut [&mut a], Duration::from_millis(500));
+    hub.shutdown();
+    let mut first_wait = None;
+    wait("offline", LONG, || {
+        a.pump();
+        if let ConnectionState::Offline { retry_in, .. } = a.conn.status().state {
+            first_wait = Some(retry_in);
+        }
+        first_wait.is_some()
+    });
+    let first_wait = first_wait.unwrap();
+    assert!(first_wait <= Duration::from_millis(50), "{first_wait:?}");
+}
+
+/// A link without traffic stays up: the hub's `Hello`s every 5 seconds keep
+/// it alive against the client's idle timeout.
+#[test]
+fn an_idle_link_to_the_hub_stays_up() {
+    let data = tempfile::tempdir().unwrap();
+    let hub = start(config(data.path()));
+    let base = base_snapshots();
+    let mut cfg = conn_config("alice");
+    cfg.hub_idle_timeout = Some(Duration::from_secs(9));
+    let mut a = App::join_with(hub.local_addr(), PROJECT, Some(WRITE), cfg, &base);
+    wait("online", LONG, || {
+        a.pump();
+        a.conn.is_online()
+    });
+    pump_for(&mut [&mut a], Duration::from_secs(11));
+    assert!(a.conn.is_online(), "{:?}", a.conn.status());
+    assert_eq!(a.conn.connect_attempts(), 1);
 }
 
 /// Refusals that retrying does not fix stop the retries: one attempt, then
@@ -372,14 +446,21 @@ fn a_read_only_token_reads_but_sends_no_edits() {
     assert_eq!(w.conn.presence()[0].state.name, "reader");
 }
 
-/// Closing returns at once; the last edit (sent in the final flush) and the
-/// "left" reach the others, and the hub keeps the edit.
+/// Closing returns at once; the last edits (held back by a `min_send_interval`,
+/// so only the final flush sends them) and the "left" reach the others, and
+/// the hub keeps the edits. That the hub confirms the close before the
+/// socket closes is tested in `crates/bae-sync/tests/hub.rs` (a plain drop
+/// delivers just as well over loopback here).
 #[test]
 fn closing_delivers_the_last_edits() {
     let data = tempfile::tempdir().unwrap();
     let hub = start(config(data.path()));
     let base = base_snapshots();
-    let mut a = App::join(hub.local_addr(), WRITE, "alice", &base);
+    let mut cfg = conn_config("alice");
+    let mut session = SessionConfig::new(cfg.client.clone());
+    session.min_send_interval = Duration::from_secs(1);
+    cfg.session = Some(session);
+    let mut a = App::join_with(hub.local_addr(), PROJECT, Some(WRITE), cfg, &base);
     let mut b = App::join(hub.local_addr(), WRITE, "bob", &base);
     a.conn.set_presence(state("alice"));
     wait("both online", LONG, || {

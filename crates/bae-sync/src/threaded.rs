@@ -1,14 +1,31 @@
 //! [`ThreadedTransport`]: runs a blocking transport on its own thread.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::error::SyncError;
 use crate::protocol::Message;
 use crate::transport::Transport;
 
 type Notify = Box<dyn Fn() + Send>;
+
+/// How far the worker got with what `send` queued.
+#[derive(Debug, Default)]
+struct Backlog {
+    /// Messages `send` queued.
+    queued: u64,
+    /// Messages the worker handed to the inner transport.
+    handed: u64,
+    /// Since when messages wait without the worker handing any of them over
+    /// (`None`: nothing waits).
+    since: Option<Instant>,
+}
+
+fn lock(b: &Mutex<Backlog>) -> std::sync::MutexGuard<'_, Backlog> {
+    b.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// What the stage thread hands the worker.
 enum Out {
@@ -33,10 +50,14 @@ enum Out {
 /// a last write that failed is not lost silently. Dropping also waits until
 /// everything queued was handed over, but does not close the inner transport
 /// (it is dropped) and reports nothing.
+///
+/// [`stalled`](Self::stalled) tells when the worker is stuck in one call of the
+/// inner transport (a NAS that does not answer) while messages wait.
 pub struct ThreadedTransport {
     tx: Option<Sender<Out>>,
     rx: Receiver<Result<Message, SyncError>>,
     worker: Option<JoinHandle<()>>,
+    backlog: Arc<Mutex<Backlog>>,
 }
 
 impl std::fmt::Debug for ThreadedTransport {
@@ -53,15 +74,28 @@ impl ThreadedTransport {
         let (out_tx, out_rx) = mpsc::channel::<Out>();
         let (in_tx, in_rx) = mpsc::channel();
         let on_receive: Notify = Box::new(on_receive);
+        let backlog = Arc::new(Mutex::new(Backlog::default()));
+        let handed = backlog.clone();
         let worker = std::thread::Builder::new()
             .name("bae-sync-io".into())
-            .spawn(move || run(inner, tick, out_rx, in_tx, on_receive))
+            .spawn(move || run(inner, tick, out_rx, in_tx, on_receive, &handed))
             .expect("spawn sync I/O thread");
         ThreadedTransport {
             tx: Some(out_tx),
             rx: in_rx,
             worker: Some(worker),
+            backlog,
         }
+    }
+
+    /// How long messages queued by `send` have been waiting without the
+    /// worker handing any of them to the inner transport; zero when nothing
+    /// waits. Long means the worker is stuck in one read or write (a NAS or
+    /// network that does not answer): what was sent is not on its way.
+    pub fn stalled(&self) -> Duration {
+        lock(&self.backlog)
+            .since
+            .map_or(Duration::ZERO, |t| t.elapsed())
     }
 
     /// Stop the worker once it handled everything queued (`close`: and closed
@@ -98,6 +132,7 @@ fn run<T: Transport>(
     out_rx: Receiver<Out>,
     in_tx: Sender<Result<Message, SyncError>>,
     on_receive: Notify,
+    backlog: &Mutex<Backlog>,
 ) {
     loop {
         // Wait for outgoing messages or the next tick.
@@ -110,7 +145,13 @@ fn run<T: Transport>(
         outgoing.extend(out_rx.try_iter());
         for m in outgoing {
             let r = match m {
-                Out::Msg(m) => inner.send(m),
+                Out::Msg(m) => {
+                    let r = inner.send(m);
+                    let mut b = lock(backlog);
+                    b.handed += 1;
+                    b.since = (b.handed < b.queued).then(Instant::now);
+                    r
+                }
                 Out::Close => {
                     if let Err(e) = inner.close() {
                         let _ = in_tx.send(Err(e));
@@ -154,11 +195,22 @@ fn run<T: Transport>(
 
 impl Transport for ThreadedTransport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
-        self.tx
-            .as_ref()
-            .ok_or(SyncError::Closed)?
-            .send(Out::Msg(msg))
-            .map_err(|_| SyncError::Closed)
+        let tx = self.tx.as_ref().ok_or(SyncError::Closed)?;
+        {
+            let mut b = lock(&self.backlog);
+            if b.handed >= b.queued {
+                b.since = Some(Instant::now());
+            }
+            b.queued += 1;
+        }
+        tx.send(Out::Msg(msg)).map_err(|_| {
+            let mut b = lock(&self.backlog);
+            b.queued -= 1;
+            if b.handed >= b.queued {
+                b.since = None;
+            }
+            SyncError::Closed
+        })
     }
 
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {

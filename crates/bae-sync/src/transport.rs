@@ -5,6 +5,50 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use crate::error::SyncError;
 use crate::protocol::Message;
 
+/// What this client may do with the project, as the remote grants it (a hub
+/// token's rights, a shared folder's permissions).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Access {
+    /// Not known: never connected yet, or a hub that does not say. Edits are
+    /// sent (the remote decides).
+    #[default]
+    Unknown,
+    /// The remote does not take our edits (a read-only hub token, a shared
+    /// folder this user cannot write). Grey out editing; local edits are not
+    /// sent.
+    Read,
+    /// Edits are accepted.
+    Write,
+}
+
+impl Access {
+    /// `unknown`, `read` or `write`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Access::Unknown => "unknown",
+            Access::Read => "read",
+            Access::Write => "write",
+        }
+    }
+
+    /// `read` / `write` (any letter case); anything else is
+    /// [`Access::Unknown`].
+    pub fn parse(s: &str) -> Access {
+        if s.trim().eq_ignore_ascii_case("read") {
+            Access::Read
+        } else if s.trim().eq_ignore_ascii_case("write") {
+            Access::Write
+        } else {
+            Access::Unknown
+        }
+    }
+
+    /// Whether local edits are sent: everything but [`Access::Read`].
+    pub fn can_write(self) -> bool {
+        self != Access::Read
+    }
+}
+
 /// Moves [`Message`]s between this client and one remote (the shared folder, the
 /// hub, or a peer). Both calls must not block: [`crate::SyncSession::pump`] runs on
 /// the thread that owns the stage. Transports with slow I/O (SMB, network) do it on

@@ -446,9 +446,6 @@ fn drain(end: &mut bae_sync::MemoryTransport, hello_from: &str) -> (usize, usize
     (hellos, updates)
 }
 
-/// `Relay::connect_with`: one peer (a store, as the hub's project directory) gets
-/// its own send interval and no periodic hello; `flush` forces out what the
-/// interval held back. The relay's client ID wins over the one in the config.
 /// A read-only session (read-only hub token or folder) takes everything in
 /// and sends no document data, not even when asked for a snapshot; its own
 /// edits stay unsynced.
@@ -500,6 +497,9 @@ fn a_read_only_session_receives_but_never_sends_edits() {
     assert_eq!(b.stats().bytes_sent, 0);
 }
 
+/// `Relay::connect_with`: one peer (a store, as the hub's project directory) gets
+/// its own send interval and no periodic hello; `flush` forces out what the
+/// interval held back. The relay's client ID wins over the one in the config.
 #[test]
 fn a_peer_with_its_own_session_settings() {
     use bae_sync::{MemoryTransport, Message, Transport};

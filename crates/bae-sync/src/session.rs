@@ -102,8 +102,12 @@ pub struct SyncStats {
 pub struct SyncSession {
     config: SessionConfig,
     /// What the remote has, per document. `None` until its first `Hello`: before
-    /// that we do not know what to send.
+    /// that we do not know what to send. Includes what we handed to the
+    /// transport, which may still be on its way.
     remote: Option<BTreeMap<DocKey, VersionVector>>,
+    /// What the remote showed it has: its last `Hello`, plus what it sent us
+    /// since. [`forget_unconfirmed`](Self::forget_unconfirmed) goes back to it.
+    confirmed: Option<BTreeMap<DocKey, VersionVector>>,
     remote_client: Option<ClientId>,
     remote_protocol: Option<u32>,
     last_hello: Option<Instant>,
@@ -125,6 +129,7 @@ impl SyncSession {
         SyncSession {
             config,
             remote: None,
+            confirmed: None,
             remote_client: None,
             remote_protocol: None,
             last_hello: None,
@@ -219,6 +224,7 @@ impl SyncSession {
     /// others see us again at once.
     pub fn reset(&mut self) {
         self.remote = None;
+        self.confirmed = None;
         self.remote_client = None;
         self.remote_protocol = None;
         self.last_hello = None;
@@ -226,6 +232,15 @@ impl SyncSession {
         self.presence_dirty = self.presence.is_some();
         self.presence_seq = (self.presence_seq + 1).max(initial_seq());
         self.peers = PresenceTable::default();
+    }
+
+    /// The link failed: what was handed to it may never have arrived. From
+    /// now on only what the remote showed it has counts as synced (its last
+    /// `Hello` and what it sent since), so [`unsynced`](Self::unsynced) reports
+    /// edits that were sent but not confirmed. The next link needs
+    /// [`reset`](Self::reset) as usual.
+    pub fn forget_unconfirmed(&mut self) {
+        self.remote = self.confirmed.clone();
     }
 
     /// Documents with local ops the remote is not known to have yet ("unsynced
@@ -406,12 +421,17 @@ impl SyncSession {
                 }
                 // Replace, not merge: after a hub restart it may have less than we
                 // sent, and then we must send it again.
-                self.remote = Some(versions.into_iter().collect());
+                let versions: BTreeMap<DocKey, VersionVector> = versions.into_iter().collect();
+                self.confirmed = Some(versions.clone());
+                self.remote = Some(versions);
             }
             Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
                 self.stats.bytes_received += data.len() as u64;
                 if let Some(remote) = &mut self.remote {
                     remote.entry(doc.clone()).or_default().merge(&version);
+                }
+                if let Some(confirmed) = &mut self.confirmed {
+                    confirmed.entry(doc.clone()).or_default().merge(&version);
                 }
                 // Imported after the receive loop, one batch per document.
                 incoming.entry(doc).or_default().push((version, data));

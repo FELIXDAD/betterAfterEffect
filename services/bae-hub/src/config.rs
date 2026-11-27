@@ -41,6 +41,16 @@ impl Access {
     }
 }
 
+/// What the handshake response tells the client (`x-bae-access`).
+impl From<Access> for bae_sync::Access {
+    fn from(access: Access) -> Self {
+        match access {
+            Access::Read => bae_sync::Access::Read,
+            Access::Write => bae_sync::Access::Write,
+        }
+    }
+}
+
 /// Access granted to connections without a token.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

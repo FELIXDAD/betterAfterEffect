@@ -6,7 +6,7 @@
 //! transfers stay off the stage thread.
 
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 use tungstenite::client::IntoClientRequest;
@@ -15,10 +15,9 @@ use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::{HeaderValue, StatusCode, header::AUTHORIZATION};
 use tungstenite::{Error as WsError, Message as WsMessage, WebSocket};
 
-use crate::connection::Access;
 use crate::error::SyncError;
 use crate::protocol::Message;
-use crate::transport::Transport;
+use crate::transport::{Access, Transport};
 
 /// Header of the hub's handshake response that tells the client what it may
 /// do: `read` or `write` ([`HubTransport::access`]). Hubs that do not send it
@@ -61,23 +60,32 @@ impl Default for HubLimits {
     }
 }
 
-/// The socket, counting the bytes written to it: how [`HubTransport`] tells a
-/// slow peer (bytes keep leaving) from one that stopped reading.
+/// The socket, counting the bytes written to it and read from it: how
+/// [`HubTransport`] tells a slow peer (bytes keep leaving) from one that
+/// stopped reading, and a peer sending a large message (bytes keep arriving)
+/// from one that went silent.
 #[derive(Debug)]
 struct Counted {
     stream: TcpStream,
     written: u64,
+    read: u64,
 }
 
 impl Counted {
     fn new(stream: TcpStream) -> Self {
-        Counted { stream, written: 0 }
+        Counted {
+            stream,
+            written: 0,
+            read: 0,
+        }
     }
 }
 
 impl Read for Counted {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stream.read(buf)
+        let n = self.stream.read(buf)?;
+        self.read += n as u64;
+        Ok(n)
     }
 }
 
@@ -107,6 +115,11 @@ pub struct HubTransport {
     progress: Instant,
     /// A write failed; reported once what already arrived has been read.
     failed: Option<SyncError>,
+    /// [`set_idle_timeout`](HubTransport::set_idle_timeout).
+    idle_timeout: Option<Duration>,
+    /// `Counted::read` when we last looked, and when it last changed.
+    read: u64,
+    heard: Instant,
 }
 
 impl std::fmt::Debug for HubTransport {
@@ -119,6 +132,36 @@ impl std::fmt::Debug for HubTransport {
 
 fn hub_err(e: impl std::fmt::Display) -> SyncError {
     SyncError::Hub(e.to_string())
+}
+
+/// Connect to the first of `addrs` that answers, IPv4 first (the hub listens
+/// on `0.0.0.0` by default, and a name like `localhost` or `nas.local` often
+/// resolves to an IPv6 address first). Each address gets an equal share of
+/// what is left of `timeout`, so one that drops packets does not use up the
+/// time of the others.
+fn connect_any(addrs: &[SocketAddr], timeout: Duration) -> io::Result<TcpStream> {
+    let mut unique: Vec<SocketAddr> = Vec::with_capacity(addrs.len());
+    for a in addrs {
+        if !unique.contains(a) {
+            unique.push(*a);
+        }
+    }
+    let mut addrs = unique;
+    addrs.sort_by_key(SocketAddr::is_ipv6);
+    let deadline = Instant::now() + timeout;
+    let mut last = None;
+    for (i, addr) in addrs.iter().enumerate() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let share = left / u32::try_from(addrs.len() - i).unwrap_or(u32::MAX);
+        match TcpStream::connect_timeout(addr, share.max(Duration::from_millis(1))) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "connect timed out")))
 }
 
 /// The handshake request for `url`, and the host and port to connect to.
@@ -178,7 +221,8 @@ impl HubTransport {
     /// Connect to a hub at `url` (`ws://host:port/path`; the path and query
     /// select the project, as defined by the hub). `token` is sent as
     /// `Authorization: Bearer <token>`. Blocks for at most about `timeout` per
-    /// step (connect, handshake). A hub that answers with an HTTP error gives
+    /// step (connect, handshake); every address the host name resolves to is
+    /// tried, IPv4 first. A hub that answers with an HTTP error gives
     /// [`SyncError::HubRefused`]; what the hub allows is in
     /// [`access`](Self::access).
     pub fn connect(url: &str, token: Option<&str>, timeout: Duration) -> Result<Self, SyncError> {
@@ -193,12 +237,14 @@ impl HubTransport {
         limits: HubLimits,
     ) -> Result<Self, SyncError> {
         let (request, host, port) = client_request(url, token)?;
-        let addr = (host.as_str(), port)
+        let addrs: Vec<SocketAddr> = (host.as_str(), port)
             .to_socket_addrs()
             .map_err(hub_err)?
-            .next()
-            .ok_or_else(|| SyncError::Hub(format!("cannot resolve {host}")))?;
-        let stream = TcpStream::connect_timeout(&addr, timeout).map_err(hub_err)?;
+            .collect();
+        if addrs.is_empty() {
+            return Err(SyncError::Hub(format!("cannot resolve {host}")));
+        }
+        let stream = connect_any(&addrs, timeout).map_err(hub_err)?;
         stream.set_nodelay(true).map_err(hub_err)?;
         stream.set_read_timeout(Some(timeout)).map_err(hub_err)?;
         stream.set_write_timeout(Some(timeout)).map_err(hub_err)?;
@@ -279,6 +325,7 @@ impl HubTransport {
         s.set_write_timeout(None).map_err(hub_err)?;
         s.set_nonblocking(true).map_err(hub_err)?;
         let written = ws.get_ref().written;
+        let read = ws.get_ref().read;
         let mut transport = HubTransport {
             ws,
             limits,
@@ -287,6 +334,9 @@ impl HubTransport {
             written,
             progress: Instant::now(),
             failed: None,
+            idle_timeout: None,
+            read,
+            heard: Instant::now(),
         };
         transport.set_limits(limits);
         Ok(transport)
@@ -308,6 +358,34 @@ impl HubTransport {
     /// The connection's limits.
     pub fn limits(&self) -> HubLimits {
         self.limits
+    }
+
+    /// Fail [`recv`](Transport::recv) once not a byte arrived for `timeout`
+    /// (`None`, the default: never). A peer that went away without closing
+    /// the connection (power loss, a dropped VPN or Wi-Fi) sends no reset, and
+    /// TCP may take many minutes to notice; the hub says `Hello` every 5
+    /// seconds, so a client can tell much sooner. A large message counts as
+    /// news while its bytes keep arriving.
+    pub fn set_idle_timeout(&mut self, timeout: Option<Duration>) {
+        self.idle_timeout = timeout;
+        self.heard = Instant::now();
+    }
+
+    /// Fails when nothing arrived for the idle timeout.
+    fn check_idle(&mut self) -> Result<(), SyncError> {
+        let now = Instant::now();
+        let read = self.ws.get_ref().read;
+        if read != self.read {
+            self.read = read;
+            self.heard = now;
+            return Ok(());
+        }
+        match self.idle_timeout {
+            Some(t) if now.saturating_duration_since(self.heard) >= t => Err(SyncError::Hub(
+                format!("nothing received for {:.1} s", t.as_secs_f32()),
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// Client side: what the hub said this connection may do
@@ -421,7 +499,7 @@ impl Transport for HubTransport {
                 Err(e) if would_block(&e) => {
                     return match self.failed.take() {
                         Some(e) => Err(e),
-                        None => Ok(None),
+                        None => self.check_idle().map(|()| None),
                     };
                 }
                 Err(e) => return Err(self.failed.take().unwrap_or_else(|| link_err(e))),
@@ -477,5 +555,26 @@ impl Drop for HubTransport {
     fn drop(&mut self) {
         let _ = self.ws.close(None);
         let _ = self.ws.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    /// A name that resolves to an address nobody listens on first (IPv6
+    /// `localhost` against a hub on `0.0.0.0`): the next address is tried.
+    #[test]
+    fn connect_tries_every_address() {
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused = closed.local_addr().unwrap();
+        drop(closed);
+        let live = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = live.local_addr().unwrap();
+        let stream = connect_any(&[refused, refused, addr], Duration::from_secs(20)).unwrap();
+        assert_eq!(stream.peer_addr().unwrap(), addr);
+        assert!(connect_any(&[refused], Duration::from_secs(20)).is_err());
+        assert!(connect_any(&[], Duration::from_secs(1)).is_err());
     }
 }

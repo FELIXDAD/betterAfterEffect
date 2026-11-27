@@ -43,7 +43,7 @@ mod transport;
 pub use client::ClientId;
 pub use commands::{RevertOutput, RevertParams, register_commands};
 pub use connection::{
-    Access, Backoff, Closing, Connection, ConnectionConfig, ConnectionOutcome, ConnectionState,
+    Backoff, Closing, Connection, ConnectionConfig, ConnectionOutcome, ConnectionState,
     ConnectionStatus, FOLDER_SEND_INTERVAL, Failure, Target,
 };
 pub use dir::{DirConfig, DirStats, DirTransport, LOG_FORMAT, LOG_VERSION};
@@ -60,4 +60,4 @@ pub use protocol::{DocKey, Message, PROTOCOL_VERSION};
 pub use relay::{PeerHandle, Relay, RelayOutcome};
 pub use session::{PumpOutcome, SessionConfig, SyncSession, SyncStats};
 pub use threaded::ThreadedTransport;
-pub use transport::{MemoryTransport, Transport};
+pub use transport::{Access, MemoryTransport, Transport};
