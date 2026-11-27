@@ -555,8 +555,8 @@ fn finish(
 /// one while its successor already waits for the lock (which the OS releases
 /// with the dead process). A second process with a client ID in use is
 /// refused. In the end every process and a fresh one agree, nothing that
-/// reached the folder before a kill is lost, and the logs stay within their
-/// compaction thresholds.
+/// reached the folder before a kill is lost, the successors compact their
+/// logs too, and the logs stay within their compaction thresholds.
 #[test]
 fn processes_share_a_folder_through_kills_and_restarts() {
     let (_tmp, dir) = project_dir();
@@ -564,7 +564,7 @@ fn processes_share_a_folder_through_kills_and_restarts() {
         .map(|i| Client::start(&dir, &format!("c{i}"), &format!("c{i}"), 10 + i, LOCK_WAIT))
         .collect();
     // c1 and c2 are still editing when they are killed, however slow the
-    // machine; their successors make the rest.
+    // machine; their successors go on until they have compacted (below).
     for c in &mut clients {
         let edits = if ["c1", "c2"].contains(&c.id.as_str()) {
             "edit 1000000 2"
@@ -582,21 +582,30 @@ fn processes_share_a_folder_through_kills_and_restarts() {
     let refused = dup.wait_for("refused", START);
     assert!(refused.contains("already_in_use"), "{refused}");
     dup.wait_exit(ANSWER);
-    let before = kill_and_restart(&dir, &mut clients, 1, false, "edit 900 2", 21);
+    let before = kill_and_restart(&dir, &mut clients, 1, false, "edit 1000000 2", 21);
     durable.push(before.vv);
     sent += before.sent;
 
     wait_until("c2 to write", SETTLE, || clients[2].state().sent > 4096);
-    let before = kill_and_restart(&dir, &mut clients, 2, true, "edit 900 2", 22);
+    let before = kill_and_restart(&dir, &mut clients, 2, true, "edit 1000000 2", 22);
     durable.push(before.vv);
     sent += before.sent;
 
-    let finals: Vec<String> = clients
-        .iter_mut()
-        .map(|c| field(&c.proc.wait_for("edited", SETTLE), "vv").to_owned())
-        .collect();
+    let mut finals = Vec::new();
+    for c in clients.iter_mut().filter(|c| !c.restarted) {
+        finals.push(field(&c.proc.wait_for("edited", SETTLE), "vv").to_owned());
+    }
+    // Compaction goes on after a restart: the successors edit until they have
+    // compacted. How much they must write for that depends on the log they
+    // took over (its threshold is twice its last snapshot), and a busy machine
+    // batches the same edits into fewer bytes, so a fixed number of edits is
+    // not always enough.
+    for c in clients.iter_mut().filter(|c| c.restarted) {
+        let what = format!("{} to compact after its restart", c.tag);
+        wait_until(&what, SETTLE, || c.state().compactions > 0);
+        finals.push(field(&c.proc.ask("stop", "stopped", ANSWER), "vv").to_owned());
+    }
     println!("edits took {:.1?}", started.elapsed());
-    // Compaction goes on after a restart (both wrote enough to need it).
     for (tag, compactions) in finish(&dir, clients, &durable, &finals, sent) {
         assert!(compactions > 0, "{tag} never compacted after its restart");
     }
