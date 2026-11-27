@@ -107,8 +107,8 @@
 | Set Proxy ▸ None | 9830403 | `motion.file.set_proxy_none` |  |  |  | E | ⏸ |
 | Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ✅ |
 | Interpret Footage ▸ Proxy... | 10420226 | `motion.file.interpret_footage_proxy` |  |  |  | E | ⏸ |
-| Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ☐ |
-| Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ☐ |
+| Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ✅ |
+| Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ✅ |
 | Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
 | Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
@@ -391,7 +391,7 @@
 | Arrange ▸ Send Backward | 12910595 | `motion.order` | `{"to":"backward"}` | Ctrl+[ / Ctrl+Alt+Down | Cmd+[ / Cmd+Opt+Down | B | ✅ |
 | Arrange ▸ Send to Back | 12910596 | `motion.order` | `{"to":"back"}` | Ctrl+Shift+[ / Ctrl+Alt+Shift+Down / Ctrl+Shift+- | Cmd+Shift+[ / Cmd+Opt+Shift+Down / Cmd+Shift+- | B | ✅ |
 | Reveal ▸ Reveal in Explorer | 23003137 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
-| Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ☐ |
+| Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Layer in Project Flowchart | 23003139 | `motion.layer.reveal_layer_in_project_flowchart` |  |  |  | E | ⏸ |
 | Reveal ▸ Reveal Composition in Project | 23003140 | `motion.layer.reveal_composition_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Expression Errors | 23003141 | `motion.layer.reveal_expression_errors` |  |  |  | C | ⏸ |

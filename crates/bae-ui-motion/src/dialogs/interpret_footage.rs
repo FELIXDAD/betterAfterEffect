@@ -80,6 +80,28 @@ impl InterpretFootage {
         })
     }
 
+    /// The interpretation as `footage.interpret` parameters, without `items`
+    /// (also what Remember Interpretation keeps).
+    pub(crate) fn settings(&self) -> serde_json::Value {
+        let mut params = json!({
+            "alpha_mode": self.alpha,
+            "premultiply_color": self.matte,
+            "pixel_aspect": self.pixel_aspect,
+            "loop_count": self.loops.round().max(1.0) as i64,
+        });
+        if self.assume {
+            params["frame_rate"] = json!(self.fps);
+        } else {
+            params["use_file_frame_rate"] = json!(true);
+        }
+        params
+    }
+
+    /// The footage items of `selected` the interpretation applies to.
+    pub(crate) fn items(&self) -> &[PrimPath] {
+        &self.items
+    }
+
     /// Draw the dialog; returns whether it stays open.
     pub(crate) fn ui(&mut self, ctx: &egui::Context, cx: &mut PanelContext<'_>) -> bool {
         let id = Id::new("bae-ui-motion.interpret-footage");
@@ -94,18 +116,8 @@ impl InterpretFootage {
             Outcome::None => true,
             Outcome::Cancel => false,
             Outcome::Ok => {
-                let mut params = json!({
-                    "items": self.items,
-                    "alpha_mode": self.alpha,
-                    "premultiply_color": self.matte,
-                    "pixel_aspect": self.pixel_aspect,
-                    "loop_count": self.loops.round().max(1.0) as i64,
-                });
-                if self.assume {
-                    params["frame_rate"] = json!(self.fps);
-                } else {
-                    params["use_file_frame_rate"] = json!(true);
-                }
+                let mut params = self.settings();
+                params["items"] = json!(self.items);
                 cx.invoke_with("footage.interpret", params);
                 false
             }

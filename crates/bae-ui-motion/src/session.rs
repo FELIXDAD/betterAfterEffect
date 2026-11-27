@@ -398,6 +398,12 @@ pub struct Session {
     /// A project item to rename in the Project panel (the Timeline's Rename
     /// on empty space renames its comp there, AE 26).
     pub(crate) rename_item: Option<PrimPath>,
+    /// Layer ▸ Reveal ▸ … in Project: the item the Project panel selects and
+    /// scrolls to next frame.
+    pub(crate) reveal_in_project: Option<PrimPath>,
+    /// File ▸ Interpret Footage ▸ Remember Interpretation: `footage.interpret`
+    /// parameters (without `items`) for Apply Interpretation.
+    pub(crate) remembered_interpretation: Option<serde_json::Value>,
     /// Frames in the GPU preview cache (the timeline's green bar): comp,
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
