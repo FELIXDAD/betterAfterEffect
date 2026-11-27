@@ -257,7 +257,9 @@ struct LogSummary {
     /// then is `vmax` known to bound everything in the log.
     complete: bool,
     /// Only part of the bytes at `stamp` were read (`SUMMARY_CHUNK`): not
-    /// `complete`, and the next read goes on from `end`.
+    /// `complete`, and the next read goes on from `end`. Never set when what
+    /// stopped the read is a corrupt record or an unusable header: that is
+    /// final.
     partial: bool,
 }
 
@@ -1558,6 +1560,10 @@ impl DirTransport {
         path: &Path,
         budget: &mut Budget,
     ) -> Option<Option<LogSummary>> {
+        // Where the last read stopped: a read that gets no further ends it
+        // (`summarize_log` already does; this only makes sure no log can keep
+        // a pass going forever).
+        let mut last = None;
         loop {
             if budget.spent() {
                 return None;
@@ -1568,7 +1574,7 @@ impl DirTransport {
                 budget.worked = true;
             }
             match summary {
-                Some(s) if s.partial => {}
+                Some(s) if s.partial && last != Some(s.end) => last = Some(s.end),
                 other => return Some(other),
             }
         }
@@ -2022,8 +2028,10 @@ fn may_replace(m: &LogSummary, y: &str, l: &LogSummary, x: &str) -> bool {
 /// after `prev` are read: the owner only ever appends to a generation, so what
 /// `prev` covers is unchanged. At most about `max_read` bytes are read (more
 /// only to take in one whole record); if that is not the end of the log, the
-/// summary is `partial` and the next call goes on from there. `Ok(None)`: it
-/// changed while being read.
+/// summary is `partial` and the next call goes on from there, unless the read
+/// stopped at a corrupt record or found no usable header: then the summary
+/// ends there, not complete (the next call would stop at the same place).
+/// `Ok(None)`: it changed while being read.
 fn summarize_log(
     path: &Path,
     doc: &DocKey,
@@ -2064,7 +2072,7 @@ fn summarize_log(
     if before != after || bytes.len() as u64 != want {
         return Ok(None);
     }
-    let partial = want < size;
+    let mut partial = want < size;
     let mut summary = match cont {
         Some(mut summary) => {
             summary.stamp = after;
@@ -2073,13 +2081,34 @@ fn summarize_log(
         }
         None => summarize(&bytes, doc, after),
     };
+    // Short of the end of the log, a read that stopped before the end of its
+    // chunk at anything but a record the chunk cut off (a corrupt record: bit
+    // rot, zeroed blocks after a crash; or no usable header) ends the summary
+    // there, not complete, as a read of the whole log would: the next read
+    // would start and stop at the same place.
     if partial {
-        summary.partial = true;
-        summary.complete = false;
-    } else {
-        summary.partial = false;
+        let used = usize::try_from(summary.end.saturating_sub(start)).unwrap_or(usize::MAX);
+        let rest = bytes.get(used..).unwrap_or_default();
+        if summary.generation.is_none() || !cut_off(rest) {
+            partial = false;
+        }
     }
+    if partial {
+        summary.complete = false;
+    }
+    summary.partial = partial;
     Ok(Some(summary))
+}
+
+/// Whether `rest`, what follows the last intact record read, starts with a
+/// record the end of what was read cut off (rather than one that is not
+/// intact).
+fn cut_off(rest: &[u8]) -> bool {
+    if rest.len() < RECORD_HEADER {
+        return true;
+    }
+    let len = u32::from_le_bytes(rest[..4].try_into().expect("4 bytes")) as usize;
+    len <= MAX_RECORD && rest.len() - RECORD_HEADER < len
 }
 
 /// Summary of the whole log `bytes` of `doc` (read at `stamp`).
@@ -3145,6 +3174,136 @@ mod tests {
         }
         assert_eq!(reads, 7, "one record per read");
         assert_eq!(fields(&s), fields(&whole));
+    }
+
+    /// A chunked read that stops at a record that is not intact (bit rot,
+    /// zeroed blocks after a NAS crash) with more of the log after it, or at a
+    /// header this build cannot use, ends the summary there, not complete:
+    /// every later read would start and stop at the same place.
+    #[test]
+    fn a_chunked_summary_ends_at_a_corrupt_record_or_header() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("x.log");
+        let b = blobs();
+        let doc = root();
+        let intact = [header("root"), record(snapshot(&b.v1, &b.snap1))].concat();
+        let mut bad = record(updates(&b.v2, &b.update));
+        bad[RECORD_HEADER] ^= 1;
+        let mut bytes = [intact.clone(), bad].concat();
+        for _ in 0..8 {
+            bytes.extend(record(updates(&b.v2, &b.update)));
+        }
+        fs::write(&path, &bytes).unwrap();
+        // One record per read, then a few per read.
+        for max_read in [16, 300] {
+            let mut s = summarize_log(&path, &doc, None, max_read).unwrap().unwrap();
+            let mut reads = 1;
+            while s.partial {
+                s = summarize_log(&path, &doc, Some(&s), max_read)
+                    .unwrap()
+                    .unwrap();
+                reads += 1;
+                assert!(reads <= 5, "no progress at {}", s.end);
+            }
+            assert_eq!(s.end, intact.len() as u64);
+            assert_eq!(s.records, 1);
+            assert!(!s.complete);
+            // Read again once the log changed: from the same place, and
+            // final at once.
+            append_bytes(&path, &record(updates(&b.v2, &b.update)));
+            let again = summarize_log(&path, &doc, Some(&s), max_read)
+                .unwrap()
+                .unwrap();
+            assert!(!again.partial && !again.complete);
+            assert_eq!(again.end, s.end);
+        }
+
+        // No usable header (garbage, a newer format): there is nothing to go
+        // on from.
+        for head in [encode_record(b"not a header"), newer_header("root")] {
+            let mut bytes = head;
+            for _ in 0..8 {
+                bytes.extend(record(updates(&b.v2, &b.update)));
+            }
+            fs::write(&path, &bytes).unwrap();
+            let s = summarize_log(&path, &doc, None, 16).unwrap().unwrap();
+            assert!(!s.partial && !s.complete && s.generation.is_none());
+        }
+    }
+
+    /// A departed client's log with a corrupt record followed by more than one
+    /// chunk (`SUMMARY_CHUNK`), or a large one of a newer format, is not
+    /// deleted, and the pass goes on to the other documents: it used to read
+    /// the same chunk over and over, so the pass never ended (and with no time
+    /// limit, `poll` never returned).
+    #[test]
+    fn a_corrupt_departed_log_does_not_stall_the_cleanup() {
+        let b = blobs();
+        let big = || -> Vec<u8> {
+            let filler = encode_record(&vec![7u8; 1 << 20]);
+            filler.repeat(usize::try_from(SUMMARY_CHUNK >> 20).unwrap() + 2)
+        };
+        let folder = || {
+            let tmp = tempfile::tempdir().unwrap();
+            for name in ["anim/a", "anim/b", "root"] {
+                let doc = DocKey::parse(name).unwrap();
+                let dir = tmp.path().join(UPDATES).join(name);
+                fs::create_dir_all(&dir).unwrap();
+                let held = doc_record(&doc, false, &b.v1, &b.snap1);
+                let x = match name {
+                    "anim/a" => {
+                        let mut bad = held.clone();
+                        bad[RECORD_HEADER] ^= 1;
+                        [header(name), held, bad, big()].concat()
+                    }
+                    "anim/b" => [newer_header(name), held, big()].concat(),
+                    _ => [header(name), held].concat(),
+                };
+                let x_path = dir.join("x.log");
+                fs::write(&x_path, x).unwrap();
+                two_hours_old(&x_path);
+                let container = doc_record(&doc, true, &b.v2, &b.snap2);
+                fs::write(dir.join("c.log"), [header(name), container].concat()).unwrap();
+            }
+            tmp
+        };
+        let config = |budget| DirConfig {
+            inactive_after: Some(Duration::from_secs(3600)),
+            cleanup_interval: Duration::ZERO,
+            absorb_departed: false,
+            cleanup_budget: budget,
+            ..quick()
+        };
+        let done = |tmp: &Path, a: &DirTransport| {
+            a.pass.is_none() && a.stats().cleanups >= 1 && a.stats().logs_removed == 1 && {
+                let x = |doc: &str| tmp.join(UPDATES).join(doc).join("x.log").exists();
+                !x("root") && x("anim/a") && x("anim/b")
+            }
+        };
+
+        let tmp = folder();
+        let mut a = transport(tmp.path(), "a", config(Duration::from_millis(20)));
+        let mut polls = 0;
+        while !done(tmp.path(), &a) {
+            a.poll();
+            polls += 1;
+            assert!(polls < 50, "{:?}", a.stats());
+        }
+
+        // No time limit: one poll does the whole pass, and returns.
+        let tmp = folder();
+        let path = tmp.path().to_owned();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut a = transport(&path, "a", config(Duration::MAX));
+            a.poll();
+            a.poll();
+            let _ = tx.send(a);
+        });
+        let a = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the cleanup pass never ended");
+        assert!(done(tmp.path(), &a), "{:?}", a.stats());
     }
 
     /// A header of the next format version, with a field this build does not
