@@ -522,6 +522,58 @@ fn evaluator_cache_invalidates_on_events() {
     );
 }
 
+/// Edits inside one layer recompile that layer only; a parent set later and
+/// a layer added later (the layer list changed) still show.
+#[test]
+fn evaluator_recompiles_changed_layers_and_new_structure() {
+    let mut s = stage(|b| {
+        b.layer("/comps/main", "a", "null");
+        b.layer("/comps/main", "b", "null");
+    });
+    let author = AuthorId::new("user:test").unwrap();
+    let mut ev = Evaluator::new();
+    let comp = p("/comps/main");
+    let eval = |ev: &mut Evaluator, s: &Stage| ev.evaluate_comp(s, &comp, Time::ZERO).unwrap();
+    assert_eq!(eval(&mut ev, &s).layers.len(), 2);
+    let edit = |s: &mut Stage, ev: &mut Evaluator, f: &dyn Fn(&mut B<'_, '_>)| {
+        let (_, event) = s
+            .transact(&author, "edit", |tx| {
+                f(&mut B(tx));
+                Ok::<_, bae_model::ModelError>(())
+            })
+            .unwrap();
+        ev.invalidate(&event);
+    };
+    edit(&mut s, &mut ev, &|b| {
+        b.set("/comps/main/layers/b", "transform:rotation", 30.0);
+    });
+    let out = eval(&mut ev, &s);
+    let rotation = |out: &bae_anim::EvaluatedComp, name: &str| {
+        out.layers
+            .iter()
+            .find(|l| l.path.name() == name)
+            .unwrap()
+            .transform
+            .rotation
+            .z
+    };
+    assert_eq!((rotation(&out, "a"), rotation(&out, "b")), (0.0, 30.0));
+    edit(&mut s, &mut ev, &|b| {
+        b.set(
+            "/comps/main/layers/a",
+            "parent",
+            Value::PrimRef(p("/comps/main/layers/b")),
+        );
+    });
+    let out = eval(&mut ev, &s);
+    let a = out.layers.iter().find(|l| l.path.name() == "a").unwrap();
+    assert!(a.parent.is_some(), "the new parent shows");
+    edit(&mut s, &mut ev, &|b| {
+        b.layer("/comps/main", "c", "null");
+    });
+    assert_eq!(eval(&mut ev, &s).layers.len(), 3);
+}
+
 #[test]
 fn evaluated_comp_serializes_to_json() {
     let s = stage(|b| {

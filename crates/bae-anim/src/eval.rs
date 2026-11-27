@@ -623,41 +623,12 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
     };
 
     let paths = comp_layers(stage, path);
-    let index_of = |p: &PrimPath| paths.iter().position(|q| q == p);
-    let mut deps = vec![path.clone()];
     let mut layers = Vec::with_capacity(paths.len());
-    for (i, lp) in paths.iter().enumerate() {
-        let lv = stage.prim(lp).expect("listed layer exists");
-        let mut layer = compile_layer(stage, &lv, duration)?;
-        layer.parent = setting_ref(&lv, l::PARENT)
-            .and_then(|p| index_of(&p))
-            .filter(|&p| p != i);
-        if let Some(light) = &mut layer.light {
-            light.source = setting_ref(&lv, li::SOURCE)
-                .and_then(|p| index_of(&p))
-                .filter(|&p| p != i);
-        }
-        if layer.track_matte != TrackMatte::None {
-            layer.track_matte_layer = match setting_ref(&lv, l::TRACK_MATTE_LAYER) {
-                Some(p) => index_of(&p),
-                None => i.checked_sub(1),
-            };
-        }
-        // Source items too: their settings (solid color, size, footage
-        // interpretation) are compiled into the layer.
-        if let CompiledSource::Comp { path, .. } | CompiledSource::Asset(path, _) = &layer.source
-            && !deps.contains(path)
-        {
-            deps.push(path.clone());
-        }
-        layers.push(layer);
+    for i in 0..paths.len() {
+        layers.push(compile_layer_at(stage, &paths, i, duration)?);
     }
-
-    let has_expressions = layers.iter().any(CompiledLayer::has_expressions);
-    let has_js_expressions = has_expressions
-        && layers
-            .iter()
-            .any(|l| l.expr_props().iter().any(|e| e.fast.is_none()));
+    let deps = comp_deps(path, &layers);
+    let (has_expressions, has_js_expressions) = expression_flags(&layers);
     Ok(CompiledComp {
         name: view
             .value(schema::layer::NAME)
@@ -688,6 +659,135 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         layers,
         deps,
     })
+}
+
+/// Layer `i` of a comp whose layers are `paths` (top first), with its parent,
+/// light source and track matte resolved to layer indices.
+fn compile_layer_at(
+    stage: &Stage,
+    paths: &[PrimPath],
+    i: usize,
+    duration: Time,
+) -> Result<CompiledLayer, EvalError> {
+    let index_of = |p: &PrimPath| paths.iter().position(|q| q == p);
+    let lv = stage
+        .prim(&paths[i])
+        .ok_or_else(|| EvalError::NoSuchPrim(paths[i].clone()))?;
+    let mut layer = compile_layer(stage, &lv, duration)?;
+    layer.parent = setting_ref(&lv, l::PARENT)
+        .and_then(|p| index_of(&p))
+        .filter(|&p| p != i);
+    if let Some(light) = &mut layer.light {
+        light.source = setting_ref(&lv, li::SOURCE)
+            .and_then(|p| index_of(&p))
+            .filter(|&p| p != i);
+    }
+    if layer.track_matte != TrackMatte::None {
+        layer.track_matte_layer = match setting_ref(&lv, l::TRACK_MATTE_LAYER) {
+            Some(p) => index_of(&p),
+            None => i.checked_sub(1),
+        };
+    }
+    Ok(layer)
+}
+
+/// What invalidates a compiled comp: the comp, and its layers' source items
+/// (their settings, such as solid color, size and footage interpretation,
+/// are compiled into the layers).
+fn comp_deps(comp: &PrimPath, layers: &[CompiledLayer]) -> Vec<PrimPath> {
+    let mut deps = vec![comp.clone()];
+    for layer in layers {
+        if let CompiledSource::Comp { path, .. } | CompiledSource::Asset(path, _) = &layer.source
+            && !deps.contains(path)
+        {
+            deps.push(path.clone());
+        }
+    }
+    deps
+}
+
+/// (some layer has an enabled expression, some of them need JavaScript).
+fn expression_flags(layers: &[CompiledLayer]) -> (bool, bool) {
+    let any = layers.iter().any(CompiledLayer::has_expressions);
+    let js = any
+        && layers
+            .iter()
+            .any(|l| l.expr_props().iter().any(|e| e.fast.is_none()));
+    (any, js)
+}
+
+/// `comp` with the layers `dirty` compiled again from `stage`, the others
+/// kept. `None` when its layer list changed (or a layer fails to compile):
+/// the caller compiles the whole comp.
+fn recompile_layers(
+    stage: &Stage,
+    mut comp: CompiledComp,
+    dirty: &[PrimPath],
+) -> Option<CompiledComp> {
+    let paths: Vec<PrimPath> = comp.layers.iter().map(|l| l.path.clone()).collect();
+    if comp_layers(stage, &comp.path) != paths {
+        return None;
+    }
+    for layer in dirty {
+        let i = paths.iter().position(|p| p == layer)?;
+        comp.layers[i] = compile_layer_at(stage, &paths, i, comp.duration).ok()?;
+    }
+    comp.deps = comp_deps(&comp.path, &comp.layers);
+    (comp.has_expressions, comp.has_js_expressions) = expression_flags(&comp.layers);
+    Some(comp)
+}
+
+/// The layer of `comp` that a change at `path` stays inside: `path` is the
+/// layer or below it. `whole` changes (the prim created, removed, moved or
+/// resynced) count only strictly below the layer; at the layer itself they
+/// change the comp's layer list.
+fn layer_holding<'a>(comp: &'a CompiledComp, path: &PrimPath, whole: bool) -> Option<&'a PrimPath> {
+    comp.layers
+        .iter()
+        .map(|l| &l.path)
+        .find(|l| l.is_prefix_of(path) && (!whole || *l != path))
+}
+
+/// [`StageEvent::touches`] for one change.
+fn change_touches(change: &bae_model::Change, path: &PrimPath) -> bool {
+    use bae_model::Change;
+    match change {
+        Change::PrimMoved { from, to } => {
+            path.is_prefix_of(from)
+                || path.is_prefix_of(to)
+                || from.is_prefix_of(path)
+                || to.is_prefix_of(path)
+        }
+        Change::PrimRemoved { path: p } | Change::Resynced { path: p } => {
+            path.is_prefix_of(p) || p.is_prefix_of(path)
+        }
+        other => path.is_prefix_of(other.path()),
+    }
+}
+
+/// The layers of `comp` that `changes` changed, when they changed nothing else
+/// of it (comp settings, its layer list, markers, source items); `None`
+/// when the whole comp must be compiled again.
+fn dirty_layers(comp: &CompiledComp, changes: &[bae_model::Change]) -> Option<Vec<PrimPath>> {
+    let mut dirty = Vec::new();
+    for change in changes {
+        if !comp.deps.iter().any(|d| change_touches(change, d)) {
+            continue;
+        }
+        let layer = match change {
+            bae_model::Change::AttrChanged { path, .. }
+            | bae_model::Change::PrimChanged { path } => layer_holding(comp, path, false),
+            bae_model::Change::PrimCreated { path }
+            | bae_model::Change::PrimRemoved { path }
+            | bae_model::Change::Resynced { path } => layer_holding(comp, path, true),
+            bae_model::Change::PrimMoved { from, to } => layer_holding(comp, from, true)
+                .filter(|l| layer_holding(comp, to, true) == Some(*l)),
+        }?;
+        if !dirty.contains(layer) {
+            dirty.push(layer.clone());
+        }
+    }
+    Some(dirty)
 }
 
 fn compile_layer(
@@ -1770,6 +1870,9 @@ const MAX_NESTING: usize = 64;
 #[derive(Debug, Default)]
 pub struct Evaluator {
     comps: HashMap<PrimPath, Arc<CompiledComp>>,
+    /// Compiled comps of which only some layers changed since (those
+    /// layers): on next use only they are compiled again.
+    stale: HashMap<PrimPath, (Arc<CompiledComp>, Vec<PrimPath>)>,
     /// Project settings and items for expressions (`colorDepth`, `footage()`);
     /// rebuilt after any edit.
     project: Option<Arc<expr::ProjectInfo>>,
@@ -1806,20 +1909,51 @@ impl Evaluator {
         if *self.overrides == overrides[..] {
             return;
         }
-        let touched: Vec<PrimPath> = self
+        let changes: Vec<bae_model::Change> = self
             .overrides
             .iter()
             .chain(&overrides)
-            .map(|o| o.prim.clone())
-            .collect();
-        self.comps.retain(|_, c| {
-            !c.deps.iter().any(|d| {
-                touched
-                    .iter()
-                    .any(|p| d.is_prefix_of(p) || p.is_prefix_of(d))
+            .map(|o| bae_model::Change::AttrChanged {
+                path: o.prim.clone(),
+                attr: o.attr.clone(),
+                range: bae_model::TimeRange::ALL,
             })
-        });
+            .collect();
+        self.mark_stale(&changes);
         self.overrides = overrides.into();
+    }
+
+    /// Moves the compiled comps `changes` touch to [`Self::stale`] (when they
+    /// stay inside some of their layers) or drops them.
+    fn mark_stale(&mut self, changes: &[bae_model::Change]) {
+        let touched: Vec<PrimPath> = self
+            .comps
+            .iter()
+            .filter(|(_, c)| {
+                c.deps
+                    .iter()
+                    .any(|d| changes.iter().any(|ch| change_touches(ch, d)))
+            })
+            .map(|(p, _)| p.clone())
+            .collect();
+        for path in touched {
+            let c = self.comps.remove(&path).expect("listed");
+            if let Some(dirty) = dirty_layers(&c, changes) {
+                self.stale.insert(path, (c, dirty));
+            }
+        }
+        self.stale
+            .retain(|_, (c, dirty)| match dirty_layers(c, changes) {
+                Some(more) => {
+                    for l in more {
+                        if !dirty.contains(&l) {
+                            dirty.push(l);
+                        }
+                    }
+                    true
+                }
+                None => false,
+            });
     }
 
     /// Evaluate `comp` at comp time `time`.
@@ -1866,6 +2000,16 @@ impl Evaluator {
     fn compiled(&mut self, stage: &Stage, comp: &PrimPath) -> Result<Arc<CompiledComp>, EvalError> {
         if let Some(c) = self.comps.get(comp) {
             return Ok(c.clone());
+        }
+        // Only some layers changed: compile those again, keep the others.
+        if let Some((old, dirty)) = self.stale.remove(comp)
+            && let Ok(old) = Arc::try_unwrap(old)
+            && let Some(c) =
+                with_overrides(&self.overrides, || recompile_layers(stage, old, &dirty))
+        {
+            let c = Arc::new(c);
+            self.comps.insert(comp.clone(), c.clone());
+            return Ok(c);
         }
         let c = Arc::new(with_overrides(&self.overrides, || {
             compile_comp(stage, comp)
@@ -2082,8 +2226,7 @@ impl Evaluator {
 
     /// Drop compiled comps that `event` may have changed.
     pub fn invalidate(&mut self, event: &StageEvent) {
-        self.comps
-            .retain(|_, c| !c.deps.iter().any(|d| event.touches(d)));
+        self.mark_stale(&event.changes);
         let structural = event.changes.iter().any(|c| match c {
             bae_model::Change::AttrChanged { attr, .. } => attr == l::NAME,
             _ => true,
@@ -2100,6 +2243,7 @@ impl Evaluator {
     /// Drop every compiled comp.
     pub fn clear(&mut self) {
         self.comps.clear();
+        self.stale.clear();
         self.comp_list = None;
         self.project = None;
         if let Some(s) = &self.samples {
