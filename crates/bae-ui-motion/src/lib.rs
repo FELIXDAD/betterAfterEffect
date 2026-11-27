@@ -56,6 +56,7 @@ mod path_nulls;
 mod playback;
 mod prefs;
 mod presets;
+mod vision_bake;
 pub use presets::register_preset_index;
 mod preview_snapshot;
 pub mod progress_metadata;

@@ -979,7 +979,7 @@ const ANIMATION: &[Node] = &[
 /// View.
 #[rustfmt::skip]
 const VIEW: &[Node] = &[
-    it(589825, "Split with New Locked Viewer", "motion.view.split_with_new_locked_viewer", "", A, Later),
+    it(589825, "Split with New Locked Viewer", "motion.view.split_with_new_locked_viewer", "", A, Done),
     SEP,
     it(589827, "Zoom In", "viewer.zoom_in", "", A, Done),
     it(589828, "Zoom Out", "viewer.zoom_out", "", A, Done),
@@ -1049,11 +1049,11 @@ const VIEW: &[Node] = &[
     sub(
         "Switch View Layout",
         &[
-            it(23396353, "1 View", "motion.view.view_layout", r#"{"views":1}"#, A, Later),
-            it(23396354, "2 Views", "motion.view.view_layout", r#"{"views":2}"#, A, Later),
-            it(23396355, "4 Views", "motion.view.view_layout", r#"{"views":4}"#, A, Later),
+            it(23396353, "1 View", "motion.view.view_layout", r#"{"views":1}"#, A, Done),
+            it(23396354, "2 Views", "motion.view.view_layout", r#"{"views":2}"#, A, Done),
+            it(23396355, "4 Views", "motion.view.view_layout", r#"{"views":4}"#, A, Done),
             SEP,
-            it(23396357, "Share View Options", "motion.view.share_view_options", "", A, Later),
+            it(23396357, "Share View Options", "motion.view.share_view_options", "", A, Done),
         ],
     ),
     sub(
