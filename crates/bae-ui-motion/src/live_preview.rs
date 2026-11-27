@@ -118,6 +118,7 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
     let mut engine = RenderEngine::new(gpu, 0);
     let mut scene: Option<(Arc<LiveScene>, Arc<Stage>)> = None;
     let mut target: Option<OutputTarget> = None;
+    let mut replicas = crate::preview_snapshot::Replicas::default();
     loop {
         let job = {
             let mut state = shared.state.lock().unwrap();
@@ -132,7 +133,7 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
             }
         };
         if scene.as_ref().is_none_or(|(s, _)| s.key != job.scene.key) {
-            let Ok(stage) = job.scene.snapshot.restore() else {
+            let Ok(stage) = job.scene.snapshot.restore_with(&mut replicas) else {
                 continue;
             };
             if let Some(sources) = &job.scene.sources {

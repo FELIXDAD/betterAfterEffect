@@ -1366,9 +1366,11 @@ impl Session {
         self.audio_clock = false;
     }
 
-    /// Keep the audio mix current (once per composition edit). While playing,
-    /// a new mix restarts the device and the clock at the current frame: a late
-    /// device or a live layer edit. The shell ticks the clock.
+    /// Keep the audio mix current while playing (once per composition edit):
+    /// a new mix restarts the device and the clock at the current frame (a
+    /// late device or a live layer edit). The shell ticks the clock. Stopped,
+    /// edits do not rebuild the mix on the UI thread: starting playback and
+    /// audio scrubbing prepare it when they need it.
     pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
         let mute =
             crate::prefs::current(cx.resources).bool("previews.mute_audio_when_not_realtime");
@@ -1378,7 +1380,8 @@ impl Session {
             output.set_muted(mute && self.audio_clock && self.playback_stats.slow);
         }
         self.mute_slow_preview = mute;
-        if self.prepare_mix(cx, info)
+        if self.playback.is_some()
+            && self.prepare_mix(cx, info)
             && let Some(pb) = &self.playback
             && pb.caching.is_none()
         {
