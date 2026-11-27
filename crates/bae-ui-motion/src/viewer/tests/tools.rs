@@ -136,7 +136,7 @@ fn contrasting_mask_uses_the_rendered_pixel_at_the_start_of_the_drag() {
     };
     let mut h = H::new();
     let registry = std::sync::Arc::new(bae_gpu::viewport::ViewportTextureRegistry::new());
-    h.resources.insert(gpu);
+    h.resources.insert(gpu.clone());
     h.resources.insert(registry.clone());
     h.viewer = CompositionViewer::new(None);
     h.frame(Vec::new(), Modifiers::NONE);
@@ -173,6 +173,11 @@ fn contrasting_mask_uses_the_rendered_pixel_at_the_start_of_the_drag() {
             "viewer pixel {:?}",
             h.session().lock().info.color
         );
+        // Slow adapters (WARP on CI) finish the frame and its pixel readback
+        // only when waited on (as in #727).
+        let _ = gpu
+            .device()
+            .poll(bae_gpu::wgpu::PollType::wait_indefinitely());
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     let r = h.draw(Tool::Rectangle, (180.0, 140.0), (250.0, 175.0));

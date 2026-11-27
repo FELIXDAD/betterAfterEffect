@@ -975,6 +975,33 @@ pub struct ToolOptions {
     pub puppet_show_mesh: bool,
     pub puppet_expansion: f64,
     pub puppet_density: f64,
+    /// Puppet Record Options (Cmd/Ctrl-dragging a pin records it).
+    pub puppet_record: PuppetRecord,
+}
+
+/// AE's Puppet Record Options.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PuppetRecord {
+    /// Recorded time per real time, percent.
+    pub speed: f64,
+    /// How far (pixels) the recorded path may stray when thinning keyframes.
+    pub smoothing: f64,
+    /// Use Draft Deformation (stored; the deformation is the same).
+    pub draft: bool,
+    /// Show the mesh while recording.
+    pub show_mesh: bool,
+}
+
+impl Default for PuppetRecord {
+    fn default() -> Self {
+        PuppetRecord {
+            speed: 100.0,
+            smoothing: 5.0,
+            draft: false,
+            show_mesh: false,
+        }
+    }
 }
 
 impl Default for ToolOptions {
@@ -1002,6 +1029,7 @@ impl Default for ToolOptions {
             puppet_show_mesh: false,
             puppet_expansion: 3.0,
             puppet_density: 10.0,
+            puppet_record: PuppetRecord::default(),
         }
     }
 }
@@ -1446,6 +1474,26 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Expansion", "扩展"),
     ("Density", "密度"),
     ("Record Options...", "记录选项..."),
+    // Puppet Record Options (AE's zh_CN dictionary: PuppetRecordOptions).
+    ("Puppet Record Options", "操控录制选项"),
+    ("Use Draft Deformation", "使用草图变形"),
+    ("Show Mesh", "显示网格"),
+    (
+        "Command-drag pins to record animation.",
+        "按住 Command 键的同时拖动操控点可录制动画。",
+    ),
+    (
+        "Ctrl-drag pins to record animation.",
+        "按住 Control 键的同时拖动操控点可录制动画。",
+    ),
+    (
+        "To record pin motion, Command-click and drag pins",
+        "要记录固定点移动，请按住 Command 键单击并拖动固定点",
+    ),
+    (
+        "To record pin motion, Ctrl-click and drag pins",
+        "要记录固定点移动，请按住 Ctrl 键单击并拖动固定点",
+    ),
     ("Add", "添加"),
     ("None", "无"),
     ("Solid Color", "纯色"),
