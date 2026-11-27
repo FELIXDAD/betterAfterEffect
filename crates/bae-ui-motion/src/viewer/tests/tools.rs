@@ -131,6 +131,14 @@ fn tools_follow_the_preferences() {
 
 #[test]
 fn contrasting_mask_uses_the_rendered_pixel_at_the_start_of_the_drag() {
+    // EXPERIMENT (do not merge): repeat to catch the Windows WARP timeout.
+    for round in 0..40 {
+        eprintln!("contrasting round {round}");
+        contrasting_round();
+    }
+}
+
+fn contrasting_round() {
     let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
