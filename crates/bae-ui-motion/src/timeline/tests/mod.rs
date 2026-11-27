@@ -405,6 +405,7 @@ impl H {
 mod columns;
 mod expressions;
 mod graph;
+mod input;
 mod keyframes;
 mod layer_bars;
 mod layers;

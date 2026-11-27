@@ -284,3 +284,98 @@ fn double_clicking_project_footage_opens_the_footage_panel() {
     let shown = h.state().session().lock().footage_view.clone();
     assert_eq!(shown, Some(solid));
 }
+
+/// A movie used in the open comp: double-clicking it in the Project panel
+/// shows it in the Footage panel, not its layer in the comp (0.2.0).
+#[test]
+fn double_clicking_a_movie_used_in_a_comp_opens_the_footage_panel() {
+    use bae_model::{FrameRate, Time, Value};
+    let mut h = gui();
+    let dir = tempfile::tempdir().unwrap();
+    let clip = dir.path().join("合成 1.mp4");
+    std::fs::write(&clip, b"clip").unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        "item.import",
+        serde_json::json!({"files": [{"path": clip, "attrs": {
+            "kind": Value::Enum("footage".into()),
+            "width": Value::Int(320), "height": Value::Int(180),
+            "frame_rate": Value::FrameRate(FrameRate::FPS_30),
+            "duration": Value::Time(Time::from_seconds(3.0)),
+            "has_video": Value::Bool(true), "has_audio": Value::Bool(true)}}]}),
+    ));
+    settle(&mut h);
+    let item = h
+        .state()
+        .stage()
+        .children(&bae_model::PrimPath::new(query::ASSETS_FOLDER).unwrap())[0]
+        .clone();
+    comp_with(&mut h, &[]);
+    let comp = h.state().active_comp().unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        "layer.create",
+        serde_json::json!({"comp": comp, "kind": "footage", "source": item}),
+    ));
+    settle(&mut h);
+    let row = project_row(&h, "合成 1.mp4");
+    double_click_at(&mut h, row);
+    settle(&mut h);
+    let session = h.state().session();
+    let s = session.lock();
+    assert!(s.selected_layers.is_empty(), "its layer was selected");
+    assert_eq!(s.footage_view.as_ref(), Some(&item));
+    assert_eq!(
+        h.state().workspace.focused_kind().as_deref(),
+        Some("footage")
+    );
+}
+
+/// Spacebar plays what the focused panel shows: with the Footage panel in
+/// front the footage plays there (its time moves), not the composition.
+#[test]
+fn spacebar_plays_the_footage_panel_when_it_has_focus() {
+    use bae_model::{FrameRate, Time, Value};
+    let mut h = gui();
+    comp_with(&mut h, &[]);
+    let dir = tempfile::tempdir().unwrap();
+    let clip = dir.path().join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        "item.import",
+        serde_json::json!({"files": [{"path": clip, "attrs": {
+            "kind": Value::Enum("footage".into()),
+            "width": Value::Int(320), "height": Value::Int(180),
+            "frame_rate": Value::FrameRate(FrameRate::FPS_30),
+            "duration": Value::Time(Time::from_seconds(3.0)),
+            "has_video": Value::Bool(true)}}]}),
+    ));
+    settle(&mut h);
+    let row = project_row(&h, "clip.mov");
+    double_click_at(&mut h, row);
+    assert_eq!(
+        h.state().workspace.focused_kind().as_deref(),
+        Some("footage")
+    );
+    // A timecode that was not shown before Spacebar: the footage's moving time.
+    let codes = |h: &Ui| {
+        painted_texts(h)
+            .into_iter()
+            .filter(|t| t.starts_with("0:00:0") && t.len() == 10)
+            .collect::<Vec<_>>()
+    };
+    let before = codes(&h);
+    let moved = |h: &Ui| codes(h).into_iter().find(|t| !before.contains(t));
+    key(&mut h, Modifiers::NONE, Key::Space);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while moved(&h).is_none() && std::time::Instant::now() < until {
+        frame(&mut h);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let shown = moved(&h).expect("the footage time did not move");
+    assert!(!h.state().is_playing(), "the composition played instead");
+    // Spacebar again stops it there.
+    key(&mut h, Modifiers::NONE, Key::Space);
+    let stopped = codes(&h);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    settle(&mut h);
+    assert_eq!(codes(&h), stopped, "kept playing after {shown}");
+}

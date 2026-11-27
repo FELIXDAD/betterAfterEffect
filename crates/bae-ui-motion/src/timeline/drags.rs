@@ -63,7 +63,7 @@ impl TimelinePanel {
                     }
                 }
             }
-            Some(Drag::Marquee { origin, additive }) => {
+            Some(Drag::Marquee { origin, mode, base }) => {
                 if let Some(p) = pointer {
                     let r = Rect::from_two_pos(origin, p).intersect(graph_body);
                     ui.painter().rect(
@@ -78,16 +78,36 @@ impl TimelinePanel {
                         .filter(|(kr, _)| r.intersects(*kr))
                         .map(|(_, k)| k.clone())
                         .collect();
+                    session.lock().selected_keys = mode.apply(&base, inside);
+                }
+                if released {
+                    self.drag = None;
+                }
+            }
+            Some(Drag::LayerMarquee { origin, mode, base }) => {
+                if let Some(p) = pointer {
+                    // The outline only: left of the time graph.
+                    let outline = Rect::from_min_max(
+                        pos2(ui.max_rect().left(), graph_body.top()),
+                        pos2(graph_body.left(), graph_body.bottom()),
+                    );
+                    let r = Rect::from_two_pos(origin, p).intersect(outline);
+                    ui.painter().rect(
+                        r,
+                        0.0,
+                        Color32::from_rgba_unmultiplied(88, 149, 237, 30),
+                        Stroke::new(1.0, color::ACCENT),
+                        egui::StrokeKind::Inside,
+                    );
+                    let inside: Vec<PrimPath> = layer_rows
+                        .iter()
+                        .filter(|(row, _)| r.y_range().intersects(row.y_range()))
+                        .map(|(_, l)| l.clone())
+                        .filter(|l| !query::is_locked(cx.stage, l))
+                        .collect();
                     let mut s = session.lock();
-                    if additive {
-                        for k in inside {
-                            if !s.selected_keys.contains(&k) {
-                                s.selected_keys.push(k);
-                            }
-                        }
-                    } else {
-                        s.selected_keys = inside;
-                    }
+                    s.selected_layers = mode.apply(&base, inside);
+                    s.selected_keys.clear();
                 }
                 if released {
                     self.drag = None;
