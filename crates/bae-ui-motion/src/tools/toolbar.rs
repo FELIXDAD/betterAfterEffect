@@ -364,7 +364,20 @@ impl AeToolbar {
                     .labeled(egui::WidgetType::DragValue, tr(label))
                     .on_hover_text(tr(label));
                 }
-                ui.add_enabled_ui(false, |ui| widgets::link(ui, tr("Record Options...")));
+                let tip = if cfg!(target_os = "macos") {
+                    "To record pin motion, Command-click and drag pins"
+                } else {
+                    "To record pin motion, Ctrl-click and drag pins"
+                };
+                if widgets::link(ui, tr("Record Options..."))
+                    .on_hover_text(tr(tip))
+                    .clicked()
+                {
+                    crate::dialogs::open(
+                        cx.resources,
+                        crate::dialogs::Dialog::PuppetRecordOptions(o.puppet_record),
+                    );
+                }
             }
             Group::Hand | Group::Zoom | Group::Mesh | Group::Roto => {}
         }

@@ -1052,5 +1052,61 @@ fn models_receive_model_shadows() {
         .collect();
     assert!(draws[1] < draws[0], "light maps reused: {draws:?}");
     assert_eq!(draws[1], draws[2], "{draws:?}");
+    // A 3D solid casting shadows throws its shadow on the slab as well.
+    let mut card_scene = scene(ShadowMode::Off);
+    card_scene.layers[0].visible = false;
+    let mut card = solid_3d(
+        "card",
+        RED,
+        [40, 40],
+        DVec3::new(100.0, 100.0, 0.0),
+        DVec3::ZERO,
+    );
+    card.material.casts_shadows = ShadowMode::On;
+    card_scene.layers.insert(0, card.clone());
+    let with_card = render(&mut r, &card_scene);
+    card.material.casts_shadows = ShadowMode::Off;
+    card_scene.layers[0] = card;
+    let without = render(&mut r, &card_scene);
+    assert!(
+        luma(&with_card, 125, 100) + 150 < luma(&without, 125, 100),
+        "card shadow: {:?} vs {:?}",
+        with_card.px(125, 100),
+        without.px(125, 100)
+    );
+    assert_eq!(luma(&with_card, 60, 100), luma(&without, 60, 100));
     std::fs::remove_dir_all(dir).ok();
+}
+
+/// Advanced 3D Transparency lets what is behind a 3D layer through;
+/// Transparency Rolloff takes transparency away at glancing angles.
+#[test]
+fn transparency_shows_what_is_behind() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let scene = |transparency: f32, rolloff: f32, tilt: f64| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut front = solid_3d(
+            "front",
+            RED,
+            [200, 200],
+            DVec3::new(100.0, 100.0, 0.0),
+            DVec3::new(tilt, 0.0, 0.0),
+        );
+        front.material.transparency = transparency;
+        front.material.transparency_rolloff = rolloff;
+        comp.layers = vec![front, solid("back", BLUE, [200, 200])];
+        comp
+    };
+    let opaque = render(&mut r, &scene(0.0, 0.0, 0.0)).px(100, 100);
+    assert!(opaque[0] > 250 && opaque[2] < 5, "{opaque:?}");
+    let half = render(&mut r, &scene(50.0, 0.0, 0.0)).px(100, 100);
+    assert!(
+        (i32::from(half[0]) - 128).abs() <= 3 && (i32::from(half[2]) - 127).abs() <= 3,
+        "{half:?}"
+    );
+    // Tilted 60° (seen at about cos 0.5 from the camera): full rolloff
+    // halves the transparency.
+    let tilted = render(&mut r, &scene(50.0, 100.0, 60.0)).px(100, 100);
+    assert!(tilted[0] > half[0] + 20, "{tilted:?} vs {half:?}");
 }

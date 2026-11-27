@@ -456,6 +456,7 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 crate::viewer::view_options::background_checked(cx.resources, &key)
             })
         }
+        actions::ids::ENABLE_LOGGING => spec.checked_when(|_| bae_platform::logging::verbose()),
         actions::ids::SEPARATE_DIMENSIONS => spec.checked_when(|cx| {
             let session = common::session(cx.resources);
             let layers = session.lock().selected_layers.clone();
@@ -466,7 +467,12 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         }
 
         id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
-            && id != "motion.view.clear_guides" =>
+            && !matches!(
+                id,
+                "motion.view.clear_guides"
+                    | "motion.view.import_guides"
+                    | "motion.view.export_guides"
+            ) =>
         {
             spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
         }

@@ -833,6 +833,14 @@ fn compile_layer(
         ("material:specular_shininess", Value::Float(5.0)),
         ("material:metal", Value::Float(100.0)),
         ("material:light_transmission", Value::Float(0.0)),
+        ("material:shadow_color", Value::Color([0.0, 0.0, 0.0, 1.0])),
+        ("material:appears_in_reflections", Value::Int(1)),
+        ("material:reflection_intensity", Value::Float(0.0)),
+        ("material:reflection_sharpness", Value::Float(100.0)),
+        ("material:reflection_rolloff", Value::Float(0.0)),
+        ("material:transparency", Value::Float(0.0)),
+        ("material:transparency_rolloff", Value::Float(0.0)),
+        ("material:index_of_refraction", Value::Float(1.0)),
     ]
     .into_iter()
     .map(|(a, d)| (a, p(a, d)))
@@ -1330,6 +1338,17 @@ impl CompiledComp {
                     specular_intensity: percent("material:specular_intensity", 50.0),
                     specular_shininess: percent("material:specular_shininess", 5.0),
                     metal: percent("material:metal", 100.0),
+                    shadow_color: match opt("material:shadow_color") {
+                        Some(Value::Color(c)) => c,
+                        _ => [0.0, 0.0, 0.0, 1.0],
+                    },
+                    appears_in_reflections: mode("material:appears_in_reflections", 1),
+                    reflection_intensity: percent("material:reflection_intensity", 0.0),
+                    reflection_sharpness: percent("material:reflection_sharpness", 100.0),
+                    reflection_rolloff: percent("material:reflection_rolloff", 0.0),
+                    transparency: percent("material:transparency", 0.0),
+                    transparency_rolloff: percent("material:transparency_rolloff", 0.0),
+                    index_of_refraction: percent("material:index_of_refraction", 1.0),
                 });
             }
             if let Some(cm) = &layer.camera {

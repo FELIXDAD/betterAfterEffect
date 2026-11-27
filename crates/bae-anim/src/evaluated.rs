@@ -335,6 +335,21 @@ pub struct MaterialState {
     pub specular_shininess: f64,
     /// Percent.
     pub metal: f64,
+    /// Advanced 3D: the colour of the shadows it casts.
+    pub shadow_color: [f64; 4],
+    /// Advanced 3D: 0 Off, 1 On, 2 Only.
+    pub appears_in_reflections: u8,
+    /// Percent.
+    pub reflection_intensity: f64,
+    /// Percent.
+    pub reflection_sharpness: f64,
+    /// Percent.
+    pub reflection_rolloff: f64,
+    /// Percent.
+    pub transparency: f64,
+    /// Percent.
+    pub transparency_rolloff: f64,
+    pub index_of_refraction: f64,
 }
 
 /// Camera layer state (AE-ANI-009/022).

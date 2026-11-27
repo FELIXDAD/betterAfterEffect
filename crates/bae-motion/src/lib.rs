@@ -113,7 +113,10 @@ pub use comp::{
 pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
-pub use import::{ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind, ReplaceFile};
+pub use import::{
+    ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind, ReloadFiles, ReloadItem,
+    ReplaceFile,
+};
 pub use interpret::InterpretFootage;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
@@ -165,6 +168,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(NewItem),
         r.register(photoshop::ImportPhotoshop),
         r.register(ReplaceFile),
+        r.register(ReloadFiles),
         r.register(CreateLayer),
         r.register(Precompose),
         r.register(precompose::ReplaceWithPrecomp),
