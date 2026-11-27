@@ -490,7 +490,7 @@
 | Remove All Text Animators | 851984 | `motion.anim.remove_all_text_animators` |  |  |  | A | ✅ |
 | Add Expression | 851986 | `motion.anim.add_expression` |  | Alt+Shift+= | Opt+Shift+= | C | ☐ |
 | Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ✅ |
-| Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
+| Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ✅ |
 | Warp Stabilizer VFX | 851989 | `motion.anim.warp_stabilizer_vfx` |  |  |  | B | ⏸ |
 | Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ✅ |
 | Track Mask | 851991 | `motion.anim.track_mask` |  |  |  | B | ⏸ |
@@ -503,7 +503,7 @@
 
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| Split with New Locked Viewer | 589825 | `motion.view.split_with_new_locked_viewer` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | A | ⏸ |
+| Split with New Locked Viewer | 589825 | `motion.view.split_with_new_locked_viewer` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | A | ✅ |
 | Zoom In | 589827 | `viewer.zoom_in` |  | . / Ctrl+Alt+= | . / Cmd+Opt+= | A | ✅ |
 | Zoom Out | 589828 | `viewer.zoom_out` |  | , / Ctrl+Alt+- | , / Cmd+Opt+- | A | ✅ |
 | Resolution ▸ Full | 8650753 | `motion.view.resolution` | `{"factor":1}` | Ctrl+J | Cmd+J | B | ☐ |
@@ -543,10 +543,10 @@
 | Camera Settings... | 589851 | `motion.layer.camera_settings` |  |  |  | E | ✅ |
 | Reset 3D View | 589852 | `motion.view.reset_3d_view` |  |  |  | A | ⏸ |
 | Create Camera from 3D View | 589853 | `motion.view.create_camera_from_3d_view` |  |  |  | A | ⏸ |
-| Switch View Layout ▸ 1 View | 23396353 | `motion.view.view_layout` | `{"views":1}` |  |  | A | ⏸ |
-| Switch View Layout ▸ 2 Views | 23396354 | `motion.view.view_layout` | `{"views":2}` |  |  | A | ⏸ |
-| Switch View Layout ▸ 4 Views | 23396355 | `motion.view.view_layout` | `{"views":4}` |  |  | A | ⏸ |
-| Switch View Layout ▸ Share View Options | 23396357 | `motion.view.share_view_options` |  |  |  | A | ⏸ |
+| Switch View Layout ▸ 1 View | 23396353 | `motion.view.view_layout` | `{"views":1}` |  |  | A | ✅ |
+| Switch View Layout ▸ 2 Views | 23396354 | `motion.view.view_layout` | `{"views":2}` |  |  | A | ✅ |
+| Switch View Layout ▸ 4 Views | 23396355 | `motion.view.view_layout` | `{"views":4}` |  |  | A | ✅ |
+| Switch View Layout ▸ Share View Options | 23396357 | `motion.view.share_view_options` |  |  |  | A | ✅ |
 | Switch 3D View ▸ Active Camera (Default) | 12058625 | `motion.view.switch_3d_view` | `{"view":"active_camera"}` |  |  | A | ⏸ |
 | Switch 3D View ▸ Default | 12058627 | `motion.view.switch_3d_view` | `{"view":"default"}` |  |  | A | ⏸ |
 | Switch 3D View ▸ Front | 12058629 | `motion.view.switch_3d_view` | `{"view":"front"}` |  |  | A | ⏸ |

@@ -204,11 +204,16 @@ pub struct PanelRequests {
     pub invocations: Vec<Invocation>,
     pub open: Vec<PanelId>,
     pub close: Vec<PanelId>,
+    /// New panels to dock to the right of another one's frame (new, beside).
+    pub split: Vec<(PanelId, PanelId)>,
 }
 
 impl PanelRequests {
     pub fn is_empty(&self) -> bool {
-        self.invocations.is_empty() && self.open.is_empty() && self.close.is_empty()
+        self.invocations.is_empty()
+            && self.open.is_empty()
+            && self.close.is_empty()
+            && self.split.is_empty()
     }
 }
 
@@ -268,6 +273,12 @@ impl<'a> PanelContext<'a> {
     /// Open (or focus) a panel after this frame.
     pub fn open_panel(&mut self, id: impl Into<PanelId>) {
         self.requests.open.push(id.into());
+    }
+
+    /// Open a new panel to the right of `beside`, splitting its frame, after
+    /// this frame (AE's View > Split with New Locked Viewer).
+    pub fn split_open(&mut self, id: impl Into<PanelId>, beside: impl Into<PanelId>) {
+        self.requests.split.push((id.into(), beside.into()));
     }
 
     /// Close this panel after this frame.
