@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::error::SyncError;
 use crate::protocol::Message;
-use crate::transport::{LinkNotes, Transport};
+use crate::transport::{LinkNotes, Transport, check_size};
 
 type Notify = Box<dyn Fn() + Send>;
 
@@ -117,11 +117,18 @@ impl NotesCopier {
 /// it copies them whenever they changed, after every call of the inner
 /// transport and before it hands on a message that call received (so notes
 /// from the shared folder's first scan are here once its `Hello` is).
+///
+/// [`Transport::max_message_size`] is the inner transport's, read once by
+/// [`spawn`](Self::spawn). `send` refuses a larger message itself, at once
+/// ([`SyncError::MessageTooLarge`]; nothing is queued or counted in the
+/// backlog), instead of queuing it for the worker, whose failed send would
+/// come back through `recv` as if the link had failed.
 pub struct ThreadedTransport {
     tx: Option<Sender<Out>>,
     rx: Receiver<Result<Message, SyncError>>,
     worker: Option<JoinHandle<()>>,
     backlog: Arc<Backlog>,
+    max_message: Option<usize>,
 }
 
 impl std::fmt::Debug for ThreadedTransport {
@@ -135,6 +142,7 @@ impl ThreadedTransport {
     where
         T: Transport + Send + 'static,
     {
+        let max_message = inner.max_message_size();
         let (out_tx, out_rx) = mpsc::channel::<Out>();
         let (in_tx, in_rx) = mpsc::channel();
         let on_receive: Notify = Box::new(on_receive);
@@ -149,6 +157,7 @@ impl ThreadedTransport {
             rx: in_rx,
             worker: Some(worker),
             backlog,
+            max_message,
         }
     }
 
@@ -273,6 +282,7 @@ fn run<T: Transport>(
 impl Transport for ThreadedTransport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
         let tx = self.tx.as_ref().ok_or(SyncError::Closed)?;
+        check_size(&msg, self.max_message)?;
         let len = msg.approx_len();
         self.backlog.queued.fetch_add(len, Ordering::AcqRel);
         {
@@ -319,6 +329,10 @@ impl Transport for ThreadedTransport {
 
     fn notes_seq(&self) -> u64 {
         self.backlog.notes_seq.load(Ordering::Acquire)
+    }
+
+    fn max_message_size(&self) -> Option<usize> {
+        self.max_message
     }
 }
 
@@ -483,5 +497,62 @@ mod tests {
         assert!(session.stats().held_back >= 2, "{:?}", session.stats());
         t.close().unwrap();
         assert_eq!(data.lock().unwrap().len(), names.len());
+    }
+
+    /// Takes messages up to 1000 bytes and fails larger ones, as a hub link
+    /// does; records what it got.
+    struct Capped {
+        got: Arc<std::sync::Mutex<Vec<usize>>>,
+    }
+
+    impl Transport for Capped {
+        fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+            check_size(&msg, self.max_message_size())?;
+            self.got.lock().unwrap().push(msg.encoded_len());
+            Ok(())
+        }
+
+        fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+            Ok(None)
+        }
+
+        fn max_message_size(&self) -> Option<usize> {
+            Some(1000)
+        }
+    }
+
+    /// A message over the inner transport's limit is refused by `send` at
+    /// once and nothing is queued: it used to be queued, fail on the worker
+    /// and come back through `recv` as a link error, so the link was dropped
+    /// and, after the reconnect, the same message failed again.
+    #[test]
+    fn a_message_over_the_limit_fails_at_once_and_the_link_goes_on() {
+        let got = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut t =
+            ThreadedTransport::spawn(Capped { got: got.clone() }, Duration::from_millis(1), || {});
+        assert_eq!(t.max_message_size(), Some(1000));
+        let msg = |len| Message::Updates {
+            doc: DocKey::parse("root").unwrap(),
+            version: Default::default(),
+            data: vec![0; len],
+        };
+        let big = msg(2000);
+        let size = big.encoded_len();
+        match t.send(big) {
+            Err(SyncError::MessageTooLarge { doc, size: s, max }) => {
+                assert_eq!(doc, Some(DocKey::parse("root").unwrap()));
+                assert_eq!((s, max), (size, 1000));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(t.backlog(), 0);
+        assert_eq!(t.stalled(), Duration::ZERO);
+        // The link goes on.
+        t.send(msg(500)).unwrap();
+        wait_until("the small message", || got.lock().unwrap().len() == 1);
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(t.recv().unwrap().is_none());
+        t.close().unwrap();
+        assert_eq!(got.lock().unwrap().len(), 1);
     }
 }

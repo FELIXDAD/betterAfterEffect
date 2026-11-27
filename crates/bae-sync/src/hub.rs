@@ -17,7 +17,7 @@ use tungstenite::{Error as WsError, Message as WsMessage, WebSocket};
 
 use crate::error::SyncError;
 use crate::protocol::Message;
-use crate::transport::{Access, Transport};
+use crate::transport::{Access, Transport, check_size};
 
 /// Header of the hub's handshake response that tells the client what it may
 /// do: `read` or `write` ([`HubTransport::access`]). Hubs that do not send it
@@ -43,11 +43,13 @@ pub const ACCESS_HEADER: &str = "x-bae-access";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HubLimits {
     /// Largest encoded protocol message this side sends. A whole sublayer
-    /// snapshot must fit: a larger one fails to send instead of being refused
-    /// remotely (the session still sends its other documents first). The
-    /// peer's `max_incoming` must not be smaller (except for document data the
-    /// peer will not take anyway: a read-only hub connection, whose session
-    /// sends none, [`crate::SessionConfig::send_data`]).
+    /// snapshot must fit: a larger one fails to send
+    /// ([`SyncError::MessageTooLarge`]) instead of being refused remotely,
+    /// and the session skips only its document. The peer's `max_incoming` must
+    /// not be smaller (except for document data the peer will not take anyway:
+    /// a read-only hub connection, whose session sends none,
+    /// [`crate::SessionConfig::send_data`]), or it drops the link over a
+    /// larger message.
     pub max_message: usize,
     /// Largest message accepted from the peer (also the frame limit, since a
     /// message is one frame): a larger one fails `recv` as soon as its frame
@@ -585,20 +587,17 @@ fn link_err(e: WsError) -> SyncError {
 }
 
 impl Transport for HubTransport {
+    /// A message over [`max_message_size`](Transport::max_message_size)
+    /// fails with [`SyncError::MessageTooLarge`] before anything is encoded
+    /// or queued, and the link stays usable.
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
         if let Some(over) = &self.over {
             return Err(SyncError::Hub(over.clone()));
         }
-        let bytes = msg.encode();
         // tungstenite only checks the size of incoming messages; the peer would
         // drop the link over an oversized one, so fail here with a clear reason.
-        let max = self.limits.max_message;
-        if bytes.len() > max {
-            return Err(SyncError::Hub(format!(
-                "message of {} bytes is over the {max}-byte limit of the hub link",
-                bytes.len()
-            )));
-        }
+        check_size(&msg, self.max_message_size())?;
+        let bytes = msg.encode();
         // Frame header included (at most 14 bytes).
         let len = bytes.len() as u64 + 14;
         if self.unsent > 0 && self.unsent + len > self.limits.max_unsent as u64 {
@@ -710,6 +709,11 @@ impl Transport for HubTransport {
     /// system's socket buffers), as of the last `send` or `recv`.
     fn backlog(&self) -> usize {
         usize::try_from(self.unsent).unwrap_or(usize::MAX)
+    }
+
+    /// [`HubLimits::max_message`].
+    fn max_message_size(&self) -> Option<usize> {
+        Some(self.limits.max_message)
     }
 }
 

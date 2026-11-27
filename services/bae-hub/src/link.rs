@@ -72,6 +72,12 @@ impl Transport for PeerLink {
     fn backlog(&self) -> usize {
         self.inner.backlog()
     }
+
+    /// The WebSocket's: a document whose update is larger is skipped for
+    /// this client (`SyncError::MessageTooLarge`), the link stays.
+    fn max_message_size(&self) -> Option<usize> {
+        self.inner.max_message_size()
+    }
 }
 
 #[cfg(test)]

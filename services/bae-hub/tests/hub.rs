@@ -170,6 +170,91 @@ fn read_only_clients_see_but_cannot_edit() {
     assert_eq!(viewer["token"], "viewer");
 }
 
+/// A note of `len` random letters in `/comps/main` of `layer` (Loro does
+/// not get them much smaller).
+fn note(client: &mut Client, layer: &SublayerId, attr: &str, len: usize, rng: &mut Rng) {
+    let text: String = (0..len)
+        .map(|_| char::from(b'a' + rng.below(26) as u8))
+        .collect();
+    client.stage.set_edit_target(layer).unwrap();
+    client
+        .stage
+        .transact(&client.who, "note", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main"),
+                attr: attr.into(),
+                value: Some(Value::String(text)),
+            })
+        })
+        .unwrap();
+}
+
+/// Whether `to` has everything `from` has of `layer`.
+fn has_all(from: &Client, to: &Client, layer: &SublayerId) -> bool {
+    let doc = DocKey::sublayer(layer);
+    let want = DocSet::version(&from.stage, &doc).unwrap();
+    DocSet::version(&to.stage, &doc).is_some_and(|v| v.includes_vv(&want))
+}
+
+/// The hub's sessions skip a document that does not fit in one message for
+/// a client, as the clients' sessions do (spec 2.4, 3.1). Here `root` grew to
+/// more than the hub's `max_message` in smaller edits, and a newcomer lacks
+/// all of them: the hub skips `root` for it and goes on with `anim/a`, and
+/// the newcomer keeps its link (it reports it has not caught up). The relay
+/// used to drop the newcomer on the failed send; it reconnected and was
+/// dropped again, forever, and got no other document either.
+#[test]
+fn a_document_too_large_for_one_client_does_not_drop_its_link() {
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.limits.max_message = 256 << 10;
+    cfg.limits.max_incoming = 256 << 10;
+    let hub = start(cfg);
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut rng = Rng::new(11);
+    let root = SublayerId::root();
+    let anim = sl("anim/a");
+    // The editor writes four notes of 100 KiB, each in its own message; a
+    // second client gets each as it comes (so the hub has them all).
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "editor", &base),
+        Client::join(addr, PROJECT, WRITE, "early", &base),
+    ];
+    for i in 0..4 {
+        note(
+            &mut clients[0],
+            &root,
+            &format!("note{i}"),
+            100 << 10,
+            &mut rng,
+        );
+        pump_until(&mut clients, Duration::from_secs(20), |c| {
+            has_all(&c[0], &c[1], &root)
+        });
+    }
+    clients.push(Client::join(addr, PROJECT, WRITE, "late", &base));
+    // The editor keeps editing both documents; `anim/a` reaches the
+    // newcomer, `root` does not, and nobody is dropped (`Client::pump`
+    // fails the test on a link error).
+    for _ in 0..5 {
+        note(&mut clients[0], &anim, "small", 100, &mut rng);
+        note(&mut clients[0], &root, "small", 100, &mut rng);
+        pump_until(&mut clients, Duration::from_secs(20), |c| {
+            has_all(&c[0], &c[2], &anim) && has_all(&c[0], &c[1], &root)
+        });
+    }
+    pump_for(&mut clients, Duration::from_millis(100));
+    let late = &clients[2];
+    assert!(!has_all(&clients[0], late, &root));
+    assert!(!late.session.is_caught_up(&late.stage));
+    assert!(late.session.stats().bytes_received > 0);
+    let list = http_get(addr, "/v1/projects", Some(WRITE));
+    let json: serde_json::Value = serde_json::from_str(&list.body).unwrap();
+    let peers = json["projects"][0]["peers"].as_array().unwrap();
+    assert_eq!(peers.len(), 3, "{peers:?}");
+}
+
 /// The hub takes at most `read_only_max_incoming` from read-only connections:
 /// a read-only token cannot make it take in messages as large as writers may
 /// send (it used to take 256 MiB from anyone and drop the edits only once

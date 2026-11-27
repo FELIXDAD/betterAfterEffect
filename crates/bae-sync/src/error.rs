@@ -35,6 +35,22 @@ pub enum SyncError {
     NotADirectory(PathBuf),
     #[error("hub connection: {0}")]
     Hub(String),
+    /// A message is larger than the link takes in one piece
+    /// ([`crate::Transport::max_message_size`]: a hub link's `max_message`,
+    /// or less if the other side said it takes less). Nothing was sent and the
+    /// link is still usable. A session skips only that document (reported
+    /// once in `PumpOutcome::errors`, listed by `SyncSession::too_large` and
+    /// as unsynced) and goes on with the others (`docs/spec/sync.md` §2.4).
+    /// `doc`: the document of the message, if it has one.
+    #[error(
+        "message of {size} bytes{} is over the link's limit of {max} bytes per message",
+        doc.as_ref().map(|d| format!(" for document {d}")).unwrap_or_default()
+    )]
+    MessageTooLarge {
+        doc: Option<crate::DocKey>,
+        size: usize,
+        max: usize,
+    },
     /// The hub answered the WebSocket handshake with an HTTP error instead of
     /// accepting it. `bae-hub` uses 401 (bad or missing token), 403 (the token
     /// may not open this project), 404 (no such project, and the token may not

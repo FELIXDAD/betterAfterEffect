@@ -112,6 +112,10 @@
 - **多进程测试**：测试失败时不再留下 `bae-hub` 进程（丢弃子进程时先关它的标准输入，守护 Hub 的子进程来得及先杀 Hub）；杀 Hub 的测试一直编辑到重连之后再叫停；同一端口重启时的端口竞争写在注释里（spec 3.1）。
 - 09 侧：只读令牌连不发 `x-bae-access` 的旧 Hub（0.0.1）时，客户端会再查一次 `/v1/status`（spec 7.5）。
 
+### 2026-11-27（zjzcoder，C 多人协作，`collab/sync-too-large`）
+
+- **放不下的工程层不再断开客户端**（spec 2.4 第 3 步）：发给某个客户端的一个工程层超过 `max_message` 时，Relay 的会话只对它跳过这个工程层，连接不断（`PeerLink` 转发 `max_message_size`）。日志里记一条 warn，说明可以调大 `max_message_mib`。测试 `a_document_too_large_for_one_client_does_not_drop_its_link`。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 09 collab/sync（2026-11-20）

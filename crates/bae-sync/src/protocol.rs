@@ -206,6 +206,20 @@ impl Message {
         }
     }
 
+    /// How many bytes [`encode`](Self::encode) produces, without copying the
+    /// payload of `Updates` and `Snapshot`: what a transport compares with its
+    /// limit ([`crate::Transport::max_message_size`]).
+    pub fn encoded_len(&self) -> usize {
+        match self {
+            Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
+                1 + bytes_len(doc.as_str().len())
+                    + bytes_len(version.encode().len())
+                    + bytes_len(data.len())
+            }
+            _ => self.encode().len(),
+        }
+    }
+
     /// Binary encoding: a tag byte, then the fields; strings and byte arrays are
     /// LEB128-length-prefixed, version vectors use Loro's encoding.
     pub fn encode(&self) -> Vec<u8> {
@@ -352,6 +366,17 @@ fn put_bytes(w: &mut Vec<u8>, b: &[u8]) {
     w.extend_from_slice(b);
 }
 
+/// Encoded size of a byte string of `len` bytes ([`put_bytes`]).
+fn bytes_len(len: usize) -> usize {
+    let mut prefix = 1;
+    let mut v = len as u64 >> 7;
+    while v != 0 {
+        prefix += 1;
+        v >>= 7;
+    }
+    prefix + len
+}
+
 struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -463,8 +488,13 @@ mod tests {
             },
             Message::Snapshot {
                 doc: DocKey::parse("root").unwrap(),
-                version: vv,
+                version: vv.clone(),
                 data: vec![0; 300],
+            },
+            Message::Updates {
+                doc: DocKey::parse("root").unwrap(),
+                version: vv,
+                data: vec![7; 20_000],
             },
             Message::Presence {
                 client: ClientId::new("bob").unwrap(),
@@ -482,6 +512,7 @@ mod tests {
         for m in msgs {
             let bytes = m.encode();
             assert_eq!(Message::decode(&bytes).unwrap(), m);
+            assert_eq!(m.encoded_len(), bytes.len(), "{m:?}");
             // Appended fields from a newer protocol version are ignored.
             let mut longer = bytes.clone();
             longer.extend_from_slice(&[9, 9, 9]);

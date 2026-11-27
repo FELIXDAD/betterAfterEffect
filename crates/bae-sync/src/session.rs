@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use bae_model::StageEvent;
-use bae_model::loro::VersionVector;
+use bae_model::loro::{Counter, PeerID, VersionVector};
 
 use crate::client::ClientId;
 use crate::docs::{DocSet, Imported};
@@ -116,6 +116,45 @@ impl InFlight {
     }
 }
 
+/// What the update of a document that did not fit in one message
+/// ([`SyncError::MessageTooLarge`]) was made of: for each Loro peer whose ops
+/// the remote lacked, how many of them it had. Local edits only make the
+/// update larger, and so do the remote getting other peers' ops (from
+/// collaborators) or losing some; it can only get smaller once the remote has
+/// more ops of one of these peers (it got them another way: a shared folder,
+/// another client of the hub). Until then exporting it again (up to hundreds
+/// of MiB, on the thread that owns the stage) would only fail again.
+#[derive(Debug)]
+struct TooLarge {
+    lacked: Vec<(PeerID, Counter)>,
+}
+
+impl TooLarge {
+    fn new(local: &VersionVector, known: &VersionVector) -> Self {
+        let lacked = local
+            .iter()
+            .filter_map(|(peer, &end)| {
+                let had = counter(known, peer);
+                (end.max(0) > had).then_some((*peer, had))
+            })
+            .collect();
+        TooLarge { lacked }
+    }
+
+    /// Whether the update may have become smaller now that the remote has
+    /// `known`.
+    fn may_fit(&self, known: &VersionVector) -> bool {
+        self.lacked
+            .iter()
+            .any(|(peer, had)| counter(known, peer) > *had)
+    }
+}
+
+/// How many ops of `peer` `vv` includes.
+fn counter(vv: &VersionVector, peer: &PeerID) -> Counter {
+    vv.get(peer).copied().unwrap_or(0).max(0)
+}
+
 /// Settings of a [`SyncSession`].
 #[derive(Clone, Debug)]
 pub struct SessionConfig {
@@ -223,7 +262,13 @@ pub struct PumpOutcome {
     /// collaborator created). Once the document exists locally the session asks
     /// the remote for its contents.
     pub unknown_docs: Vec<DocKey>,
-    /// Messages that were skipped (corrupt payloads, unknown message types).
+    /// Problems with single messages or documents; the link is still usable:
+    /// received data that could not be imported (corrupt payload, model
+    /// error), a document that could not be exported, or one whose changes do
+    /// not fit in one message on this link ([`SyncError::MessageTooLarge`]:
+    /// reported once, then not exported again until the update may have
+    /// become smaller or after [`SyncSession::reset`], see
+    /// [`SyncSession::too_large`]).
     pub errors: Vec<SyncError>,
     /// Someone came online, went offline or changed their presence.
     pub presence_changed: bool,
@@ -236,6 +281,9 @@ pub struct PumpOutcome {
 pub struct SyncStats {
     pub messages_sent: u64,
     pub messages_received: u64,
+    /// Bytes of document data handed to the transport, also of sends that
+    /// failed; not of those it refused as too large
+    /// ([`SyncError::MessageTooLarge`]: nothing was sent).
     pub bytes_sent: u64,
     pub bytes_received: u64,
     /// Payloads imported into a document.
@@ -285,6 +333,13 @@ pub struct SyncSession {
     /// document once and only documents we have (so never more than we have
     /// documents).
     snapshot_requests: VecDeque<DocKey>,
+    /// Documents whose update did not fit in one message: not exported again
+    /// until it may have become smaller (see [`TooLarge`]) or `reset`.
+    too_large: BTreeMap<DocKey, TooLarge>,
+    /// Documents whose snapshot did not fit in one message: a snapshot only
+    /// grows, so their snapshot requests are not answered (nor kept) until
+    /// `reset`.
+    snapshot_too_large: BTreeSet<DocKey>,
     stats: SyncStats,
     presence: Option<PresenceState>,
     presence_dirty: bool,
@@ -311,6 +366,8 @@ impl SyncSession {
             announced: BTreeSet::new(),
             next_doc: None,
             snapshot_requests: VecDeque::new(),
+            too_large: BTreeMap::new(),
+            snapshot_too_large: BTreeSet::new(),
             stats: SyncStats::default(),
             presence: None,
             presence_dirty: false,
@@ -392,7 +449,9 @@ impl SyncSession {
 
     /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
     /// says hello again and nothing is sent until the remote answers. Snapshot
-    /// requests of the old link that are still waiting are dropped.
+    /// requests of the old link that are still waiting are dropped, and
+    /// documents that did not fit in one message on it are tried again
+    /// ([`too_large`](Self::too_large); the new link may take more).
     ///
     /// Presence starts over too: our own goes out again on the next pump (the
     /// new link has not seen it), and who is online is whatever the new link
@@ -411,6 +470,8 @@ impl SyncSession {
         self.next_doc = None;
         // The old link's requests: a new link asks for what it needs itself.
         self.snapshot_requests.clear();
+        self.too_large.clear();
+        self.snapshot_too_large.clear();
         self.presence_dirty = self.presence.is_some();
         self.presence_seq = (self.presence_seq + 1).max(initial_seq());
         self.peers = PresenceTable::default();
@@ -477,7 +538,9 @@ impl SyncSession {
     }
 
     /// Documents with local ops the remote is not known to have yet ("unsynced
-    /// changes"). Everything counts as unsynced before the remote said hello.
+    /// changes"). Everything counts as unsynced before the remote said hello,
+    /// and so does a document whose changes do not fit in one message
+    /// ([`too_large`](Self::too_large)): nothing of it was sent.
     pub fn unsynced(&self, docs: &dyn DocSet) -> Vec<DocKey> {
         docs.doc_keys()
             .into_iter()
@@ -493,6 +556,31 @@ impl SyncSession {
                     Some(r) => !r.get(key).is_some_and(|k| k.includes_vv(&local)),
                 }
             })
+            .collect()
+    }
+
+    /// Documents of `docs` with changes the remote lacks that are not sent
+    /// because they do not fit in one message on this link
+    /// ([`Transport::max_message_size`], [`SyncError::MessageTooLarge`]; e.g.
+    /// a sublayer over a hub's message limit). They are also in
+    /// [`unsynced`](Self::unsynced). Each was reported once in
+    /// [`PumpOutcome::errors`]; it is exported again only once the remote has
+    /// more of the ops it lacked (it got them another way), or after
+    /// [`reset`](Self::reset). Local edits only make the update larger, so
+    /// they do not make it try again.
+    pub fn too_large(&self, docs: &dyn DocSet) -> Vec<DocKey> {
+        self.too_large
+            .keys()
+            .filter(|key| {
+                docs.version(key).is_some_and(|local| {
+                    !self
+                        .remote
+                        .as_ref()
+                        .and_then(|r| r.get(*key))
+                        .is_some_and(|known| known.includes_vv(&local))
+                })
+            })
+            .cloned()
             .collect()
     }
 
@@ -543,6 +631,7 @@ impl SyncSession {
         for doc in incoming.snapshot_requests {
             if self.config.send_data
                 && docs.version(&doc).is_some()
+                && !self.snapshot_too_large.contains(&doc)
                 && !self.snapshot_requests.contains(&doc)
             {
                 self.snapshot_requests.push_back(doc);
@@ -750,6 +839,12 @@ impl SyncSession {
     /// Answer a `SnapshotRequest` (after this pump's import): a snapshot of the
     /// whole document. Documents we do not have are not answered, nor is
     /// anything without `send_data`.
+    ///
+    /// A snapshot that does not fit in one message
+    /// ([`SyncError::MessageTooLarge`]) is reported in `out.errors` and not
+    /// counted as sent. A snapshot holds the whole history, so it only grows:
+    /// later requests for that document are not answered on this link (not
+    /// exported again on every request) until [`reset`](Self::reset).
     fn send_snapshot(
         &mut self,
         docs: &dyn DocSet,
@@ -757,25 +852,40 @@ impl SyncSession {
         doc: DocKey,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        if !self.config.send_data {
+        if !self.config.send_data || self.snapshot_too_large.contains(&doc) {
             return Ok(());
         }
         let Some(version) = docs.version(&doc) else {
             return Ok(());
         };
-        match docs.export_snapshot(&doc) {
-            Ok(data) => {
+        let data = match docs.export_snapshot(&doc) {
+            Ok(data) => data,
+            Err(e) => {
+                out.errors.push(e);
+                return Ok(());
+            }
+        };
+        let msg = Message::Snapshot {
+            doc: doc.clone(),
+            version: version.clone(),
+            data,
+        };
+        match self.send(transport, msg, out) {
+            Err(e @ SyncError::MessageTooLarge { .. }) => {
+                self.snapshot_too_large.insert(doc);
+                out.errors.push(e);
+                Ok(())
+            }
+            // Counted as sent even when the send failed otherwise, as in
+            // `send_missing`.
+            r => {
                 if let Some(remote) = &mut self.remote {
                     remote.entry(doc.clone()).or_default().merge(&version);
                     if self.config.hello_interval.is_some() {
                         self.in_flight.sent(&doc, self.hello_seq, &version);
                     }
                 }
-                self.send(transport, Message::Snapshot { doc, version, data }, out)
-            }
-            Err(e) => {
-                out.errors.push(e);
-                Ok(())
+                r
             }
         }
     }
@@ -854,8 +964,14 @@ impl SyncSession {
     /// Send every document's ops the remote is not known to have. Returns whether
     /// anything was sent. A failed send does not stop the others: they are
     /// already counted as sent, and a transport can fail one message and take
-    /// the next (a shared folder whose log for one document cannot be written,
-    /// a message over the hub's size limit). The first error is returned.
+    /// the next (a shared folder whose log for one document cannot be
+    /// written). The first error is returned.
+    ///
+    /// A document whose update does not fit in one message
+    /// ([`SyncError::MessageTooLarge`]: nothing was sent, the link is fine) is
+    /// only skipped: reported in `out.errors`, not counted as sent (so not
+    /// known by the remote, not on its way, and unsynced), and not exported
+    /// again until it may have become smaller ([`TooLarge`]).
     ///
     /// With `flow`, stops before a document while the transport's backlog is
     /// over `max_backlog`; the next call starts with that document. Sends
@@ -888,6 +1004,12 @@ impl SyncSession {
             };
             let known = remote.entry(key.clone()).or_default();
             if known.includes_vv(&local) {
+                self.too_large.remove(&key);
+                continue;
+            }
+            // Did not fit, and cannot have become smaller since: skipped
+            // before flow control, so it never holds up the others.
+            if self.too_large.get(&key).is_some_and(|t| !t.may_fit(known)) {
                 continue;
             }
             if let Some(max) = max_backlog
@@ -897,23 +1019,35 @@ impl SyncSession {
                 self.stats.held_back += 1;
                 break;
             }
-            match docs.export_updates(&key, known) {
-                Ok(data) => {
+            let data = match docs.export_updates(&key, known) {
+                Ok(data) => data,
+                Err(e) => {
+                    out.errors.push(e);
+                    continue;
+                }
+            };
+            let msg = Message::Updates {
+                doc: key.clone(),
+                version: local.clone(),
+                data,
+            };
+            match self.send(transport, msg, out) {
+                // Only this document is stuck (spec 2.4); nothing was sent.
+                Err(e @ SyncError::MessageTooLarge { .. }) => {
+                    self.too_large.insert(key, TooLarge::new(&local, known));
+                    out.errors.push(e);
+                }
+                r => {
+                    self.too_large.remove(&key);
                     known.merge(&local);
                     if self.config.hello_interval.is_some() {
                         self.in_flight.sent(&key, self.hello_seq, &local);
                     }
                     sent = true;
-                    let msg = Message::Updates {
-                        doc: key,
-                        version: local,
-                        data,
-                    };
-                    if let Err(e) = self.send(transport, msg, out) {
+                    if let Err(e) = r {
                         failed.get_or_insert(e);
                     }
                 }
-                Err(e) => out.errors.push(e),
             }
         }
         self.remote = Some(remote);
@@ -923,19 +1057,31 @@ impl SyncSession {
         }
     }
 
+    /// Hand `msg` to the transport. Its data counts in
+    /// [`SyncStats::bytes_sent`] unless the transport refused it as too large.
     fn send(
         &mut self,
         transport: &mut dyn Transport,
         msg: Message,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        if let Message::Updates { data, .. } | Message::Snapshot { data, .. } = &msg {
-            self.stats.bytes_sent += data.len() as u64;
+        let data = match &msg {
+            Message::Updates { data, .. } | Message::Snapshot { data, .. } => data.len() as u64,
+            _ => 0,
+        };
+        match transport.send(msg) {
+            Ok(()) => {
+                self.stats.bytes_sent += data;
+                self.stats.messages_sent += 1;
+                out.sent += 1;
+                Ok(())
+            }
+            Err(e @ SyncError::MessageTooLarge { .. }) => Err(e),
+            Err(e) => {
+                self.stats.bytes_sent += data;
+                Err(e)
+            }
         }
-        transport.send(msg)?;
-        self.stats.messages_sent += 1;
-        out.sent += 1;
-        Ok(())
     }
 }
 
@@ -947,16 +1093,18 @@ mod tests {
     use crate::docs::MemDocs;
 
     /// A link whose backlog grows with every message sent and drains only when
-    /// the test says so.
+    /// the test says so. Refuses messages over `max`, as a hub link does.
     #[derive(Default)]
     struct Lagging {
         inbox: VecDeque<Message>,
         sent: Vec<Message>,
         backlog: usize,
+        max: Option<usize>,
     }
 
     impl Transport for Lagging {
         fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+            crate::transport::check_size(&msg, self.max)?;
             self.backlog += msg.approx_len();
             self.sent.push(msg);
             Ok(())
@@ -968,6 +1116,10 @@ mod tests {
 
         fn backlog(&self) -> usize {
             self.backlog
+        }
+
+        fn max_message_size(&self) -> Option<usize> {
+            self.max
         }
     }
 
@@ -1377,6 +1529,123 @@ mod tests {
             assert_eq!(t.data_sent(), [want]);
         }
         assert_eq!(in_flight(&s), ["a", "b", "c"]);
+        assert!(s.unsynced(&docs).is_empty());
+    }
+
+    /// A document whose update does not fit in one message is skipped, not
+    /// sent: not on its way, not known by the remote, unsynced and listed by
+    /// `too_large`, reported once. It does not hold up the others (flow
+    /// control goes on with the next document, the rotation still reaches
+    /// every one), and neither a later pump, the remote's `Hello`s nor
+    /// `flush` export it again. A snapshot answer that does not fit is
+    /// reported once and later requests for it are not kept.
+    #[test]
+    fn a_document_that_does_not_fit_is_skipped_and_reported_once() {
+        let mut docs = MemDocs::new();
+        for (doc, len) in [("a", 8000), ("b", 600), ("c", 600)] {
+            let d = bae_model::loro::LoroDoc::new();
+            d.get_map("m").insert("v", text(len as u64, len)).unwrap();
+            d.commit();
+            let snapshot = d.export(bae_model::loro::ExportMode::Snapshot).unwrap();
+            docs.load(key(doc), &snapshot).unwrap();
+        }
+        let mut config = SessionConfig::new(ClientId::new("app").unwrap());
+        config.hello_interval = Some(Duration::from_secs(3600));
+        config.max_backlog = Some(500);
+        let mut s = SyncSession::new(config);
+        let hub = ClientId::new("hub").unwrap();
+        let hello = |seq, ack| Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            client: hub.clone(),
+            versions: Vec::new(),
+            seq,
+            ack,
+        };
+        let mut t = Lagging {
+            max: Some(4000),
+            ..Lagging::default()
+        };
+        let too_large = |out: &PumpOutcome| {
+            out.errors
+                .iter()
+                .filter(|e| matches!(e, SyncError::MessageTooLarge { .. }))
+                .count()
+        };
+        // `a` does not fit, `b` goes out and fills the backlog, `c` waits.
+        t.inbox.push_back(hello(1, None));
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(too_large(&out), 1, "{:?}", out.errors);
+        assert!(
+            matches!(&out.errors[0], SyncError::MessageTooLarge { doc: Some(d), max: 4000, .. } if *d == key("a")),
+            "{:?}",
+            out.errors
+        );
+        assert_eq!(t.data_sent(), ["b"]);
+        assert_eq!(s.stats().held_back, 1);
+        let in_flight = |s: &SyncSession| {
+            s.in_flight
+                .0
+                .keys()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(in_flight(&s), ["b"]);
+        assert_eq!(s.unsynced(&docs), [key("a"), key("c")]);
+        assert_eq!(s.too_large(&docs), [key("a")]);
+        // The backlog drained: `c`, then nothing. `a` is not tried again,
+        // also not after the hub's `Hello` that acknowledges ours and lists
+        // nothing (it was never on its way), nor by `flush`.
+        for round in 0..3 {
+            t.backlog = 0;
+            if round == 1 {
+                t.inbox.push_back(hello(2, Some(s.hello_seq)));
+            }
+            let out = s.pump(&mut docs, &mut t).unwrap();
+            assert_eq!(too_large(&out), 0, "{:?}", out.errors);
+            let want: &[&str] = if round == 0 { &["c"] } else { &[] };
+            assert_eq!(t.data_sent(), want);
+        }
+        let out = s.flush(&docs, &mut t).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert!(t.data_sent().is_empty());
+        assert_eq!(in_flight(&s), ["b", "c"]);
+        assert_eq!(s.unsynced(&docs), [key("a")]);
+        assert_eq!(s.too_large(&docs), [key("a")]);
+        // A local edit only makes the update larger: not tried again.
+        set(&docs, "a", "more".into());
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(too_large(&out), 0);
+        assert!(t.data_sent().is_empty());
+
+        // A snapshot answer that does not fit: reported once, not counted as
+        // sent, and later requests for it are not kept.
+        let bytes = s.stats().bytes_sent;
+        let mut reported = 0;
+        for _ in 0..3 {
+            t.inbox
+                .push_back(Message::SnapshotRequest { doc: key("a") });
+            let out = s.pump(&mut docs, &mut t).unwrap();
+            reported += too_large(&out);
+            assert!(t.data_sent().is_empty());
+            assert_eq!(s.pending_snapshot_requests(), 0);
+        }
+        assert_eq!(reported, 1);
+        assert_eq!(s.stats().bytes_sent, bytes);
+        assert_eq!(s.unsynced(&docs), [key("a")]);
+
+        // A new link may take more: tried again (once) after `reset`.
+        s.reset();
+        t.max = Some(1 << 20);
+        t.inbox.push_back(hello(3, None));
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert!(t.data_sent().contains(&"a".to_owned()));
+        t.backlog = 0;
+        for _ in 0..3 {
+            s.pump(&mut docs, &mut t).unwrap();
+            t.backlog = 0;
+        }
+        assert!(s.too_large(&docs).is_empty());
         assert!(s.unsynced(&docs).is_empty());
     }
 }

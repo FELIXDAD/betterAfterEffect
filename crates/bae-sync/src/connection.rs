@@ -1142,7 +1142,7 @@ impl Connection {
         self.session.clear_presence();
         // The last pump sends as usual (flow control included); what it held
         // back is collected here and sent by the closing thread.
-        let mut rest = Collect::default();
+        let mut rest = Collect::for_link(&transport);
         let sent = self
             .session
             .pump(docs, &mut transport)
@@ -1165,7 +1165,7 @@ impl Connection {
         let spawned = std::thread::Builder::new()
             .name("bae-sync-close".into())
             .spawn(move || {
-                let paced = sent.and_then(|()| send_paced(&mut transport, rest.0, pacing));
+                let paced = sent.and_then(|()| send_paced(&mut transport, rest.msgs, pacing));
                 let closed = transport.close();
                 drop(transport);
                 drop(releasing);
@@ -1660,17 +1660,36 @@ fn classify(e: &SyncError) -> Option<Failure> {
 
 /// What a session sends, kept instead of sent: [`Connection::close`] flushes
 /// into it on the thread that owns the documents, the closing thread sends it.
-#[derive(Default)]
-struct Collect(Vec<Message>);
+/// Takes what the link takes ([`Transport::max_message_size`]), so a
+/// document that does not fit is skipped by the session and stays unsynced
+/// ([`Closing::unsynced`]) instead of failing the closing thread's send.
+struct Collect {
+    msgs: Vec<Message>,
+    max_message: Option<usize>,
+}
+
+impl Collect {
+    fn for_link(link: &dyn Transport) -> Collect {
+        Collect {
+            msgs: Vec::new(),
+            max_message: link.max_message_size(),
+        }
+    }
+}
 
 impl Transport for Collect {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
-        self.0.push(msg);
+        crate::transport::check_size(&msg, self.max_message)?;
+        self.msgs.push(msg);
         Ok(())
     }
 
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {
         Ok(None)
+    }
+
+    fn max_message_size(&self) -> Option<usize> {
+        self.max_message
     }
 }
 
@@ -2239,6 +2258,97 @@ mod tests {
         got.dedup();
         let want: Vec<String> = keys.iter().map(ToString::to_string).collect();
         assert_eq!(got, want);
+    }
+
+    /// A link that says hello once and takes messages of at most `max`
+    /// bytes, as a hub link does; records the documents of the data it took.
+    struct Limited {
+        hello: Option<Message>,
+        max: usize,
+        took: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Transport for Limited {
+        fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+            crate::transport::check_size(&msg, Some(self.max))?;
+            if let Message::Updates { doc, .. } | Message::Snapshot { doc, .. } = msg {
+                self.took.lock().unwrap().push(doc.to_string());
+            }
+            Ok(())
+        }
+
+        fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+            Ok(self.hello.take())
+        }
+
+        fn max_message_size(&self) -> Option<usize> {
+            Some(self.max)
+        }
+    }
+
+    /// A document whose changes do not fit in one message on the link is
+    /// skipped and reported once; the link stays up, the document counts as
+    /// unsynced, and `Closing::unsynced` lists it. Also when its edits wait
+    /// for `close` (here: held back by `min_send_interval`): the closing
+    /// thread's queue takes what the link takes, so the document is skipped
+    /// there too. It used to be counted as sent and fail the closing
+    /// thread's send: `close` reported an error and not the document.
+    #[test]
+    fn a_document_that_does_not_fit_stays_unsynced_and_closing_lists_it() {
+        let mut docs = MemDocs::new();
+        let load = |docs: &mut MemDocs, name: &str, len: usize| {
+            let d = LoroDoc::new();
+            d.get_map("m").insert("v", text(len as u64, len)).unwrap();
+            d.commit();
+            docs.load(
+                DocKey::parse(name).unwrap(),
+                &d.export(ExportMode::Snapshot).unwrap(),
+            )
+            .unwrap();
+        };
+        load(&mut docs, "a", 100);
+        load(&mut docs, "b", 8000);
+        let took = Arc::new(Mutex::new(Vec::new()));
+        let link = Limited {
+            hello: Some(Message::hello(ClientId::new("hub").unwrap(), Vec::new())),
+            max: 4000,
+            took: took.clone(),
+        };
+        let mut c = bare("too-large", quiet());
+        linked(
+            &mut c,
+            ThreadedTransport::spawn(link, Duration::from_millis(1), || {}),
+        );
+        let mut errors = Vec::new();
+        wait_for("a to be sent", || {
+            let out = c.pump(&mut docs);
+            errors.extend(out.errors);
+            took.lock().unwrap().contains(&"a".to_owned())
+        });
+        for _ in 0..5 {
+            errors.extend(c.pump(&mut docs).errors);
+        }
+        let key = |s: &str| DocKey::parse(s).unwrap();
+        assert!(c.is_online());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            matches!(&errors[0], SyncError::MessageTooLarge { doc: Some(d), max: 4000, .. } if *d == key("b")),
+            "{errors:?}"
+        );
+        assert!(c.status().unsynced);
+        assert_eq!(c.session().too_large(&docs), [key("b")]);
+
+        c.session.config_mut().min_send_interval = Duration::from_secs(3600);
+        edit(&mut docs, &key("a"), 1);
+        load(&mut docs, "c", 8000);
+        c.pump(&mut docs);
+        let mut closing = c.close(&mut docs);
+        assert_eq!(closing.unsynced(), [key("b"), key("c")]);
+        let result = closing
+            .wait(Duration::from_secs(20))
+            .map(|r| r.as_ref().map_err(ToString::to_string).copied());
+        assert_eq!(result, Some(Ok(())));
+        assert_eq!(*took.lock().unwrap(), ["a", "a"]);
     }
 
     /// A connect attempt that hangs on the NAS (here: it waits for our old

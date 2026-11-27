@@ -122,6 +122,33 @@ pub trait Transport {
     fn notes_seq(&self) -> u64 {
         0
     }
+    /// The largest message [`send`](Self::send) takes
+    /// ([`Message::encoded_len`]). A larger one fails with
+    /// [`SyncError::MessageTooLarge`] at once: nothing is sent or queued, and
+    /// the link stays usable (a session skips that document and sends the
+    /// others, `docs/spec/sync.md` §2.4). A hub link's is its
+    /// `HubLimits::max_message`, or less if the hub said it takes less. Must
+    /// not change while the transport is in use ([`crate::ThreadedTransport`]
+    /// reads it once). The default, `None`: no limit.
+    fn max_message_size(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// [`SyncError::MessageTooLarge`] if `msg` is over `max`.
+pub(crate) fn check_size(msg: &Message, max: Option<usize>) -> Result<(), SyncError> {
+    let Some(max) = max else {
+        return Ok(());
+    };
+    let size = msg.encoded_len();
+    if size > max {
+        return Err(SyncError::MessageTooLarge {
+            doc: msg.doc().cloned(),
+            size,
+            max,
+        });
+    }
+    Ok(())
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
@@ -142,6 +169,9 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
     fn notes_seq(&self) -> u64 {
         (**self).notes_seq()
+    }
+    fn max_message_size(&self) -> Option<usize> {
+        (**self).max_message_size()
     }
 }
 

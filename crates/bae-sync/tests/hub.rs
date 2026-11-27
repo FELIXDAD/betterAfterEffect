@@ -261,6 +261,96 @@ fn clients_reconnect_after_the_hub_restarts() {
     });
 }
 
+/// A note of `len` random letters on `/comps/main` in `layer`.
+fn note(c: &mut Client, layer: &SublayerId, len: usize) {
+    let text: String = (0..len)
+        .map(|_| char::from(b'a' + c.rng.below(26) as u8))
+        .collect();
+    c.stage.set_edit_target(layer).unwrap();
+    c.stage
+        .transact(&c.who, "note", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main"),
+                attr: "note".into(),
+                value: Some(Value::String(text)),
+            })
+        })
+        .unwrap();
+}
+
+/// Whether `to` has everything `from` has of `layer`.
+fn has_all(from: &Client, to: &Client, layer: &SublayerId) -> bool {
+    use bae_sync::{DocKey, DocSet};
+    let doc = DocKey::sublayer(layer);
+    let want = DocSet::version(&from.stage, &doc).unwrap();
+    DocSet::version(&to.stage, &doc).is_some_and(|v| v.includes_vv(&want))
+}
+
+/// A client whose edit of one document is over its link's `max_message`
+/// (`ThreadedTransport(HubTransport)`, as the app connects): only that
+/// document is skipped and reported once; the link stays up and the other
+/// document keeps syncing. The oversized message used to be queued, fail on
+/// the link's thread and come back as a link error, and after every
+/// reconnect the same message failed again.
+#[test]
+fn a_document_over_the_message_limit_is_skipped_and_the_link_stays() {
+    use bae_sync::{DocKey, HubLimits};
+    let hub = TestHub::start(Some("team-secret"));
+    let base = base_snapshots();
+    let mut a = Client::new(0, &hub.url(), &base);
+    let mut b = Client::new(1, &hub.url(), &base);
+    let limits = HubLimits {
+        max_message: 64 << 10,
+        ..HubLimits::default()
+    };
+    a.link = ThreadedTransport::spawn(
+        HubTransport::connect_with(
+            &hub.url(),
+            Some("team-secret"),
+            Duration::from_secs(5),
+            limits,
+        )
+        .unwrap(),
+        Duration::from_millis(2),
+        || {},
+    );
+    let root = SublayerId::root();
+    let anim = sl("anim/a");
+    // The hub starts empty: first it gets the base from both, so `a`'s
+    // large edit is all the hub lacks of `root`.
+    wait_until("the hub has the base", Duration::from_secs(10), || {
+        a.pump().unwrap();
+        b.pump().unwrap();
+        [&a, &b].iter().all(|c| {
+            c.session.unsynced(&c.stage).is_empty()
+                && c.session
+                    .remote_versions()
+                    .is_some_and(|r| r.contains_key(&DocKey::sublayer(&root)))
+        })
+    });
+    note(&mut a, &root, 256 << 10);
+    let mut too_large = 0;
+    for _ in 0..5 {
+        note(&mut a, &anim, 100);
+        wait_until("the small edit", Duration::from_secs(10), || {
+            let out = a.pump().unwrap();
+            for e in &out.errors {
+                assert!(
+                    matches!(e, SyncError::MessageTooLarge { doc: Some(d), .. } if *d == DocKey::sublayer(&root)),
+                    "{e:?}"
+                );
+                too_large += 1;
+            }
+            b.pump().unwrap();
+            has_all(&a, &b, &anim)
+        });
+    }
+    assert_eq!(too_large, 1);
+    assert!(!has_all(&a, &b, &root));
+    assert_eq!(a.session.unsynced(&a.stage), [DocKey::sublayer(&root)]);
+    assert_eq!(a.session.too_large(&a.stage), [DocKey::sublayer(&root)]);
+}
+
 /// A raw client/server pair on loopback, without a relay.
 fn raw_pair(server_limits: bae_sync::HubLimits) -> (HubTransport, HubTransport) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -323,18 +413,41 @@ fn messages_larger_than_one_default_frame_get_through() {
         other => panic!("unexpected {other:?}"),
     }
 
-    // Over the limit: refused when sending, not silently dropped by the peer.
+    // Over the limit: refused when sending, not silently dropped by the peer,
+    // and the link goes on (only that message is not sent).
     client.set_limits(HubLimits {
         max_message: 1 << 20,
         ..HubLimits::default()
     });
     assert_eq!(client.limits().max_message, 1 << 20);
+    assert_eq!(client.max_message_size(), Some(1 << 20));
     let too_big = Message::Updates {
         doc: DocKey::sublayer(&SublayerId::root()),
         version: Default::default(),
         data: vec![0; 2 << 20],
     };
-    assert!(client.send(too_big).is_err());
+    let size = too_big.encoded_len();
+    match client.send(too_big) {
+        Err(SyncError::MessageTooLarge { doc, size: s, max }) => {
+            assert_eq!(doc, Some(DocKey::sublayer(&SublayerId::root())));
+            assert_eq!((s, max), (size, 1 << 20));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(client.backlog(), 0);
+    let fits = Message::Updates {
+        doc: DocKey::sublayer(&SublayerId::root()),
+        version: Default::default(),
+        data: vec![1; 1000],
+    };
+    client.send(fits.clone()).unwrap();
+    let mut got = None;
+    wait_until("the next message", Duration::from_secs(20), || {
+        client.recv().unwrap();
+        got = server.recv().unwrap();
+        got.is_some()
+    });
+    assert_eq!(got, Some(fits));
 }
 
 #[test]

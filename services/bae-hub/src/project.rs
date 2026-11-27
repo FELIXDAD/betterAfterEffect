@@ -532,7 +532,20 @@ impl RelayThread {
                 }
             }
             for (handle, e) in out.errors {
-                tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
+                if matches!(e, SyncError::MessageTooLarge { .. }) {
+                    // Reported once per client connection (spec 2.4).
+                    let addr = peers.get(&handle).map(|i| i.addr);
+                    tracing::warn!(
+                        project = %self.id,
+                        peer = ?handle,
+                        addr = ?addr,
+                        error = %e,
+                        "a document does not fit in one message to this client; it is not sent \
+                         to it on this connection (raise max_message_mib in [limits] to sync it)"
+                    );
+                } else {
+                    tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
+                }
             }
             notes.check(&self.id, &relay, store);
             // Nobody is editing, so holding writes back gains nothing, and the

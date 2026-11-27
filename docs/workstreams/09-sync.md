@@ -146,6 +146,15 @@
   - 按范围回滚时把移出范围的后来新建的子节点留在原处：先把它们移出要删的 Prim，可移到哪里都不是它们原来的位置，只写了说明。
 - 以后（性能，不急）：每次 `diff` / `revert` 都为整个工程层的两个版本各建一份 `NodeIndex`（`Prim` 范围的回滚也是全量建），开销和以前按路径遍历同一量级。界面要实时显示差异时，缓存当前版本的 `NodeIndex`（按 Loro frontiers 失效）。
 
+### 2026-11-27（一条消息放不下的文档，`collab/sync-too-large`）
+
+- **一条消息放不下的文档**（spec 2.4 第 3 步、2.6、3、3.1、7.3、7.7；移植自 #760）：
+  - 原来一个文档的增量超过 Hub 链路的 `max_message`（默认 256 MiB）时，`ThreadedTransport` 把它放进队列，后台线程发送失败，整条链路断开；`Connection` 重连后，会话又导出同一个几百 MiB 的增量、又失败，一直循环，别的文档也同步不了。Hub 一侧也一样：发给某个客户端的工程层太大时，Relay 断开这个客户端。
+  - 现在传输层可以说出自己的上限（`Transport::max_message_size()`：`HubTransport` 是发送上限；`ThreadedTransport` 在 `spawn` 时读内层的；`Box`、`PeerLink` 转发）。超过上限时 `send` 直接返回 `SyncError::MessageTooLarge`（文档、大小、上限），什么都不发，链路照常。会话只跳过这个文档：报一次错，不算发出、不算在路上，`unsynced` 和新的 `too_large(docs)` 列出它；其他文档照发，流量控制的轮转照常往下走。
+  - 按 #760 的做法记下增量由哪些 peer 的操作组成：只有对方拿到了其中某个 peer 更多的操作，或者 `reset()` 之后，才再试。本地修改、协作者的修改只会让增量变大，不重试。快照回答放不下时，这条链路上不再回答这个文档的快照请求（快照只会变大）。`Connection::close` 的 `flush` 也按链路的上限检查，放不下的文档留在 `Closing::unsynced()` 里，关闭结果不因它出错。
+  - #760 里"对方拒收的文档"（`NewerLogVersion`）没有移植：更新的格式版本的日志现在由 `DirTransport::not_written`、`LinkNotes` 处理。
+  - 测试（去掉对应的修复时都失败）：`tests/too_large.rs`（移植并补充：另一个文档照常同步、不算在路上、本地修改不重试、快照请求只导出一次）、会话的 `a_document_that_does_not_fit_is_skipped_and_reported_once`、`ThreadedTransport` 的 `a_message_over_the_limit_fails_at_once_and_the_link_goes_on`、`Connection` 的 `a_document_that_does_not_fit_stays_unsynced_and_closing_lists_it`、`tests/hub.rs` 的 `a_document_over_the_message_limit_is_skipped_and_the_link_stays`、bae-hub 的 `a_document_too_large_for_one_client_does_not_drop_its_link`。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 10 hub-nas（2026-11-20）
