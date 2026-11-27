@@ -37,6 +37,12 @@ fn media_panels_edit_metadata_and_trim_footage_from_the_window_menu() {
         .center();
     click_at(&mut h, field);
     type_text(&mut h, "123");
+    // The field commits once, on Enter (or when it loses focus), not per key.
+    let typing =
+        bae_motion::query::static_value(&h.state().stage().prim(&item).unwrap(), "dc:title");
+    assert!(!matches!(typing, Some(Value::String(s)) if s.contains("123")));
+    key(&mut h, egui::Modifiers::NONE, egui::Key::Enter);
+    settle(&mut h);
     let v = bae_motion::query::static_value(&h.state().stage().prim(&item).unwrap(), "dc:title");
     assert!(matches!(v, Some(Value::String(s)) if s.contains("123")));
     assert!(h.state_mut().menu("menu.window.footage"));

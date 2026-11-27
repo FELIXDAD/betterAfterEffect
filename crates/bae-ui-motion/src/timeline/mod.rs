@@ -746,6 +746,12 @@ impl TimelinePanel {
             let lines = ((height / ROW_H).ceil() as usize)
                 .max(hard_lines)
                 .min(MAX_EXPR_LINES);
+            let error_line = stored.is_some_and(|e| {
+                e.enabled
+                    && crate::expr_menu::inline_error(ui, resources, path, attr, source, &e.source)
+                        .is_some()
+            });
+            let lines = lines + usize::from(error_line);
             for line in 0..lines {
                 out.push(Row {
                     kind: RowKind::Expression {

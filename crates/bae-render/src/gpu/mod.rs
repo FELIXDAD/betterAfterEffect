@@ -445,6 +445,7 @@ pub(crate) struct Shared {
     pub masks: Arc<Mutex<Option<MaskPipelines>>>,
     pub mix: Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>>,
     pub dof: Arc<Mutex<Option<crate::exec::dof::DofPipelines>>>,
+    pub mesh: Arc<Mutex<Option<crate::exec::mesh::MeshPipelines>>>,
     pub shadow_map: Arc<Mutex<Option<crate::exec::shadowmap::ShadowMapPipeline>>>,
 }
 
@@ -470,6 +471,7 @@ impl Shared {
             masks: Arc::new(Mutex::new(None)),
             mix: Arc::new(Mutex::new(None)),
             dof: Arc::new(Mutex::new(None)),
+            mesh: Arc::new(Mutex::new(None)),
             shadow_map: Arc::new(Mutex::new(None)),
         });
         all.push((Arc::downgrade(gpu), shared.clone()));
@@ -583,6 +585,13 @@ impl Shared {
                 dof.warm(&self.device, format);
             }
             self.dof.lock().get_or_insert(dof);
+        }
+        if self.mesh.lock().is_none() {
+            let mut mesh = crate::exec::mesh::MeshPipelines::new(&self.device);
+            for &(format, _) in formats {
+                mesh.warm(&self.device, format);
+            }
+            self.mesh.lock().get_or_insert(mesh);
         }
         if self.shadow_map.lock().is_none() {
             let pipeline = crate::exec::shadowmap::ShadowMapPipeline::new(&self.device);
@@ -857,6 +866,14 @@ impl Pipelines {
         self.shared
             .as_ref()
             .map(|s| s.mix.clone())
+            .unwrap_or_default()
+    }
+
+    /// The shared 3D model pipelines and uploaded models (created on first use).
+    pub fn mesh(&self) -> Arc<Mutex<Option<crate::exec::mesh::MeshPipelines>>> {
+        self.shared
+            .as_ref()
+            .map(|s| s.mesh.clone())
             .unwrap_or_default()
     }
 
