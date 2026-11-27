@@ -48,6 +48,22 @@ pub enum SyncError {
     /// The version includes ops of sublayer `.0` that have not arrived here yet.
     #[error("that version of sublayer {0} is not available locally (not synced yet)")]
     VersionNotAvailable(bae_model::SublayerId),
+    /// A rollback of one prim (`RevertScope::Prim`) would restore `path`,
+    /// but its parent at that version no longer exists, is outside the scope,
+    /// and no prim has the parent's old path: there is nowhere to put it.
+    /// `revert` names the top-most such ancestor: roll that back first (or
+    /// the whole sublayer or project). Nothing was changed.
+    #[error(
+        "cannot restore {path} in sublayer {sublayer}: its parent no longer exists; \
+         revert {revert} first (or the whole sublayer)"
+    )]
+    RevertParentGone {
+        sublayer: bae_model::SublayerId,
+        /// The prim's path at that version.
+        path: bae_model::PrimPath,
+        /// The top-most ancestor (path at that version) that is gone now.
+        revert: bae_model::PrimPath,
+    },
 }
 
 impl SyncError {
