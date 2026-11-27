@@ -16,6 +16,7 @@ mod light_settings;
 mod mask_value;
 pub mod memory;
 pub(crate) mod photoshop;
+mod placeholder;
 mod precompose;
 mod project_settings;
 mod render_output;
@@ -68,6 +69,8 @@ pub enum Dialog {
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
+    /// File ▸ Import ▸ Placeholder….
+    NewPlaceholder(Box<placeholder::NewPlaceholder>),
     EffectManager(Box<crate::effects::manager::EffectManager>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
@@ -211,6 +214,27 @@ pub(crate) fn new_solid(cx: &PanelContext<'_>, session: &SharedSession) {
     if let Some(s) = SolidSettings::new_solid(cx.stage, session, &d.solid) {
         d.open = Some(Dialog::SolidSettings(Box::new(s)));
     }
+}
+
+/// File ▸ Import ▸ Placeholder…: New Placeholder.
+pub(crate) fn import_placeholder(cx: &PanelContext<'_>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::NewPlaceholder(Box::default()));
+    }
+}
+
+/// File ▸ Import ▸ Solid…: Solid Settings for a new solid item.
+pub(crate) fn import_solid(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    remember(cx.resources, &mut d);
+    let s = SolidSettings::new_item(cx.stage, session, &d.solid);
+    d.open = Some(Dialog::SolidSettings(Box::new(s)));
 }
 
 /// Open the settings dialog of a layer or a solid item: Solid Settings
@@ -481,6 +505,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        placeholder::STRINGS,
         interpret_footage::STRINGS,
         layer_time::STRINGS,
         go_to_time::STRINGS,
@@ -546,6 +571,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::NewPlaceholder(d) => d.ui(ctx, cx),
             Dialog::InterpretFootage(d) => d.ui(ctx, cx),
             Dialog::TimeStretch(d) => d.ui(ctx, cx),
             Dialog::AutoOrient(d) => d.ui(ctx, cx),

@@ -221,7 +221,11 @@ impl Panel for PropertiesPanel {
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        if let Some(v)=crate::ae_panels::character::number(ui,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size")) {
+                        // Commits on release (no live preview here).
+                        let mut gesture = crate::ae_panels::character::Gesture::None;
+                        if let Some(v)=crate::ae_panels::character::number(ui,&mut gesture,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size"))
+                            && gesture != crate::ae_panels::character::Gesture::Live
+                        {
                             change["font_size"]=json!(v);
                         }
                     });
