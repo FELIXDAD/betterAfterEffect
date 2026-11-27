@@ -55,6 +55,7 @@ pub(crate) mod view3d;
 pub(crate) mod view_options;
 
 pub(crate) use overlay::{mask_color, path_shapes};
+pub(crate) use puppet_tool::record_options_ui as puppet_record_options_ui;
 pub(crate) use transform::nudge_layers;
 
 /// The magnification popup (AE 26): `(magnification, label)`.
