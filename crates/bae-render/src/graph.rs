@@ -2031,10 +2031,18 @@ impl Builder<'_, '_> {
             && let (LayerContent::Custom(content), Some(matrix)) = (&layer.content, layer.matrix_3d)
         {
             let depth_px = layer.extrusion;
-            let key = hash_of(&(content.hash, &content.provider, depth_px.to_bits()));
+            let bevel = layer.bevel;
+            let key = hash_of(&(
+                content.hash,
+                &content.provider,
+                depth_px.to_bits(),
+                bevel.map(|b| (b.style, b.inward, b.depth.to_bits(), b.hole_scale.to_bits())),
+            ));
             let outlines = self.sources.outlines(content);
             if let Some(mesh) = outlines.and_then(|o| {
-                crate::model::extrude::cached(key, || crate::model::extrude::extrude(&o, depth_px))
+                crate::model::extrude::cached(key, || {
+                    crate::model::extrude::extrude(&o, depth_px, bevel)
+                })
             }) {
                 return self.plan_mesh(comp, index, mesh, matrix, canvas, scale, depth);
             }
