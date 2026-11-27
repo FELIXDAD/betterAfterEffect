@@ -30,7 +30,9 @@ use rustc_hash::FxHashMap;
 
 pub(crate) mod adjust;
 pub(crate) mod dof;
+pub(crate) mod env;
 mod masks;
+pub(crate) mod mesh;
 mod shadow;
 pub(crate) mod shadowmap;
 use crate::pool::TexturePool;
@@ -180,7 +182,6 @@ impl ImageAllocator for PoolAllocator<'_> {
 /// existing byte-limited frame cache. Entries are published after submission.
 pub(crate) struct TileCache<'a> {
     pub whole_surfaces: bool,
-    pub feedback: bool,
     pub frames: &'a mut crate::cache::FrameCache<GpuImage>,
     pub request: u64,
     pub comp: &'a crate::RenderComp,
@@ -270,6 +271,8 @@ pub(crate) fn execute(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("bae-render.frame"),
     });
+    let needed = needed_nodes(graph, &pipelines.mesh());
+    let tainted = feedback_taint(graph);
     let mut uses = graph.use_counts();
     let mut outputs: Vec<Option<GpuImage>> = vec![None; graph.nodes.len()];
     let mut ctx = ExecCtx {
@@ -289,6 +292,7 @@ pub(crate) fn execute(
         passes: 0,
         mask_outs: Vec::new(),
         incomplete: false,
+        mesh_depths: Default::default(),
         skipped_maps: Default::default(),
     };
     // Every mask of the frame at once, in shared atlases (they have no inputs).
@@ -301,10 +305,16 @@ pub(crate) fn execute(
         if gpu_timed && let Some(t) = gpu_timer.as_deref() {
             t.write(&mut encoder, index);
         }
+        if !needed[index] {
+            if let Some(started) = started {
+                node_times.push(started.elapsed());
+            }
+            continue;
+        }
         let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
             NodeKind::Effect(fx)
                 if fx.feedback.is_some()
-                    || (cache.whole_surfaces && !cache.feedback && fx.effect.full_surface()) =>
+                    || (cache.whole_surfaces && !tainted[index] && fx.effect.full_surface()) =>
             {
                 Some(crate::cache::FrameKey {
                     comp: fx.instance.path.clone(),
@@ -318,7 +328,7 @@ pub(crate) fn execute(
         // Re-encode one pass; never walk or regenerate the history.
         let cached = surface_key
             .as_ref()
-            .filter(|_| tiles.as_ref().is_some_and(|cache| !cache.feedback))
+            .filter(|_| !tainted[index])
             .and_then(|key| {
                 let frames = &mut tiles.as_mut()?.frames;
                 (frames.content_hash(key) == Some(node.key))
@@ -431,7 +441,7 @@ pub(crate) fn execute(
                 let image_cache = tiles
                     .as_mut()
                     .filter(|c| {
-                        !c.feedback
+                        !tainted[index]
                             && c.frames.stats().budget > 0
                             && !graph.incomplete
                             && !incomplete
@@ -483,6 +493,65 @@ pub(crate) fn execute(
                 ctx.passes += 1;
                 target
             }
+            (NodeKind::Mesh(mesh), None) => {
+                let px = node_pixels(node);
+                let target = pool.acquire(device, format, px, node.pixel_scale)?;
+                let depth_out = pool.acquire(device, mesh::DEPTH_OUT, px, node.pixel_scale)?;
+                let environments: Vec<_> = mesh
+                    .models
+                    .iter()
+                    .map(|m| {
+                        m.environment.as_ref().map(|e| {
+                            (
+                                graph.nodes[e.input.index()].key,
+                                outputs[e.input.index()].clone(),
+                            )
+                        })
+                    })
+                    .collect();
+                let planes: Vec<_> = mesh
+                    .planes
+                    .iter()
+                    .map(|p| match p.image {
+                        Some(id) => (graph.nodes[id.index()].key, outputs[id.index()].clone()),
+                        None => (0, None),
+                    })
+                    .collect();
+                let pipelines = ctx.pipelines.mesh();
+                ctx.draw_calls += mesh::encode(
+                    &mut pipelines.lock(),
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    format,
+                    mesh,
+                    &environments,
+                    &planes,
+                    &target,
+                    &depth_out,
+                );
+                ctx.mesh_depths.insert(index, depth_out);
+                ctx.passes += 1;
+                target
+            }
+            (NodeKind::Sky(sky), None) => {
+                let e = &sky.environment;
+                let input = outputs[e.input.index()].clone();
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let pipelines = ctx.pipelines.mesh();
+                mesh::encode_sky(
+                    &mut pipelines.lock(),
+                    device,
+                    &mut encoder,
+                    format,
+                    sky,
+                    graph.nodes[e.input.index()].key,
+                    input.as_ref(),
+                    &target,
+                );
+                ctx.passes += 1;
+                target
+            }
             (NodeKind::ShadowMap(map), None) => match shadow_maps.get(node.key) {
                 Some(image) => image,
                 // A new map (the layer, its lights or casters changed) on a
@@ -490,7 +559,9 @@ pub(crate) fn execute(
                 // texels: this frame tests the casters per pixel, and the map
                 // is drawn once the same key comes again (animated shadows
                 // pay for maps only where they are cheaper, such as at 4K).
-                None if !shadow_maps.stable(&map.layer, node.key)
+                // (Model casters exist only in maps.)
+                None if map.lighting.models.is_empty()
+                    && !shadow_maps.stable(&map.layer, node.key)
                     && map.screen_texels <= {
                         let (_, [w, h]) = map.lighting.shadow_map_size();
                         u64::from(w) * u64::from(h)
@@ -571,6 +642,26 @@ pub(crate) fn execute(
                         &draw,
                     );
                     ctx.passes += 1;
+                    if !l.models.is_empty() {
+                        let drawn: Vec<(u32, usize)> = slots
+                            .iter()
+                            .enumerate()
+                            .filter(|(slot, _)| draw[*slot])
+                            .map(|(slot, &li)| (slot as u32, li))
+                            .collect();
+                        let mesh = ctx.pipelines.mesh();
+                        ctx.draw_calls += mesh::encode_shadows(
+                            &mut mesh.lock(),
+                            device,
+                            gpu.queue(),
+                            &mut encoder,
+                            l,
+                            &drawn,
+                            [w, h],
+                            &target,
+                        );
+                        ctx.passes += 1;
+                    }
                     for (slot, cached) in reuse.iter().enumerate() {
                         let Some((from, from_slot)) = cached else {
                             continue;
@@ -624,9 +715,11 @@ pub(crate) fn execute(
                 .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
         if let Some(key) = surface_key {
-            surfaces.push((key, node.key, image.clone()));
+            let history = matches!(&node.kind, NodeKind::Effect(fx) if fx.feedback.is_some());
+            surfaces.push((key, node.key, image.clone(), history));
         }
-        if graph.time_dependent && intermediates.stats().budget > 0 {
+        // A tainted image has no identity: its key does not cover the history.
+        if graph.time_dependent && intermediates.stats().budget > 0 && !tainted[index] {
             use std::hash::{Hash, Hasher};
             let mut identity = rustc_hash::FxHasher::default();
             node.key.hash(&mut identity);
@@ -674,7 +767,7 @@ pub(crate) fn execute(
         && !incomplete
         && let Some(cache) = tiles
     {
-        for (key, hash, image) in surfaces {
+        for (key, hash, image, history) in surfaces {
             let bytes = image.byte_size();
             cache.frames.insert_surface(
                 key,
@@ -682,7 +775,7 @@ pub(crate) fn execute(
                 bytes,
                 cache.comp.dependencies(),
                 hash,
-                cache.feedback,
+                history,
             );
         }
         intermediates.publish(cache.frames, cache.comp);
@@ -695,6 +788,77 @@ pub(crate) fn execute(
         node_times,
         output,
     })
+}
+
+/// Nodes whose image depends on a feedback effect's earlier output: a feedback
+/// effect and whatever reads it. Their content key does not cover that history,
+/// so only they skip shared surfaces; the rest of the comp is still reused.
+fn feedback_taint(graph: &RenderGraph) -> Vec<bool> {
+    let mut tainted = vec![false; graph.nodes.len()];
+    for (index, node) in graph.nodes.iter().enumerate() {
+        let mut taint = matches!(&node.kind, NodeKind::Effect(fx) if fx.feedback.is_some());
+        node.kind.for_each_input(|id| taint |= tainted[id.index()]);
+        tainted[index] = taint;
+    }
+    tainted
+}
+
+/// The nodes to execute: all but an environment light's picture whose maps
+/// are already built (and what only it reads). Only those are left out, so
+/// nodes read in other ways than [`NodeKind::for_each_input`] still run.
+fn needed_nodes(
+    graph: &RenderGraph,
+    mesh: &parking_lot::Mutex<Option<mesh::MeshPipelines>>,
+) -> Vec<bool> {
+    let n = graph.nodes.len();
+    // Read on the way to the output; read only by built environment maps.
+    let mut reached = vec![false; n];
+    let mut env_only = vec![false; n];
+    reached[graph.output.index()] = true;
+    let mut mesh = mesh.lock();
+    if let Some(p) = mesh.as_mut() {
+        p.begin_frame();
+    }
+    for index in (0..n).rev() {
+        let node = &graph.nodes[index];
+        if !reached[index] {
+            if env_only[index] {
+                node.kind.for_each_input(|id| env_only[id.index()] = true);
+            }
+            continue;
+        }
+        let (environments, linear): (Vec<_>, bool) = match &node.kind {
+            NodeKind::Mesh(m) => (
+                m.models
+                    .iter()
+                    .filter_map(|m| m.environment.as_ref())
+                    .collect(),
+                m.linear,
+            ),
+            NodeKind::Sky(s) => (vec![&s.environment], s.linear),
+            _ => {
+                node.kind.for_each_input(|id| reached[id.index()] = true);
+                continue;
+            }
+        };
+        for e in environments {
+            let key = graph.nodes[e.input.index()].key;
+            if mesh
+                .as_mut()
+                .is_some_and(|p| p.has_env(key, e.width, linear))
+            {
+                env_only[e.input.index()] = true;
+            } else {
+                reached[e.input.index()] = true;
+            }
+        }
+    }
+    // Model passes whose models joined another pass draw nothing.
+    let emptied =
+        |i: usize| matches!(&graph.nodes[i].kind, NodeKind::Mesh(m) if m.models.is_empty());
+    (0..n)
+        .map(|i| reached[i] || !(env_only[i] || emptied(i)))
+        .collect()
 }
 
 struct ExecCtx<'a> {
@@ -716,6 +880,9 @@ struct ExecCtx<'a> {
     mask_outs: Vec<Option<masks::MaskOut>>,
     /// A pipeline was still compiling for the UI thread (incomplete frame).
     incomplete: bool,
+    /// Camera depth of the 3D model passes (by node index), for the planes
+    /// drawn over the models.
+    mesh_depths: rustc_hash::FxHashMap<usize, GpuImage>,
     /// Shadow maps not drawn this frame: their layers test the casters.
     skipped_maps: rustc_hash::FxHashSet<NodeId>,
 }
@@ -830,9 +997,36 @@ impl ExecCtx<'_> {
                 OpInput::Image(id) => outputs[id.index()].as_ref().map(|i| &i.view),
                 OpInput::Solid { .. } => None,
             };
-            let matte_view = op
-                .matte
-                .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));
+            // A plane over 3D models reads their depth in the matte slot.
+            let occlusion = op
+                .occlusion
+                .filter(|_| op.matte.is_none())
+                .and_then(|o| Some((o, self.mesh_depths.get(&o.mesh.index())?)));
+            if let Some((o, depth)) = &occlusion {
+                let s = node.pixel_scale;
+                let (x0, y0) = (f64::from(node.rect.x0), f64::from(node.rect.y0));
+                let [a, b, c] = o.depth;
+                data.occlusion = [
+                    (a * s) as f32,
+                    (b * s) as f32,
+                    ((a * x0 + b * y0) * s + c) as f32,
+                    if o.orthographic { 2.0 } else { 1.0 },
+                ];
+                let [dw, dh] = depth.texel_size();
+                data.matte = [
+                    (f64::from(depth.rect.x0) / depth.pixel_scale - x0) as f32,
+                    (f64::from(depth.rect.y0) / depth.pixel_scale - y0) as f32,
+                    dw as f32,
+                    dh as f32,
+                ];
+                data.mode[1] |= flags::OCCLUDE;
+            }
+            let matte_view = match &occlusion {
+                Some((_, depth)) => Some(&depth.view),
+                None => op
+                    .matte
+                    .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view)),
+            };
             let mask_view = op
                 .mask
                 .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));

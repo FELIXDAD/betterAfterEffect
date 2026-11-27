@@ -117,6 +117,9 @@ pub(crate) mod flags {
     pub const LIT_SAMPLES: u32 = 2048;
     pub const DRAFT: u32 = 4096;
     pub const WIREFRAME: u32 = 8192;
+    /// 3D plane over 3D models: the matte slot holds the models' camera
+    /// depth, `occlusion` the plane's.
+    pub const OCCLUDE: u32 = 16384;
 }
 
 /// Which fragment entry point a composite pipeline uses: plain draws never pay
@@ -167,6 +170,9 @@ pub(crate) struct DrawData {
     pub clips: [[f32; 4]; MAX_CLIPS],
     /// Clip count, first motion sample, sample count, lighting record offset.
     pub extra: [u32; 4],
+    /// The plane's camera depth `a·x + b·y + c` at target texel (x, y); w: 1
+    /// perspective (it is `1 / depth`), 2 orthographic.
+    pub occlusion: [f32; 4],
 }
 
 /// One motion-blur sample of a draw: target texel → input texel homography,
@@ -445,6 +451,7 @@ pub(crate) struct Shared {
     pub masks: Arc<Mutex<Option<MaskPipelines>>>,
     pub mix: Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>>,
     pub dof: Arc<Mutex<Option<crate::exec::dof::DofPipelines>>>,
+    pub mesh: Arc<Mutex<Option<crate::exec::mesh::MeshPipelines>>>,
     pub shadow_map: Arc<Mutex<Option<crate::exec::shadowmap::ShadowMapPipeline>>>,
 }
 
@@ -470,6 +477,7 @@ impl Shared {
             masks: Arc::new(Mutex::new(None)),
             mix: Arc::new(Mutex::new(None)),
             dof: Arc::new(Mutex::new(None)),
+            mesh: Arc::new(Mutex::new(None)),
             shadow_map: Arc::new(Mutex::new(None)),
         });
         all.push((Arc::downgrade(gpu), shared.clone()));
@@ -583,6 +591,13 @@ impl Shared {
                 dof.warm(&self.device, format);
             }
             self.dof.lock().get_or_insert(dof);
+        }
+        if self.mesh.lock().is_none() {
+            let mut mesh = crate::exec::mesh::MeshPipelines::new(&self.device);
+            for &(format, _) in formats {
+                mesh.warm(&self.device, format);
+            }
+            self.mesh.lock().get_or_insert(mesh);
         }
         if self.shadow_map.lock().is_none() {
             let pipeline = crate::exec::shadowmap::ShadowMapPipeline::new(&self.device);
@@ -857,6 +872,14 @@ impl Pipelines {
         self.shared
             .as_ref()
             .map(|s| s.mix.clone())
+            .unwrap_or_default()
+    }
+
+    /// The shared 3D model pipelines and uploaded models (created on first use).
+    pub fn mesh(&self) -> Arc<Mutex<Option<crate::exec::mesh::MeshPipelines>>> {
+        self.shared
+            .as_ref()
+            .map(|s| s.mesh.clone())
             .unwrap_or_default()
     }
 
@@ -1294,8 +1317,8 @@ mod tests {
 
     #[test]
     fn draw_record_matches_wgsl_layout() {
-        // 21 vec4s: the WGSL struct stride.
-        assert_eq!(std::mem::size_of::<DrawData>(), 336);
+        // 22 vec4s: the WGSL struct stride.
+        assert_eq!(std::mem::size_of::<DrawData>(), 352);
         assert_eq!(std::mem::size_of::<SampleData>(), 48);
         assert_eq!(std::mem::size_of::<EdgeData>(), 40);
         assert_eq!(std::mem::size_of::<MaskPassData>(), 112);

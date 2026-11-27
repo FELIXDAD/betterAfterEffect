@@ -49,6 +49,45 @@ fn expression_typing_honours_pairing_and_indentation_in_the_workbench() {
 }
 
 #[test]
+fn timeline_shows_the_evaluated_expression_error_inline() {
+    let mut h = gui();
+    new_comp(&mut h);
+    new_solid(&mut h);
+    let path = h.state().layers()[0].clone();
+    h.state_mut().workspace.focus_panel("timeline");
+    key(&mut h, Modifiers::NONE, Key::P);
+    h.state_mut().dispatch(Invocation::with_params(
+        "attr.set_expressions",
+        serde_json::json!({"items":[{"path":path,"attr":"transform:position","source":"missingInlineValue + 1"}]}),
+    ));
+    for enabled in [true, false, true] {
+        let mut p = (*h.state().prefs.current()).clone();
+        p.set(
+            "scripting_expressions.show_expression_error_warning_banner",
+            false,
+        );
+        p.set("scripting_expressions.expr_inline_errors", enabled);
+        h.state().prefs.set(p).unwrap();
+        settle(&mut h);
+        let msg = h
+            .state()
+            .session()
+            .lock()
+            .expr_errors
+            .iter()
+            .find(|e| e.prim == path && e.attr == "transform:position")
+            .expect("the viewer evaluated the invalid expression")
+            .message
+            .clone();
+        assert_eq!(
+            find_text(&h, msg.lines().next().unwrap()).is_some(),
+            enabled,
+            "{msg}"
+        );
+    }
+}
+
+#[test]
 fn expression_gutter_and_guides_follow_preferences_in_the_timeline() {
     let mut h = gui();
     new_comp(&mut h);
@@ -88,6 +127,83 @@ fn expression_gutter_and_guides_follow_preferences_in_the_timeline() {
 }
 
 #[test]
+fn expression_syntax_and_brace_colors_reach_the_timeline_text() {
+    let mut h = gui();
+    new_comp(&mut h);
+    new_solid(&mut h);
+    let layer = h.state().layers()[0].clone();
+    h.state_mut().workspace.focus_panel("timeline");
+    key(&mut h, Modifiers::NONE, Key::P);
+    let source = "var 字 = 'x'; // ]\nvalue + [2,2]";
+    h.state_mut().dispatch(Invocation::with_params(
+        "attr.set_expressions",
+        serde_json::json!({"items":[{"path":layer,"attr":"transform:position","source":source}]}),
+    ));
+    let mut prefs = (*h.state().prefs.current()).clone();
+    prefs.set("scripting_expressions.expr_color_correct_braces", "#010203");
+    h.state().prefs.set(prefs.clone()).unwrap();
+    settle(&mut h);
+    let field = find_text(&h, source).unwrap();
+    click_at(&mut h, field.center());
+    key(&mut h, Modifiers::CTRL, Key::End);
+    settle(&mut h);
+    let sections = |h: &Ui| {
+        h.output()
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == source => Some(
+                    t.galley
+                        .job
+                        .sections
+                        .iter()
+                        .map(|s| {
+                            (
+                                source[usize::from(s.byte_range.start)
+                                    ..usize::from(s.byte_range.end)]
+                                    .to_owned(),
+                                s.format.color,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .expect("timeline expression text")
+    };
+    let runs = sections(&h);
+    for (token, key) in [
+        ("var", "keywords"),
+        ("字", "identifiers"),
+        ("=", "operators"),
+        ("'x'", "strings"),
+        ("// ]", "comments"),
+        ("2", "numbers"),
+    ] {
+        let [r, g, b] = prefs.color(&format!("scripting_expressions.expr_color_{key}"));
+        assert!(
+            runs.contains(&(token.to_owned(), egui::Color32::from_rgb(r, g, b))),
+            "{token}: {runs:?}"
+        );
+    }
+    let matched = egui::Color32::from_rgb(1, 2, 3);
+    for token in ["[", "]"] {
+        assert!(runs.contains(&(token.into(), matched)), "{runs:?}");
+    }
+    prefs.set(
+        "scripting_expressions.expr_highlight_matching_braces",
+        false,
+    );
+    h.state().prefs.set(prefs.clone()).unwrap();
+    settle(&mut h);
+    assert!(sections(&h).iter().all(|(_, c)| *c != matched));
+    prefs.set("scripting_expressions.expr_syntax_highlighting", false);
+    h.state().prefs.set(prefs).unwrap();
+    settle(&mut h);
+    assert_eq!(sections(&h).len(), 1);
+}
+
+#[test]
 fn settings_sample_folds_and_restores_its_expression() {
     use egui_kittest::kittest::Queryable as _;
     let mut h = gui();
@@ -112,4 +228,41 @@ fn settings_sample_folds_and_restores_its_expression() {
     h.get_by_label("Expand").click_accesskit();
     settle(&mut h);
     assert_eq!(sample(&h), Some(full));
+}
+
+#[test]
+fn expression_themes_save_and_delete_through_preferences() {
+    use egui_kittest::kittest::Queryable as _;
+
+    let mut h = gui();
+    let open = |h: &mut Ui| {
+        h.state_mut()
+            .workspace
+            .show_settings(Some("scripting_expressions"));
+        settle(h);
+    };
+    open(&mut h);
+    h.get_by_label("Save Theme").click_accesskit();
+    settle(&mut h);
+    h.get_by_label("Theme name").click();
+    type_text(&mut h, "Studio");
+    h.get_by_label("Save").click();
+    settle(&mut h);
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    assert_eq!(
+        h.state().prefs.current().selected_expression_theme(),
+        Some("Studio")
+    );
+    for commit in [false, true] {
+        open(&mut h);
+        h.get_by_label("Delete Theme").click_accesskit();
+        settle(&mut h);
+        h.get_by_label(if commit { "OK" } else { "Cancel" }).click();
+        settle(&mut h);
+        assert_eq!(
+            h.state().prefs.current().saved_expression_themes().count(),
+            usize::from(!commit)
+        );
+    }
 }

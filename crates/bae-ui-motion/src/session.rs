@@ -135,6 +135,27 @@ pub enum PreviewRange {
     EntireDuration,
 }
 
+impl PreviewRange {
+    pub(crate) fn bounds(self, info: &CompInfo, now: Time) -> TimeRange {
+        let wa = info.work_area;
+        match self {
+            PreviewRange::WorkArea => wa,
+            // The work area, grown to take in the current time (AE).
+            PreviewRange::WorkAreaExtended => {
+                let end = (info.duration).max(info.frame_duration());
+                let start = wa.start.min(now);
+                let stop = if now >= wa.end {
+                    (now + info.frame_duration()).min(end)
+                } else {
+                    wa.end
+                };
+                TimeRange::new(start, stop)
+            }
+            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
+        }
+    }
+}
+
 /// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewOptions {
@@ -356,6 +377,11 @@ pub struct Session {
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
     /// View ▸ View Options: the layer controls the viewers draw.
     pub(crate) layer_controls: crate::viewer::view_options::LayerControls,
+    /// The region of interest a viewer shows and its comp ([left, top, right,
+    /// bottom], comp pixels), for Composition ▸ Crop Comp to Region of Interest.
+    pub(crate) roi: Option<(PrimPath, [f64; 4])>,
+    /// The comp was cropped to its region of interest: viewers turn it off.
+    pub(crate) roi_cropped: bool,
     /// View ▸ Panel Background Color.
     pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).
@@ -369,6 +395,12 @@ pub struct Session {
     /// A project item to rename in the Project panel (the Timeline's Rename
     /// on empty space renames its comp there, AE 26).
     pub(crate) rename_item: Option<PrimPath>,
+    /// Layer ▸ Reveal ▸ … in Project: the item the Project panel selects and
+    /// scrolls to next frame.
+    pub(crate) reveal_in_project: Option<PrimPath>,
+    /// File ▸ Interpret Footage ▸ Remember Interpretation: `footage.interpret`
+    /// parameters (without `items`) for Apply Interpretation.
+    pub(crate) remembered_interpretation: Option<serde_json::Value>,
     /// Frames in the GPU preview cache (the timeline's green bar): comp,
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
@@ -419,10 +451,14 @@ pub struct Session {
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,
+    /// Character panel menu ▸ Use Smart Quotes turned off.
+    pub(crate) straight_quotes: bool,
     /// Viewer selection at a specific source-text frame, retained across panel focus changes.
     pub(crate) text_selection: Option<(PrimPath, Time, std::ops::Range<usize>)>,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
+    /// Composition displayed at the root of the Flowchart panel.
+    pub flowchart_root: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
@@ -620,6 +656,14 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    /// Cached preview spans displayed on the timeline for this composition revision.
+    pub fn cached_frames(&self, comp: &PrimPath, revision: u64) -> &[TimeRange] {
+        match &self.cached_preview {
+            Some((path, rev, spans)) if path == comp && *rev == revision => spans,
+            _ => &[],
+        }
+    }
+
     /// What panels evaluate in place of the stage while something is dragged:
     /// the value drag ([`Scrub`]) and the keyframe drag ([`KeyPreview`]).
     pub fn live_overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
@@ -999,22 +1043,7 @@ impl Session {
 
     /// The range Preview ▸ Range plays for the current time `now`.
     pub fn preview_range(&self, info: &CompInfo, now: Time) -> TimeRange {
-        let wa = info.work_area;
-        match self.preview.range {
-            PreviewRange::WorkArea => wa,
-            // The work area, grown to take in the current time (AE).
-            PreviewRange::WorkAreaExtended => {
-                let end = (info.duration).max(info.frame_duration());
-                let start = wa.start.min(now);
-                let stop = if now >= wa.end {
-                    (now + info.frame_duration()).min(end)
-                } else {
-                    wa.end
-                };
-                TimeRange::new(start, stop)
-            }
-            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
-        }
+        self.preview.range.bounds(info, now)
     }
 
     /// Where playback of `info` would start and the range it plays (Preview

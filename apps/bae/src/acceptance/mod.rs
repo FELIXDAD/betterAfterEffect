@@ -21,6 +21,7 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_colors;
 mod appearance_preferences;
 mod audio_preferences;
 #[cfg(target_os = "windows")]
@@ -46,15 +47,18 @@ mod layers;
 mod layout;
 mod liquify;
 mod marker_label_preferences;
+mod media_panels;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
 mod panel_parity;
 mod preference_controls;
+mod preview_preferences;
 mod preview_switches;
 mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
+mod render_autosave;
 #[cfg(target_os = "macos")]
 mod render_queue;
 mod settings;
@@ -66,10 +70,12 @@ mod shortcuts_dialog;
 mod startup;
 #[cfg(target_os = "macos")]
 mod stress;
+mod text_orientation;
 #[cfg(target_os = "macos")]
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod type_preferences;
 mod window_workspaces;
 
 use std::collections::VecDeque;
@@ -191,6 +197,7 @@ pub(crate) struct Gui {
     /// Preferences (in memory) and the generation last applied.
     pub prefs: Arc<bae_prefs::PrefsStore>,
     prefs_generation: u64,
+    autosave: crate::autosave::AutoSave,
 }
 
 impl Gui {
@@ -210,6 +217,7 @@ impl Gui {
         workspace.set_extra_commands(doc.command_titles());
         Gui {
             prefs_generation: prefs.generation(),
+            autosave: crate::autosave::AutoSave::default(),
             prefs,
             app,
             workspace,
@@ -254,6 +262,15 @@ impl Gui {
             .workspace
             .ui(ui, &self.status, &self.doc, self.app.resources());
         self.pending.extend(invocations);
+        let queue = self.app.resource::<bae_ui_motion::SharedRenderQueue>();
+        if let Some(result) = self.autosave.tick(
+            std::time::Instant::now(),
+            &self.prefs.current(),
+            &self.doc,
+            queue,
+        ) {
+            result.expect("workbench auto-save");
+        }
         self.passes += 1;
         // As `Shell::sync_prefs`.
         let prefs = self.prefs.clone();
@@ -455,6 +472,18 @@ pub(crate) struct MenuItemView {
 }
 
 pub(crate) type Ui = Harness<'static, Gui>;
+
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
 
 /// A harness around a fresh [`Gui`].
 pub(crate) fn gui() -> Ui {
@@ -710,6 +739,20 @@ pub(crate) fn timeline_header(h: &Ui) -> Option<Rect> {
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }
+
+/// A panel's anchor text: [`FITTED`] finds the Composition viewer's fitted
+/// magnification ("(50%)"), anything else is [`find_text`].
+pub(crate) fn find_anchor(h: &Ui, anchor: &str) -> Option<Rect> {
+    if anchor == FITTED {
+        return find_texts(h, |t| t.starts_with('(') && t.ends_with("%)"))
+            .into_iter()
+            .next();
+    }
+    find_text(h, anchor)
+}
+
+/// The Composition viewer's anchor: its magnification popup while fitted.
+pub(crate) const FITTED: &str = "(%)";
 
 /// Every painted text matching `pred`, as visible rects.
 pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {

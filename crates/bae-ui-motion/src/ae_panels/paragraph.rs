@@ -75,6 +75,7 @@ impl Panel for ParagraphPanel {
             token.as_str()
         };
         let mut change = json!({});
+        let mut gesture = super::character::Gesture::None;
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
@@ -164,6 +165,7 @@ impl Panel for ParagraphPanel {
                     resp.on_hover_text(tr(tip));
                     if let Some(v) = super::character::number(
                         ui,
+                        &mut gesture,
                         ui.id().with(field),
                         value,
                         tr("px"),
@@ -177,36 +179,17 @@ impl Panel for ParagraphPanel {
                 }
             });
         }
-        if change.as_object().is_some_and(|o| !o.is_empty()) {
-            if layers.is_empty() {
-                let mut d = doc.clone();
-                if let Ok(c) = serde_json::from_value::<bae_motion::TextStyleChange>(change.clone())
-                {
-                    c.apply(&mut d, 0..usize::MAX);
-                }
-                session.lock().text_defaults = Some(d);
-            } else {
-                cx.invoke_with(
-                    "text.set_style",
-                    json!({ "layers": layers, "time": time, "style": change, "range":range }),
-                );
-            }
+        super::text_menu::Selection {
+            layers,
+            time,
+            range,
+            doc,
         }
+        .send(cx, change, gesture);
     }
 
-    fn menu(&mut self, ui: &mut Ui, _cx: &mut PanelContext<'_>) {
-        ui.add_enabled_ui(false, |ui| {
-            for item in [
-                "Roman Hanging Punctuation",
-                "Top-to-Top Leading",
-                "Bottom-to-Bottom Leading",
-                "Adobe Single-line Composer",
-                "Adobe Every-line Composer",
-                "Reset Paragraph",
-            ] {
-                let _ = ui.button(tr(item));
-            }
-        });
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        super::text_menu::show(ui, cx, false);
     }
 }
 

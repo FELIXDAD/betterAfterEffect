@@ -25,6 +25,75 @@ fn show_channel_toggles_and_a_drag_draws_the_region_of_interest() {
     );
 }
 
+#[test]
+fn a_new_composition_viewer_can_present_previews_from_disk() {
+    use bae_gpu::{WarmUp, testing::shared_context, viewport::ViewportTextureRegistry};
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+    let Some(gpu) = shared_context() else { return };
+    let mut h = H::new();
+    // At 999 fps every frame renders slower than it lasts; with free reads it is stored.
+    h.comp = path(
+        &h.run(
+            "comp.create",
+            json!({"width": 640, "height": 360, "fps": 999.0}),
+        )["path"],
+    );
+    h.session().lock().open_comp(&h.comp);
+    let dir = tempfile::tempdir().unwrap();
+    let mut p = bae_prefs::Preferences::default();
+    p.set(
+        "disk.disk_cache_folder",
+        dir.path().to_string_lossy().as_ref(),
+    );
+    p.set(bae_prefs::keys::DISK_LIMIT_GB, 1);
+    let prefs = Arc::new(bae_prefs::PrefsStore::new(p));
+    let cache = crate::disk_frames::DiskFrames::new(dir.path().to_path_buf(), &prefs);
+    cache.run(&gpu).unwrap();
+    cache.assume_free_reads();
+    let registry = Arc::new(ViewportTextureRegistry::new());
+    h.resources.insert(registry.clone());
+    h.resources.insert(prefs);
+    h.resources.insert(gpu);
+    h.resources.insert(cache.clone());
+    h.layer("solid");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !cache.enabled() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for reopen in [false, true] {
+        h.viewer = CompositionViewer::new(None);
+        loop {
+            for slot in registry.snapshot() {
+                if slot.texture.is_some() && slot.display_handle.is_none() {
+                    registry.set_display_handle(slot.id, Some(slot.id.raw()));
+                }
+            }
+            h.frame(Vec::new(), Modifiers::NONE);
+            let presented=h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Mesh(m) if matches!(m.texture_id,egui::TextureId::User(_))));
+            let ready = if reopen {
+                cache.reads() > 0
+            } else {
+                std::fs::read_dir(dir.path().join("BAE Preview Frames"))
+                    .unwrap()
+                    .flatten()
+                    .any(|e| e.path().extension().is_some_and(|s| s == "bpf"))
+            };
+            if ready && presented {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "disk viewer reopen={reopen}, ready={ready}, presented={presented}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
 /// Fast Previews (Cmd/Ctrl+Alt+1, 2, 5) and View ▸ Show Layer Controls.
 #[test]
 fn fast_previews_modes_and_show_layer_controls() {

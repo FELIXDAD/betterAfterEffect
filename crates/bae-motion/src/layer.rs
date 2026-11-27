@@ -361,12 +361,33 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::PreComp | LayerKind::Footage | LayerKind::Audio => {
-                let src = p.source.clone().expect("checked above");
+                let src = p.source.as_ref().expect("checked above");
                 let (size, duration) = source_info.expect("checked above");
-                set(tx, &path, "source", Value::PrimRef(src))?;
-                anchor = [size[0] / 2.0, size[1] / 2.0];
+                // A 3D model (AE's model layers): 3D, centred on its origin.
+                let model = matches!(
+                    tx.stage().prim(src).and_then(|v| query::static_value(&v, "kind")),
+                    Some(Value::Enum(k)) if k == "model"
+                );
+                set(tx, &path, "source", Value::PrimRef(src.clone()))?;
+                anchor = if model {
+                    [0.0, 0.0]
+                } else {
+                    [size[0] / 2.0, size[1] / 2.0]
+                };
+                if model {
+                    set(tx, &path, "three_d", Value::Bool(true))?;
+                }
                 if let Some(d) = duration {
-                    set(tx, &path, "out_point", Value::Time(start + d))?;
+                    let (first, end) = if matches!(kind, LayerKind::Footage | LayerKind::Audio) {
+                        query::footage_range(tx.stage(), src, d)
+                    } else {
+                        (Time::ZERO, d)
+                    };
+                    if first != Time::ZERO {
+                        set(tx, &path, "start_time", Value::Time(start - first))?;
+                        set(tx, &path, "in_point", Value::Time(start))?;
+                    }
+                    set(tx, &path, "out_point", Value::Time(start + (end - first)))?;
                 }
             }
             LayerKind::Null => {

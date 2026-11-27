@@ -221,7 +221,11 @@ impl Panel for PropertiesPanel {
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        if let Some(v)=crate::ae_panels::character::number(ui,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size")) {
+                        // Commits on release (no live preview here).
+                        let mut gesture = crate::ae_panels::character::Gesture::None;
+                        if let Some(v)=crate::ae_panels::character::number(ui,&mut gesture,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size"))
+                            && gesture != crate::ae_panels::character::Gesture::Live
+                        {
                             change["font_size"]=json!(v);
                         }
                     });
@@ -741,6 +745,20 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Light Transmission", "透光率"),
     ("Accepts Shadows", "接受阴影"),
     ("Accepts Lights", "接受灯光"),
+    // Advanced 3D Material Options (AE 26's zh terms).
+    ("Shadow Color", "阴影颜色"),
+    ("Appears in Reflections", "在反射中显示"),
+    ("Reflection Intensity", "反射强度"),
+    ("Reflection Sharpness", "反射锐度"),
+    ("Reflection Rolloff", "反射衰减"),
+    ("Transparency", "透明度"),
+    ("Transparency Rolloff", "透明度衰减"),
+    ("Index of Refraction", "折射率"),
+    // Environment light (AE 26's zh terms).
+    ("Source", "源"),
+    ("Background Visible", "背景可见"),
+    ("Background Opacity", "背景不透明度"),
+    ("Background Blur", "背景模糊"),
     ("Diffuse", "漫射"),
     ("Specular Intensity", "镜面强度"),
     ("Specular Shininess", "镜面反光度"),
