@@ -54,14 +54,14 @@ pub const FORMATS: &[ExportFormat] = &[
     ExportFormat::Wav,
 ];
 
-/// AE 26's Render Settings templates in its menu order; BAE renders at Best
-/// Settings, the others are shown greyed.
-const RS_TEMPLATES: [&str; 5] = [
-    "Best Settings",
-    "DV Settings",
-    "Multi-Machine Settings",
-    "Current Settings",
-    "Draft Settings",
+/// Available render presets use the composition's work area. Field rendering
+/// and multi-machine output require export modes the renderer does not provide.
+const RS_TEMPLATES: [(&str, Option<QueueResolution>); 5] = [
+    ("Best Settings", Some(QueueResolution::Full)),
+    ("DV Settings", None),
+    ("Multi-Machine Settings", None),
+    ("Current Settings", Some(QueueResolution::Current)),
+    ("Draft Settings", Some(QueueResolution::Half)),
 ];
 
 /// What BAE writes for an Output Module template: format, channels, video
@@ -102,9 +102,15 @@ const OM_TEMPLATES: [(&str, Option<OmSettings>); 12] = [
             DEFAULT_BIT_RATE_MBPS,
         )),
     ),
-    ("Lossless with Alpha", None),
+    (
+        "Lossless with Alpha",
+        Some((ExportFormat::Png, Channels::RgbAlpha, DEFAULT_BIT_RATE_MBPS)),
+    ),
     ("Alpha Only", None),
-    ("Lossless", None),
+    (
+        "Lossless",
+        Some((ExportFormat::Png, Channels::Rgb, DEFAULT_BIT_RATE_MBPS)),
+    ),
     (
         "High Quality",
         Some((ExportFormat::ProRes, Channels::Rgb, DEFAULT_BIT_RATE_MBPS)),
@@ -254,6 +260,48 @@ pub fn has_bit_rate(format: ExportFormat) -> bool {
     )
 }
 
+/// The resolution selected in Render Settings or a render template.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum QueueResolution {
+    Current,
+    #[default]
+    Full,
+    Half,
+    Third,
+    Quarter,
+}
+
+impl QueueResolution {
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Current,
+        Self::Full,
+        Self::Half,
+        Self::Third,
+        Self::Quarter,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Current => "Current Settings",
+            Self::Full => "Full",
+            Self::Half => "Half",
+            Self::Third => "Third",
+            Self::Quarter => "Quarter",
+        }
+    }
+
+    pub(crate) fn resolve(self, current: u32) -> bae_render::Resolution {
+        use bae_render::Resolution;
+        match self {
+            Self::Current => Resolution::Custom(current),
+            Self::Full => Resolution::Full,
+            Self::Half => Resolution::Half,
+            Self::Third => Resolution::Third,
+            Self::Quarter => Resolution::Quarter,
+        }
+    }
+}
+
 /// State of a queued item.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ItemStatus {
@@ -308,6 +356,8 @@ pub struct QueueItem {
     pub start: i64,
     /// Last frame (inclusive).
     pub end: i64,
+    /// The rendered size, independent of the output module.
+    pub(crate) resolution: QueueResolution,
     /// Current state.
     pub status: ItemStatus,
     /// The Render column's check box: unchecked items stay in the queue but
@@ -505,6 +555,7 @@ impl RenderQueue {
             log_file: None,
             start,
             end,
+            resolution: QueueResolution::Full,
             status: ItemStatus::Queued,
             render: true,
             comment: String::new(),
@@ -693,6 +744,7 @@ impl RenderQueue {
             render_threads: self.render_threads,
             start: item.start,
             end: item.end,
+            resolution: item.resolution,
             cancel: item.cancel.clone(),
         })
     }
@@ -843,6 +895,7 @@ pub(crate) struct Job {
     render_threads: Option<usize>,
     start: i64,
     end: i64,
+    resolution: QueueResolution,
     cancel: Arc<AtomicBool>,
 }
 
@@ -951,6 +1004,9 @@ pub(crate) fn render_job(
     // A `#` run in the name numbers the frames, one frame too (#207);
     // export_frames decides, like `bae render`.
     let request = RenderRequest {
+        resolution: job
+            .resolution
+            .resolve(crate::viewer::comp_resolution(stage, &job.comp)),
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
     };
@@ -1801,10 +1857,10 @@ fn item_ui(
     // Render Settings and Log (AE's templates; BAE renders at Best Settings).
     ui.add_enabled_ui(editable, |ui| {
         ui.horizontal_wrapped(|ui| {
-            let span = comp.map(|comp| Span::capture(item, comp));
+            let render = comp.map(|comp| templates::Render::capture(item, comp));
             let mut rs: Vec<_> = RS_TEMPLATES
                 .iter()
-                .map(|t| (tr(t), *t == "Best Settings" && comp.is_some()))
+                .map(|(label, resolution)| (tr(label), resolution.is_some() && comp.is_some()))
                 .collect();
             if let Some(lib) = library {
                 rs.extend(lib.render.keys().map(|n| (n.as_str(), comp.is_some())));
@@ -1815,9 +1871,16 @@ fn item_ui(
                 .filter(|n| {
                     library
                         .and_then(|l| l.render.get(*n))
-                        .is_some_and(|s| Some(s) == span.as_ref())
+                        .is_some_and(|s| Some(s) == render.as_ref())
                 })
-                .or_else(|| (span == Some(Span::WorkArea)).then(|| tr("Best Settings")));
+                .or_else(|| {
+                    let settings = render.as_ref()?;
+                    RS_TEMPLATES.iter().find_map(|(name, resolution)| {
+                        (settings.span == Span::WorkArea
+                            && *resolution == Some(settings.resolution))
+                        .then(|| tr(name))
+                    })
+                });
             let render_label = selected.unwrap_or_else(|| tr("Custom")).to_owned();
             let id = egui::Id::new(("rq-rs-templates", item.id));
             match template_menu(
@@ -1826,18 +1889,29 @@ fn item_ui(
                 &name("Render Settings Templates"),
                 rs,
                 selected,
-                library.is_some() && span.is_some(),
+                library.is_some() && render.is_some(),
             ) {
                 Some(TemplatePick::Name(n)) => {
                     if let Some(comp) = comp {
-                        let preset = library.and_then(|l| l.render.get(&n));
-                        (item.start, item.end) = preset.unwrap_or(&Span::WorkArea).range(comp);
-                        item.render_template = preset.map(|_| n);
+                        if let Some(preset) = library.and_then(|l| l.render.get(&n)) {
+                            preset.apply(item, comp);
+                            item.render_template = Some(n);
+                        } else if let Some(resolution) = RS_TEMPLATES
+                            .iter()
+                            .find_map(|(label, r)| (tr(label) == n).then_some(*r).flatten())
+                        {
+                            templates::Render {
+                                span: Span::WorkArea,
+                                resolution,
+                            }
+                            .apply(item, comp);
+                            item.render_template = None;
+                        }
                     }
                 }
                 Some(TemplatePick::Custom) => *open = Some((item.id, QueueLink::RenderSettings)),
                 Some(TemplatePick::Save) => {
-                    if let Some(s) = span {
+                    if let Some(s) = render {
                         *open = Some((item.id, QueueLink::Make(None, Template::Render(s))));
                     }
                 }
@@ -1902,6 +1976,9 @@ fn item_ui(
                         .filter(|n| {
                             library
                                 .and_then(|l| l.outputs.get(*n))
+                                .filter(|p| {
+                                    !module.format.is_quicktime() || p.pcm_audio == module.pcm_audio
+                                })
                                 .and_then(|p| p.settings())
                                 .is_some_and(|(f, c, b)| {
                                     module.format == f
@@ -1911,9 +1988,13 @@ fn item_ui(
                                 })
                         })
                         .or_else(|| om_template(module).map(tr));
-                    let output_label = selected
-                        .unwrap_or_else(|| tr(format_label(module.format)))
-                        .to_owned();
+                    let format = tr(format_label(module.format));
+                    let output_label = match selected {
+                        Some(name) if module.format == ExportFormat::Png => {
+                            format!("{name} ({format})")
+                        }
+                        _ => selected.unwrap_or(format).to_owned(),
+                    };
                     let popup_id = egui::Id::new(("rq-om-templates", id, index));
                     match template_menu(
                         ui,
@@ -1945,6 +2026,7 @@ fn item_ui(
                                 module.set_format(f);
                                 module.channels = c;
                                 module.bit_rate_mbps = rate;
+                                module.pcm_audio = user.is_none_or(|p| p.pcm_audio);
                                 module.template = user.map(|_| name);
                             }
                         }
@@ -2448,6 +2530,28 @@ mod tests {
         assert_eq!(item.outputs[0].output, first);
     }
 
+    /// Templates saved by the previous version are kept, not reset.
+    #[test]
+    fn version_1_templates_load() {
+        use bae_platform::{SettingsFile, settings::LoadStatus};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("render-templates.json");
+        std::fs::write(
+            &file,
+            r#"{"kind":"render-queue-templates","version":1,"data":{
+                "render":{"Half":{"Custom":[0,352800000]}},
+                "outputs":{"Mov":{"format":"prores","alpha":false,"mbps":20.0}},
+                "names":{},"default_name":null}}"#,
+        )
+        .unwrap();
+        let loaded = SettingsFile::<Library>::new(&file).load();
+        assert_eq!(loaded.status, LoadStatus::Migrated { from: 1 });
+        let render = &loaded.value.render["Half"];
+        assert_eq!(render.span, Span::Custom(Time(0), Time(352_800_000)));
+        assert_eq!(render.resolution, QueueResolution::Full);
+        assert!(loaded.value.outputs["Mov"].pcm_audio);
+    }
+
     #[test]
     fn user_templates_round_trip_and_apply_to_another_composition() {
         let source = comp_info("/comps/a", "A");
@@ -2461,7 +2565,8 @@ mod tests {
         assert_eq!(work.range(&target), (0, 23));
         item.start = 0;
         item.end = 14;
-        let custom = Span::capture(item, &source);
+        item.resolution = QueueResolution::Third;
+        let custom = templates::Render::capture(item, &source);
         item.outputs[0].set_format(ExportFormat::Tiff);
         item.outputs[0].channels = Channels::RgbAlpha;
         let mut lib = Library::default();
@@ -2471,7 +2576,10 @@ mod tests {
             templates::Output::capture(&item.outputs[0]),
         );
         let restored: Library = serde_json::from_value(serde_json::to_value(lib).unwrap()).unwrap();
-        assert_eq!(restored.render["半秒"].range(&target), (0, 11));
+        item.resolution = QueueResolution::Full;
+        restored.render["半秒"].apply(item, &target);
+        assert_eq!((item.start, item.end), (0, 11));
+        assert_eq!(item.resolution, QueueResolution::Third);
         assert_eq!(
             restored.outputs["带透明"].settings().unwrap(),
             (
@@ -2495,7 +2603,7 @@ mod tests {
             "{}",
             item.outputs[0].output
         );
-        assert_eq!(om_template(&item.outputs[0]), None);
+        assert_eq!(om_template(&item.outputs[0]), Some("Lossless"));
         item.outputs[0].set_format(ExportFormat::Tiff);
         item.outputs[0].channels = Channels::RgbAlpha;
         assert_eq!(
