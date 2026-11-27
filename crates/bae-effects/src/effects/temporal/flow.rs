@@ -217,6 +217,18 @@ pub(crate) struct Field {
     pub(crate) region: IRect,
 }
 
+impl Field {
+    /// Reuse the flow texture in render-grid coordinates. Its two channels are
+    /// displacements in render pixels, including at reduced preview resolution.
+    pub(crate) fn grid_image(&self, grid: f64) -> GpuImage {
+        let mut image = self.image.clone();
+        image.rect = image_grid::pixel_rect(self.region, grid);
+        image.pixel_scale = grid * f64::from(self.scale);
+        image.alpha = bae_render::ImageAlpha::Straight;
+        image
+    }
+}
+
 fn patches(n: u32, block: u32) -> u32 {
     n.saturating_sub(block).div_ceil(block / 2) + 1
 }

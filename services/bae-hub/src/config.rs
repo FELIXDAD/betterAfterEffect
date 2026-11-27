@@ -6,6 +6,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bae_sync::HubLimits;
 use serde::{Deserialize, Serialize};
 
 use crate::error::HubError;
@@ -93,8 +94,35 @@ pub struct FileConfig {
     /// Unload a project from memory after this many seconds without connections
     /// (0: never).
     pub idle_unload_secs: Option<u64>,
+    /// `[limits]`: see [`HubConfig::limits`].
+    pub limits: Option<LimitsConfig>,
     #[serde(default, rename = "token")]
     pub tokens: Vec<TokenConfig>,
+}
+
+/// `[limits]` in `hub.toml`: limits of client connections
+/// ([`HubConfig::limits`], [`HubConfig::read_only_max_incoming`]). Every field
+/// is optional.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitsConfig {
+    /// Largest message sent to clients and taken from writers (MiB).
+    pub max_message_mib: Option<u64>,
+    /// Flow control: document data waits while more than this waits for a
+    /// client (MiB).
+    pub max_backlog_mib: Option<u64>,
+    /// Hard cap on what waits for one client; over it the connection is
+    /// dropped (MiB).
+    pub max_unsent_mib: Option<u64>,
+    /// Drop a client that read nothing for this long while more than
+    /// `max_backlog_mib` waits for it (seconds).
+    pub stall_timeout_secs: Option<u64>,
+    /// Largest message taken from read-only connections (KiB).
+    pub read_only_max_message_kib: Option<u64>,
+}
+
+fn bytes(n: u64, unit: u64) -> usize {
+    usize::try_from(n.saturating_mul(unit)).unwrap_or(usize::MAX)
 }
 
 impl FileConfig {
@@ -129,6 +157,27 @@ pub struct HubConfig {
     /// that reaches the hub as dozens of updates per second becomes a few
     /// appends per second. Clients still get every update at once.
     pub store_send_interval: Duration,
+    /// Limits of client connections (`bae_sync::HubLimits`, spec 3.1): the
+    /// largest message, flow control (the relay holds document data back while
+    /// more than `max_backlog` waits for a client, and goes on once it read
+    /// that), the hard cap on what waits for one client, the stall timeout.
+    /// Read-only connections take less, see `read_only_max_incoming`.
+    pub limits: HubLimits,
+    /// Largest message a read-only connection may send (its
+    /// `HubLimits::max_incoming`, at most `limits.max_incoming`), so a
+    /// read-only token cannot make the hub take in messages as large as
+    /// writers may send, which it would only drop. Default 16 MiB.
+    ///
+    /// Not smaller: what a viewer must send grows too. Its `Hello` holds a
+    /// version vector per document, about 11 bytes per (document, Loro peer)
+    /// pair, and every editing session adds a peer to the documents it edits
+    /// (about 95 000 pairs per MiB). And viewers edit locally: a session that
+    /// does not know it is read-only (`SessionConfig::send_data`) sends those
+    /// edits after every `Hello` of the hub and every reconnect, so a viewer
+    /// with more than this in one document is dropped every time it connects.
+    /// Clients that know their token is read-only (`GET /v1/status`) set
+    /// `send_data = false` and never send data at all.
+    pub read_only_max_incoming: usize,
 }
 
 impl HubConfig {
@@ -145,6 +194,19 @@ impl HubConfig {
             quiet_tick: Duration::from_millis(10),
             empty_tick: Duration::from_millis(500),
             store_send_interval: Duration::from_millis(300),
+            limits: HubLimits::default(),
+            read_only_max_incoming: 16 << 20,
+        }
+    }
+
+    /// The limits of a client connection with `access`.
+    pub fn client_limits(&self, access: Access) -> HubLimits {
+        match access {
+            Access::Write => self.limits,
+            Access::Read => HubLimits {
+                max_incoming: self.read_only_max_incoming.min(self.limits.max_incoming),
+                ..self.limits
+            },
         }
     }
 
@@ -158,6 +220,30 @@ impl HubConfig {
         }
         if let Some(secs) = file.idle_unload_secs {
             self.idle_unload = (secs > 0).then(|| Duration::from_secs(secs));
+        }
+        if let Some(l) = file.limits {
+            if let Some(mib) = l.max_message_mib {
+                self.limits.max_message = bytes(mib, 1 << 20);
+                self.limits.max_incoming = self.limits.max_message;
+            }
+            if let Some(mib) = l.max_backlog_mib {
+                self.limits.max_backlog = bytes(mib, 1 << 20);
+            }
+            match l.max_unsent_mib {
+                Some(mib) => self.limits.max_unsent = bytes(mib, 1 << 20),
+                // Follow the other two, as the default does.
+                None if l.max_message_mib.is_some() || l.max_backlog_mib.is_some() => {
+                    self.limits.max_unsent =
+                        HubLimits::max_unsent_for(self.limits.max_message, self.limits.max_backlog);
+                }
+                None => {}
+            }
+            if let Some(secs) = l.stall_timeout_secs {
+                self.limits.stall_timeout = Duration::from_secs(secs);
+            }
+            if let Some(kib) = l.read_only_max_message_kib {
+                self.read_only_max_incoming = bytes(kib, 1 << 10);
+            }
         }
         self.tokens.extend(file.tokens);
     }
@@ -187,8 +273,44 @@ impl HubConfig {
         Ok(())
     }
 
-    /// Check the settings (tokens long enough and unique, names present).
+    /// Check the settings (tokens long enough and unique, names present, limits
+    /// not zero and fitting together).
     pub fn validate(&self) -> Result<(), HubError> {
+        let l = &self.limits;
+        let mib = |n: usize| n.div_ceil(1 << 20);
+        // Clients connect with the default limits.
+        let clients_take = HubLimits::default().max_incoming;
+        if l.max_message > clients_take {
+            return Err(HubError::Config(format!(
+                "limits: max_message_mib ({} MiB) is more than clients take ({} MiB): \
+                 they would refuse such messages and get them again after every reconnect",
+                mib(l.max_message),
+                mib(clients_take)
+            )));
+        }
+        let held_back = l.max_message.saturating_add(l.max_backlog);
+        if l.max_unsent < held_back {
+            return Err(HubError::Config(format!(
+                "limits: max_unsent_mib ({} MiB) must be at least max_message_mib + \
+                 max_backlog_mib ({} MiB), what may wait for a client that flow control \
+                 held back; leave it out to get 2 x max_message_mib + max_backlog_mib",
+                l.max_unsent >> 20,
+                mib(held_back)
+            )));
+        }
+        for (name, zero) in [
+            ("max_message_mib", l.max_message == 0 || l.max_incoming == 0),
+            ("max_unsent_mib", l.max_unsent == 0),
+            ("stall_timeout_secs", l.stall_timeout.is_zero()),
+            (
+                "read_only_max_message_kib",
+                self.read_only_max_incoming == 0,
+            ),
+        ] {
+            if zero {
+                return Err(HubError::Config(format!("limits: {name} must not be 0")));
+            }
+        }
         for (i, t) in self.tokens.iter().enumerate() {
             if t.name.trim().is_empty() {
                 return Err(HubError::Config(format!("token #{} has no name", i + 1)));
@@ -294,6 +416,23 @@ pub fn default_config_text(token: &str) -> String {
 # 工程多久没人连接就从内存里卸载（秒，0 表示不卸载）。数据都在磁盘上，下次连接时重新加载。
 # idle_unload_secs = 600
 
+# 客户端连接的上限（一般不用改）。
+# [limits]
+# 单条消息的上限（MiB）：发给客户端的、可写客户端发来的。一个工程层的快照要放得下。
+# 不能超过 256（客户端最多收这么大）；调小的话，比它大的工程层就同步不了。
+# max_message_mib = 256
+# 给某个客户端排队等它读的数据超过这么多（MiB）时，先不发工程数据，等它读完再发。
+# 平时每个读得慢的客户端那里最多排队这么多加一条消息；NAS 内存小就调小它。
+# max_backlog_mib = 16
+# 给一个客户端排队的数据最多这么多（MiB），超过就断开它。只是兜底的硬上限，
+# 不能小于 max_message_mib + max_backlog_mib；不写就是 2 × max_message_mib + max_backlog_mib。
+# max_unsent_mib = 528
+# 排队超过 max_backlog_mib、并且这么多秒内对方一个字节都没读时断开它。
+# stall_timeout_secs = 30
+# 只读连接发来的单条消息的上限（KiB）。只读客户端不发修改（应用知道令牌只读时就不发），
+# 但 Hello 随文档数和编辑过的会话数增长，不知道自己只读的客户端还会发它本地的修改，超过上限就会被断开。
+# read_only_max_message_kib = 16384
+
 # 团队令牌。客户端连接时带上其中一个。
 #   access = "write"：可以编辑，也可以新建工程
 #   access = "read"：只能看，客户端发来的修改会被丢弃
@@ -372,6 +511,86 @@ mod tests {
 
         assert!(FileConfig::parse("bogus = 1").is_err());
         c.tokens[0].token = "short".into();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn limits() {
+        let mut c = HubConfig::new("/data");
+        assert_eq!(c.client_limits(Access::Write), HubLimits::default());
+        assert_eq!(c.client_limits(Access::Read).max_incoming, 16 << 20);
+        // Read-only connections only take less; they are sent as much.
+        assert_eq!(
+            c.client_limits(Access::Read).max_message,
+            HubLimits::default().max_message
+        );
+        let file = FileConfig::parse(
+            r#"
+            [limits]
+            max_message_mib = 64
+            max_backlog_mib = 8
+            max_unsent_mib = 200
+            stall_timeout_secs = 90
+            read_only_max_message_kib = 256
+            "#,
+        )
+        .unwrap();
+        c.apply_file(file);
+        c.validate().unwrap();
+        let write = c.client_limits(Access::Write);
+        assert_eq!(
+            (write.max_message, write.max_incoming),
+            (64 << 20, 64 << 20)
+        );
+        assert_eq!((write.max_backlog, write.max_unsent), (8 << 20, 200 << 20));
+        assert_eq!(write.stall_timeout, Duration::from_secs(90));
+        let read = c.client_limits(Access::Read);
+        assert_eq!((read.max_message, read.max_incoming), (64 << 20, 256 << 10));
+        assert_eq!(read.max_backlog, write.max_backlog);
+
+        // Never more for read-only connections than for writers.
+        c.read_only_max_incoming = 1 << 30;
+        assert_eq!(c.client_limits(Access::Read).max_incoming, 64 << 20);
+        assert!(FileConfig::parse("[limits]\nmax_mesage_mib = 1").is_err());
+        let zero = FileConfig::parse("[limits]\nmax_message_mib = 0").unwrap();
+        c.apply_file(zero);
+        assert!(c.validate().is_err());
+    }
+
+    /// The limits must fit together: what may wait for a client held back by
+    /// flow control (`max_backlog` plus one message) under the hard cap, and
+    /// messages no larger than clients take. Raising `max_message_mib` alone
+    /// raises the cap with it, as the default is made.
+    #[test]
+    fn limits_fit_together() {
+        let limits = |text: &str| {
+            let mut c = HubConfig::new("/data");
+            c.apply_file(FileConfig::parse(&format!("[limits]\n{text}")).unwrap());
+            c.validate().map(|()| c.limits)
+        };
+        let l = limits("max_message_mib = 64").unwrap();
+        assert_eq!(l.max_unsent, (2 * 64 + 16) << 20);
+        let l = limits("max_message_mib = 100\nmax_backlog_mib = 4").unwrap();
+        assert_eq!(l.max_unsent, (2 * 100 + 4) << 20);
+        let l = limits("max_backlog_mib = 32").unwrap();
+        assert_eq!(l.max_unsent, (2 * 256 + 32) << 20);
+        // Given explicitly, as long as a held-back client fits.
+        let l = limits("max_message_mib = 64\nmax_unsent_mib = 80").unwrap();
+        assert_eq!(l.max_unsent, 80 << 20);
+        let e = limits("max_unsent_mib = 64").unwrap_err().to_string();
+        assert!(e.contains("max_unsent_mib"), "{e}");
+        let e = limits("max_message_mib = 64\nmax_unsent_mib = 79")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("max_unsent_mib"), "{e}");
+        // Clients take at most 256 MiB: larger messages would be refused,
+        // and sent again after every reconnect.
+        let e = limits("max_message_mib = 512").unwrap_err().to_string();
+        assert!(e.contains("max_message_mib"), "{e}");
+        assert!(limits("max_message_mib = 256").is_ok());
+        // The same checks for settings made in code.
+        let mut c = HubConfig::new("/data");
+        c.limits.max_unsent = c.limits.max_message;
         assert!(c.validate().is_err());
     }
 

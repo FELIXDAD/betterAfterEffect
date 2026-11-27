@@ -55,6 +55,7 @@ mod menus;
 mod panel_parity;
 mod preference_controls;
 mod preview_preferences;
+mod preview_properties;
 mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
@@ -76,6 +77,7 @@ mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
 mod type_preferences;
+mod vision;
 mod window_workspaces;
 
 use std::collections::VecDeque;

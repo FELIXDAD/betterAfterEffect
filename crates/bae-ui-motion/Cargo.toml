@@ -12,6 +12,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bae-vision.workspace = true
+png.workspace = true
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 bae-interop-psd.workspace = true
 bae-effects.workspace = true
