@@ -1174,14 +1174,20 @@ impl Builder<'_, '_> {
                 None => {}
             }
         }
-        attach_shadows(comp, &mut planned);
-        self.attach_model_shadows(comp, &mut planned);
+        // Ops drawn by a model pass (models, extruded text and shapes).
+        let solids: rustc_hash::FxHashSet<usize> = planned
+            .iter()
+            .filter(|(_, op)| self.is_mesh_op(op))
+            .map(|(index, _)| *index)
+            .collect();
+        attach_shadows(comp, &mut planned, &solids);
+        self.attach_model_shadows(comp, &mut planned, &solids);
         // The planes casting shadows on models (Only casters too).
         let plane_casters: Vec<PlaneCaster> = planned
             .iter()
             .filter(|(index, op)| {
                 let layer = &comp.layers[*index];
-                !matches!(layer.content, LayerContent::Model(_))
+                !solids.contains(index)
                     && layer.material.casts_shadows != crate::light::ShadowMode::Off
                     && op.opacity > 0.0
             })
@@ -1205,7 +1211,7 @@ impl Builder<'_, '_> {
         }
         // 3D models: one depth-buffered pass under the planes; each plane
         // over them is cut where it passes behind them.
-        let mut models = self.merge_models(comp, &mut planned);
+        let mut models = self.merge_models(comp, &mut planned, &solids);
         if let Some((op, _)) = &mut models
             && let OpInput::Image(id) = op.input
             && !plane_casters.is_empty()
@@ -1253,14 +1259,18 @@ impl Builder<'_, '_> {
     /// 3D models with Casts Shadows on throw shadows on the lit layers of
     /// their 3D group that accept shadows (drawn into the layers' shadow
     /// maps, `exec/mesh.rs`).
-    fn attach_model_shadows(&self, comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
+    fn attach_model_shadows(
+        &self,
+        comp: &RenderComp,
+        planned: &mut [(usize, LayerOp)],
+        solids: &rustc_hash::FxHashSet<usize>,
+    ) {
         use crate::light::{ModelCaster, ShadowMode};
         let models: Arc<[ModelCaster]> = planned
             .iter()
             .filter(|(index, _)| {
-                let layer = &comp.layers[*index];
-                matches!(layer.content, LayerContent::Model(_))
-                    && layer.material.casts_shadows != ShadowMode::Off
+                solids.contains(index)
+                    && comp.layers[*index].material.casts_shadows != ShadowMode::Off
             })
             .filter_map(|(index, op)| match op.input {
                 OpInput::Image(id) => match &self.nodes[id.index()].kind {
@@ -1287,7 +1297,7 @@ impl Builder<'_, '_> {
             let Some(lighting) = &op.lighting else {
                 continue;
             };
-            if matches!(layer.content, LayerContent::Model(_))
+            if solids.contains(index)
                 || layer.material.accepts_shadows == ShadowMode::Off
                 || !lighting.lights.iter().any(|l| l.casts_shadows)
             {
@@ -1300,6 +1310,11 @@ impl Builder<'_, '_> {
         }
     }
 
+    /// Whether `op` draws a model pass ([`MeshNode`]).
+    fn is_mesh_op(&self, op: &LayerOp) -> bool {
+        matches!(op.input, OpInput::Image(id) if matches!(self.nodes[id.index()].kind, NodeKind::Mesh(_)))
+    }
+
     /// Takes the model layers out of `planned` and joins them into one
     /// [`MeshNode`] (one depth buffer). Returns its op and the camera depth
     /// of the models' nearest corner.
@@ -1307,8 +1322,9 @@ impl Builder<'_, '_> {
         &mut self,
         comp: &RenderComp,
         planned: &mut Vec<(usize, LayerOp)>,
+        solids: &rustc_hash::FxHashSet<usize>,
     ) -> Option<(LayerOp, f64)> {
-        let is_model = |i: &usize| matches!(comp.layers[*i].content, LayerContent::Model(_));
+        let is_model = |i: &usize| solids.contains(i);
         let mut found: Vec<LayerOp> = Vec::new();
         planned.retain(|(index, op)| {
             let model = is_model(index);
@@ -3566,14 +3582,18 @@ fn placement(
 /// Shadows inside one 3D group (AE-CMP-437): every lit layer that accepts
 /// shadows gets the other layers of the group that cast shadows, when one of
 /// its lights casts shadows.
-fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
+fn attach_shadows(
+    comp: &RenderComp,
+    planned: &mut [(usize, LayerOp)],
+    solids: &rustc_hash::FxHashSet<usize>,
+) {
     use crate::light::{CasterPixels, ShadowCaster, ShadowMode};
     let casters: Vec<(usize, ShadowCaster)> = planned
         .iter()
         .filter(|(index, op)| {
             comp.layers[*index].material.casts_shadows != ShadowMode::Off
                 && op.opacity > 0.0
-                && !matches!(comp.layers[*index].content, LayerContent::Model(_))
+                && !solids.contains(index)
         })
         .filter_map(|(index, op)| {
             let pixels = match &op.input {

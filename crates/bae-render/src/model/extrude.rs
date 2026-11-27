@@ -48,7 +48,8 @@ pub fn extrude(outlines: &Outlines, depth: f64) -> Option<Model> {
 pub fn cached(key: u64, make: impl FnOnce() -> Option<Model>) -> Option<Arc<Model>> {
     use std::sync::{Mutex, OnceLock};
     const KEPT: usize = 32;
-    static CACHE: OnceLock<Mutex<Vec<(u64, Arc<Model>)>>> = OnceLock::new();
+    type Kept = Mutex<Vec<(u64, Arc<Model>)>>;
+    static CACHE: OnceLock<Kept> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(hit) = cache
         .lock()
@@ -128,7 +129,7 @@ fn nest(contours: &[Vec<P>]) -> Vec<(Vec<P>, Vec<Vec<P>>)> {
         c
     };
     let mut out: Vec<(usize, Vec<P>, Vec<Vec<P>>)> = (0..cs.len())
-        .filter(|&i| depth[i] % 2 == 0)
+        .filter(|&i| depth[i].is_multiple_of(2))
         .map(|i| (i, oriented(&cs[i], true), Vec::new()))
         .collect();
     for i in (0..cs.len()).filter(|&i| depth[i] % 2 == 1) {
@@ -229,7 +230,11 @@ fn cross(o: P, a: P, b: P) -> f64 {
 }
 
 fn triangle_contains(t: [P; 3], p: P) -> bool {
-    let (d1, d2, d3) = (cross(t[0], t[1], p), cross(t[1], t[2], p), cross(t[2], t[0], p));
+    let (d1, d2, d3) = (
+        cross(t[0], t[1], p),
+        cross(t[1], t[2], p),
+        cross(t[2], t[0], p),
+    );
     let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
     let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
     !(neg && pos)
@@ -296,7 +301,12 @@ fn add_solid(part: &mut Part, outer: &[P], holes: &[Vec<P>], depth: f64) {
     for (zz, nz, flip) in [(0.0f32, -1.0f32, false), (z, 1.0, true)] {
         let base = part.positions.len() as u32;
         for p in &poly {
-            push(part, [p[0] as f32, p[1] as f32, zz], [0.0, 0.0, nz], [0.0; 2]);
+            push(
+                part,
+                [p[0] as f32, p[1] as f32, zz],
+                [0.0, 0.0, nz],
+                [0.0; 2],
+            );
         }
         for t in &tris {
             let [a, b, c] = t.map(|i| base + i as u32);
@@ -375,7 +385,11 @@ mod tests {
         assert_eq!(nested[0].1.len(), 1);
         let poly = bridge(&nested[0].0, &nested[0].1);
         let tris = triangulate(&poly);
-        assert!((tri_area(&poly, &tris) - 800.0).abs() < 1e-6, "{}", tri_area(&poly, &tris));
+        assert!(
+            (tri_area(&poly, &tris) - 800.0).abs() < 1e-6,
+            "{}",
+            tri_area(&poly, &tris)
+        );
     }
 
     #[test]
