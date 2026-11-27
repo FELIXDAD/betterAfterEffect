@@ -3449,6 +3449,46 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
     assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
+/// A Puppet Position Pin click in the Layer panel adds a pin in layer pixels.
+#[test]
+fn puppet_pins_go_on_in_the_layer_panel() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::PuppetPosition);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = pos2(320.0 + 100.0, 195.0 + 50.0);
+    let mut r = PanelRequests::default();
+    for press in [None, Some(true), Some(false)] {
+        let mut evs = Vec::new();
+        pointer(&mut evs, at, press);
+        let out = h.frame("layer", &mut panel, evs);
+        r.invocations.extend(out.invocations);
+    }
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "puppet.add_pin")
+        .expect("a pin");
+    assert_eq!(inv.params["at"], json!([100.0, 50.0]));
+    h.apply(r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    assert_eq!(bae_motion::puppet::pins_of(&h.stage, &effects[0]).len(), 1);
+}
+
 /// Shift-drag continues the previous Brush stroke; Ctrl/Cmd-drag only sizes
 /// the brush (AE).
 #[test]
@@ -3652,6 +3692,26 @@ fn camera_light_and_material_options_groups() {
         json!({"path": light, "attr": "light:type", "value": Value::Enum("ambient".into())}),
     );
     assert_eq!(groups(&h, &light).last().map(|g| g.1), Some(2), "ambient");
+    // An environment light: its picture (Source) and background, then its light.
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("environment".into())}),
+    );
+    assert_eq!(
+        groups(&h, &light).last().map(|g| g.1),
+        Some(6),
+        "environment"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:source", "value": Value::PrimRef(solid.clone())}),
+    );
+    assert_eq!(
+        h.stage
+            .prim(&light)
+            .and_then(|v| bae_motion::query::static_value(&v, "light:source")),
+        Some(Value::PrimRef(solid.clone()))
+    );
     assert!(
         groups(&h, &solid).iter().all(|g| g.0 != "Material Options"),
         "2D layers have none"
@@ -3714,4 +3774,64 @@ fn add_footage_separate_dimensions_and_layer_controls() {
         &h.resources,
         "motion.view.show_layer_controls"
     ));
+}
+
+/// Composition ▸ Crop Comp to Selected Layer(s) Bounds and Region of Interest;
+/// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest / to Layer, Set
+/// Focus Distance to Layer.
+#[test]
+fn crop_comp_and_camera_focus() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_LAYERS));
+    assert_eq!(r.invocations[0].id, "comp.crop");
+    // The solid fills the 640×360 comp.
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([0.0, 0.0, 640.0, 360.0])
+    );
+    // No region of interest: nothing to crop to.
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().roi = Some((comp.clone(), [10.0, 20.0, 110.0, 220.0]));
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI));
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([10.0, 20.0, 110.0, 220.0])
+    );
+    assert!(h.session().lock().roi_cropped);
+
+    let camera = PrimPath::new(
+        h.run("layer.create", json!({"comp": comp, "kind": "camera"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().selected_layers = vec![camera.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::FOCUS_TO_POI));
+    assert_eq!(r.invocations[0].id, "attr.set_expressions");
+    assert_eq!(
+        r.invocations[0].params["items"][0]["source"],
+        "length(position, pointOfInterest)"
+    );
+    h.session().lock().selected_layers = vec![camera.clone(), solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::LINK_FOCUS_TO_LAYER));
+    let source = r.invocations[0].params["items"][0]["source"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(source.starts_with("m = thisComp.layer(\""), "{source}");
+    let r = h.action(&mut viewer, Invocation::new(ids::SET_FOCUS_TO_LAYER));
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    let d = r.invocations[0].params["edits"][0]["value"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(d > 0.0, "{d}");
 }

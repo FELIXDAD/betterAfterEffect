@@ -363,6 +363,12 @@ const LAYER: &[AttrDef] = &[
     boolean("light:casts_shadows", false).kinds(&["light"]),
     float("light:shadow_darkness", 100.0).kinds(&["light"]),
     float("light:shadow_diffusion", 0.0).kinds(&["light"]),
+    prim_ref("light:source")
+        .kinds(&["light"])
+        .doc("Environment light: the layer whose image (an HDRI, equirectangular) lights the scene."),
+    boolean("light:background_visible", false).kinds(&["light"]),
+    float("light:background_opacity", 100.0).kinds(&["light"]),
+    float("light:background_blur", 0.0).kinds(&["light"]),
     int("material:casts_shadows", 0)
         .kinds(VISUAL)
         .doc("AE's Casts Shadows: 0 Off, 1 On, 2 Only (casts, not drawn)."),
@@ -769,6 +775,30 @@ pub static SCHEMAS: &[PrimSchema] = &[
             float("transform:rotation", 0.0),
             time("in_point", 0).fixed(),
             time("out_point", 0).fixed(),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::PUPPET_PIN,
+        doc: "A pin under a Puppet effect (AE's Puppet Position / Starch / Overlap \
+              pins), in layer space: where it was placed on the mesh (`rest`) and \
+              where it pulls that point (`position`).",
+        attrs: &[
+            string("name"),
+            choice(
+                "pin_type",
+                "position",
+                &["position", "starch", "bend", "advanced", "overlap"],
+            )
+            .fixed(),
+            vec2("rest", [0.0, 0.0])
+                .fixed()
+                .doc("Where the pin was placed (layer pixels)."),
+            vec2("position", [0.0, 0.0]).doc("Where the pin pulls its point (layer pixels)."),
+            float("scale", 100.0),
+            float("rotation", 0.0),
+            float("amount", 0.3).doc("Starch: how stiff the mesh is around the pin."),
+            float("extent", 15.0).doc("Starch and Overlap: reach in pixels."),
+            float("in_front", 0.0).doc("Overlap: higher draws in front."),
         ],
     },
     PrimSchema {

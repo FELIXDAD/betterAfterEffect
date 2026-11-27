@@ -201,6 +201,7 @@ impl Builder<'_, '_> {
             motion: None,
             clips: Vec::new(),
             lighting: None,
+            occlusion: None,
         });
         Ok(())
     }
