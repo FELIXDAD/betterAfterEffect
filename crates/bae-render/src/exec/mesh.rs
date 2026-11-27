@@ -73,6 +73,8 @@ pub(crate) struct MeshPipelines {
     shadow: Option<(wgpu::BindGroupLayout, wgpu::RenderPipeline)>,
     /// Light-view depth of the models casting shadows on models.
     caster: Option<wgpu::RenderPipeline>,
+    /// Light-view depth of the planes casting shadows on models.
+    plane_caster: Option<(wgpu::BindGroupLayout, wgpu::RenderPipeline)>,
     /// Light maps kept across frames (redrawn only when their lights or
     /// casters change).
     light_maps: Vec<LightMaps>,
@@ -240,6 +242,7 @@ impl MeshPipelines {
             no_env,
             shadow: None,
             caster: None,
+            plane_caster: None,
             light_maps: Vec::new(),
             frame: 0,
             no_light_map,
@@ -253,6 +256,90 @@ impl MeshPipelines {
         self.env.warm(device, format);
         self.shadow_pipeline(device);
         self.caster_pipeline(device);
+        self.plane_caster_pipeline(device);
+    }
+
+    /// Light-view depth of planes (alpha-tested quads).
+    fn plane_caster_pipeline(
+        &mut self,
+        device: &wgpu::Device,
+    ) -> (wgpu::BindGroupLayout, wgpu::RenderPipeline) {
+        if let Some(p) = &self.plane_caster {
+            return p.clone();
+        }
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bae-render.mesh.plane-caster"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../gpu/model_shadow.wgsl").into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bae-render.mesh.plane-caster"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bae-render.mesh.plane-caster"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("bae-render.mesh.plane-caster"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_plane"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: LIGHT_MAP,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_plane"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        self.plane_caster = Some((layout.clone(), pipeline.clone()));
+        (layout, pipeline)
     }
 
     /// Light-view depth of models (the light maps).
@@ -896,6 +983,7 @@ pub(crate) fn encode(
     format: wgpu::TextureFormat,
     node: &MeshNode,
     environments: &[Option<(u64, Option<GpuImage>)>],
+    planes: &[(u64, Option<GpuImage>)],
     target: &GpuImage,
     depth_out: &GpuImage,
 ) -> usize {
@@ -907,7 +995,7 @@ pub(crate) fn encode(
     let (light_maps, map_draws) = if shadows.is_empty() {
         (p.no_light_map.clone(), 0)
     } else {
-        draw_light_maps(p, device, queue, encoder, node, &shadows)
+        draw_light_maps(p, device, queue, encoder, node, planes, &shadows)
     };
     // Per model: its GPU data, frame bind group and environment bind group.
     let mut draws = Vec::with_capacity(node.models.len());
@@ -1213,7 +1301,7 @@ fn shadow_projection(
 /// `node` (at most [`MAX_SHADOW_LIGHTS`]), with view-projections covering
 /// every model. Empty when no model casts or accepts shadows.
 fn light_shadows(node: &MeshNode) -> Vec<(crate::light::Light, DMat4)> {
-    if !node.models.iter().any(|m| m.casts_shadows)
+    if !(node.models.iter().any(|m| m.casts_shadows) || !node.planes.is_empty())
         || !node.models.iter().any(|m| m.accepts_shadows)
     {
         return Vec::new();
@@ -1259,12 +1347,14 @@ fn light_shadows(node: &MeshNode) -> Vec<(crate::light::Light, DMat4)> {
 /// `shadows`: drawn when the lights or the casting models change, else
 /// the maps of an earlier frame. Returns a view of all of them and the
 /// number of draws.
+/// `planes`: per plane caster of `node`, its pixels' node key and image.
 fn draw_light_maps(
     p: &mut MeshPipelines,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     encoder: &mut wgpu::CommandEncoder,
     node: &MeshNode,
+    planes: &[(u64, Option<GpuImage>)],
     shadows: &[(crate::light::Light, DMat4)],
 ) -> (wgpu::TextureView, usize) {
     use std::hash::{Hash, Hasher};
@@ -1281,6 +1371,12 @@ fn draw_light_maps(
         (Arc::as_ptr(&m.model) as usize).hash(&mut h);
         m.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
     }
+    for (plane, (key, _)) in node.planes.iter().zip(planes) {
+        plane.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
+        let r = plane.rect;
+        [r.x0, r.y0, r.x1, r.y1].map(f64::to_bits).hash(&mut h);
+        key.hash(&mut h);
+    }
     let (texture, all, draw) = p.light_maps(device, h.finish(), shadows.len() as u32);
     if !draw {
         return (all, 0);
@@ -1288,6 +1384,11 @@ fn draw_light_maps(
     let mut draws = 0;
     let pipeline = p.caster_pipeline(device);
     let layout = p.shadow_pipeline(device).0.clone();
+    let (plane_layout, plane_pipeline) = p.plane_caster_pipeline(device);
+    let white = p
+        .white
+        .get_or_insert_with(|| self::texture(device, queue, 1, 1, &[255; 4]))
+        .clone();
     let casters: Vec<(usize, DMat4)> = node
         .models
         .iter()
@@ -1318,6 +1419,61 @@ fn draw_light_maps(
                 (*key, group)
             })
             .collect();
+        let plane_groups: Vec<wgpu::BindGroup> = node
+            .planes
+            .iter()
+            .zip(planes)
+            .map(|(plane, (_, image))| {
+                let r = plane.rect;
+                let mut data: Vec<f32> = Vec::with_capacity(40);
+                data.extend(vp.to_cols_array().map(|v| v as f32));
+                data.extend(plane.matrix.to_cols_array().map(|v| v as f32));
+                data.extend([r.x0, r.y0, r.x1, r.y1].map(|v| v as f32));
+                // Layer pixel → texture uv (texels `pixel_scale` layer pixels
+                // apart from the image's origin).
+                data.extend(match image {
+                    Some(img) => {
+                        let [tw, th] = img.texture_size();
+                        let (sx, sy) = (
+                            img.pixel_scale * f64::from(tw.max(1)),
+                            img.pixel_scale * f64::from(th.max(1)),
+                        );
+                        [
+                            (1.0 / sx) as f32,
+                            (-f64::from(img.rect.x0) / sx) as f32,
+                            (1.0 / sy) as f32,
+                            (-f64::from(img.rect.y0) / sy) as f32,
+                        ]
+                    }
+                    None => [0.0; 4],
+                });
+                let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bae-render.mesh.plane-caster"),
+                    contents: bytemuck::cast_slice(&data),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("bae-render.mesh.plane-caster"),
+                    layout: &plane_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: uniform.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(
+                                image.as_ref().map_or(&white, |i| &i.view),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&p.sampler),
+                        },
+                    ],
+                })
+            })
+            .collect();
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2),
             base_array_layer: layer as u32,
@@ -1346,6 +1502,14 @@ fn draw_light_maps(
                 pass.set_vertex_buffer(0, vb.slice(..));
                 pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*n, 0, 0..1);
+                draws += 1;
+            }
+        }
+        if !plane_groups.is_empty() {
+            pass.set_pipeline(&plane_pipeline);
+            for group in &plane_groups {
+                pass.set_bind_group(0, group, &[]);
+                pass.draw(0..6, 0..1);
                 draws += 1;
             }
         }

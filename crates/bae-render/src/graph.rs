@@ -192,11 +192,25 @@ pub enum NodeKind {
 #[derive(Debug)]
 pub struct MeshNode {
     pub models: Vec<MeshModel>,
+    /// The 3D planes of the group that cast shadows on the models (drawn
+    /// into the light maps).
+    pub planes: Vec<PlaneCaster>,
     pub camera: crate::camera::Camera,
     /// The comp's size in pixels.
     pub comp_size: [u32; 2],
     /// A linear working space (the shading is not display-encoded).
     pub linear: bool,
+}
+
+/// A 3D plane casting shadows on models: opaque where its pixels are.
+#[derive(Clone, Debug)]
+pub struct PlaneCaster {
+    /// Layer pixels → comp space.
+    pub matrix: DMat4,
+    /// The drawn rectangle in layer pixels.
+    pub rect: Rect,
+    /// Its pixels (alpha decides); `None`: a solid, opaque everywhere.
+    pub image: Option<NodeId>,
 }
 
 /// One model layer of a [`MeshNode`].
@@ -359,6 +373,9 @@ impl NodeKind {
             NodeKind::Mesh(m) => {
                 for e in m.models.iter().filter_map(|m| m.environment.as_ref()) {
                     f(e.input);
+                }
+                for id in m.planes.iter().filter_map(|p| p.image) {
+                    f(id);
                 }
             }
             NodeKind::Sky(s) => f(s.environment.input),
@@ -1153,6 +1170,26 @@ impl Builder<'_, '_> {
         }
         attach_shadows(comp, &mut planned);
         self.attach_model_shadows(comp, &mut planned);
+        // The planes casting shadows on models (Only casters too).
+        let plane_casters: Vec<PlaneCaster> = planned
+            .iter()
+            .filter(|(index, op)| {
+                let layer = &comp.layers[*index];
+                !matches!(layer.content, LayerContent::Model(_))
+                    && layer.material.casts_shadows != crate::light::ShadowMode::Off
+                    && op.opacity > 0.0
+            })
+            .filter_map(|(index, op)| {
+                Some(PlaneCaster {
+                    matrix: comp.layers[*index].matrix_3d?,
+                    rect: op.content,
+                    image: match op.input {
+                        OpInput::Image(id) => Some(id),
+                        OpInput::Solid { .. } => None,
+                    },
+                })
+            })
+            .collect();
         // Casts Shadows: Only: a caster that is not drawn itself.
         planned.retain(|(index, _)| {
             comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
@@ -1162,7 +1199,37 @@ impl Builder<'_, '_> {
         }
         // 3D models: one depth-buffered pass under the planes; each plane
         // over them is cut where it passes behind them.
-        let models = self.merge_models(comp, &mut planned);
+        let mut models = self.merge_models(comp, &mut planned);
+        if let Some((op, _)) = &mut models
+            && let OpInput::Image(id) = op.input
+            && !plane_casters.is_empty()
+        {
+            // The models read the planes' pixels: their pass moves after
+            // them (the emptied node is not run).
+            let keys: Vec<u64> = plane_casters
+                .iter()
+                .map(|p| p.image.map_or(0, |i| self.nodes[i.index()].key))
+                .collect();
+            let old = &mut self.nodes[id.index()];
+            let (rect, pixel_scale, key) = (old.rect, old.pixel_scale, hash_of(&(old.key, keys)));
+            if let NodeKind::Mesh(mesh) = &mut old.kind {
+                let moved = MeshNode {
+                    models: std::mem::take(&mut mesh.models),
+                    planes: plane_casters,
+                    camera: mesh.camera,
+                    comp_size: mesh.comp_size,
+                    linear: mesh.linear,
+                };
+                let node = self.push(Node {
+                    kind: NodeKind::Mesh(Box::new(moved)),
+                    rect,
+                    pixel_scale,
+                    key,
+                    cacheable: false,
+                });
+                op.input = OpInput::Image(node);
+            }
+        }
         let drawn = Self::depth_order_3d(comp, planned);
         if let Some((op, _)) = &models {
             ops.push(op.clone());
@@ -1762,6 +1829,7 @@ impl Builder<'_, '_> {
                     accepts_shadows: layer.material.accepts_shadows
                         != crate::light::ShadowMode::Off,
                 }],
+                planes: Vec::new(),
                 camera,
                 comp_size: [comp.width, comp.height],
                 linear,

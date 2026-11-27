@@ -58,6 +58,7 @@ pub mod ids {
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
+    pub const TEXT_ORIENTATION: &str = "motion.layer.text_orientation";
     /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid, Camera or Light
     /// Settings of the selected layer, or Solid Settings of the solid item
     /// selected in the focused Project panel.
@@ -247,6 +248,13 @@ pub mod ids {
     /// Layer ▸ Camera ▸ Camera Settings… (and View ▸): the selected camera, else
     /// the comp's active camera.
     pub const CAMERA_SETTINGS: &str = "motion.layer.camera_settings";
+    /// Layer ▸ Reveal ▸ Reveal Layer Source in Project / Reveal Composition in
+    /// Project: the Project panel selects and scrolls to the item.
+    pub const REVEAL_SOURCE_IN_PROJECT: &str = "motion.layer.reveal_layer_source_in_project";
+    /// File ▸ Interpret Footage ▸ Remember Interpretation (Cmd/Ctrl+Alt+C) /
+    /// Apply Interpretation (Cmd/Ctrl+Alt+V).
+    pub const REMEMBER_INTERPRETATION: &str = "motion.file.remember_interpretation";
+    pub const APPLY_INTERPRETATION: &str = "motion.file.apply_interpretation";
     /// Composition ▸ Crop Comp to Region of Interest / to Selected Layer(s)
     /// Bounds.
     pub const CROP_TO_ROI: &str = "motion.comp.crop_comp_to_region_of_interest";
@@ -256,6 +264,10 @@ pub mod ids {
     pub const FOCUS_TO_POI: &str = "motion.layer.link_focus_distance_to_point_of_interest";
     pub const LINK_FOCUS_TO_LAYER: &str = "motion.layer.link_focus_distance_to_layer";
     pub const SET_FOCUS_TO_LAYER: &str = "motion.layer.set_focus_distance_to_layer";
+    /// Help ▸ Enable Logging (a toggle: debug-level lines in the session log)
+    /// and Reveal Logging File.
+    pub const ENABLE_LOGGING: &str = "motion.help.enable_logging";
+    pub const REVEAL_LOG: &str = "motion.help.reveal_logging_file";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -371,6 +383,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::COMP_FLOWCHART, "Composition Flowchart"),
     (ids::REVEAL_COMP_IN_PROJECT, "Reveal Composition in Project"),
     (ids::NEW_LAYER, "New"),
+    (ids::TEXT_ORIENTATION, "Text Orientation"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
@@ -468,6 +481,12 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EDIT_LABEL_COLORS, "Edit Label Colors..."),
     (ids::SEPARATE_DIMENSIONS, "Separate Dimensions"),
     (ids::CAMERA_SETTINGS, "Camera Settings..."),
+    (
+        ids::REVEAL_SOURCE_IN_PROJECT,
+        "Reveal Layer Source in Project",
+    ),
+    (ids::REMEMBER_INTERPRETATION, "Remember Interpretation"),
+    (ids::APPLY_INTERPRETATION, "Apply Interpretation"),
     (ids::CROP_TO_ROI, "Crop Comp to Region of Interest"),
     (ids::CROP_TO_LAYERS, "Crop Comp to Selected Layer(s) Bounds"),
     (
@@ -476,6 +495,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ),
     (ids::LINK_FOCUS_TO_LAYER, "Link Focus Distance to Layer"),
     (ids::SET_FOCUS_TO_LAYER, "Set Focus Distance to Layer"),
+    (ids::ENABLE_LOGGING, "Enable Logging"),
+    (ids::REVEAL_LOG, "Reveal Logging File"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -1458,6 +1479,53 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
             return true;
         }
+        ids::ENABLE_LOGGING => {
+            bae_platform::logging::set_verbose(!bae_platform::logging::verbose());
+            return true;
+        }
+        ids::REVEAL_LOG => {
+            if let Some(file) = bae_platform::logging::current_log_file() {
+                bae_platform::logging::flush();
+                bae_platform::reveal(&file);
+            }
+            return true;
+        }
+        ids::REVEAL_SOURCE_IN_PROJECT | ids::REVEAL_COMP_IN_PROJECT => {
+            let item = {
+                let s = session.lock();
+                if id == ids::REVEAL_COMP_IN_PROJECT {
+                    s.active_comp.clone()
+                } else {
+                    s.selected_layers.first().and_then(|l| {
+                        stage
+                            .prim(l)
+                            .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned())
+                    })
+                }
+            };
+            if let Some(item) = item {
+                let mut s = session.lock();
+                s.selected_items = vec![item.clone()];
+                s.reveal_in_project = Some(item);
+                drop(s);
+                cx.open_panel("project");
+            }
+            return true;
+        }
+        ids::REMEMBER_INTERPRETATION | ids::APPLY_INTERPRETATION => {
+            use crate::dialogs::interpret_footage::InterpretFootage;
+            let selected = session.lock().selected_items.clone();
+            let Some(current) = InterpretFootage::new(stage, &selected) else {
+                return true;
+            };
+            if id == ids::REMEMBER_INTERPRETATION {
+                session.lock().remembered_interpretation = Some(current.settings());
+            } else if let Some(mut params) = session.lock().remembered_interpretation.clone() {
+                params["items"] = json!(current.items());
+                cx.invoke_with("footage.interpret", params);
+            }
+            return true;
+        }
         ids::CROP_TO_ROI => {
             let roi = session.lock().roi.clone();
             let active = session.lock().active_comp.clone();
@@ -1704,6 +1772,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::dialogs::precompose(cx, layers);
             return true;
         }
+        ids::TEXT_ORIENTATION => {
+            let layers: Vec<_> = session
+                .lock()
+                .selected_layers
+                .iter()
+                .filter(|l| {
+                    query::layer_kind(stage, l).as_deref() == Some("text")
+                        && !query::is_locked(stage, l)
+                })
+                .cloned()
+                .collect();
+            if !layers.is_empty() {
+                cx.invoke_with(
+                    "text.convert_orientation",
+                    json!({"layers":layers,"orientation":inv.params["orientation"]}),
+                );
+            }
+            return true;
+        }
         ids::LAYER_SETTINGS => {
             let project = cx.panel.kind() == "project";
             if let Some(target) = layer_settings_target(cx.stage, session, project) {
@@ -1795,10 +1882,6 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
         ids::COMP_FLOWCHART => cx.open_panel("flowchart"),
-        ids::REVEAL_COMP_IN_PROJECT => {
-            s.selected_items = vec![info.path.clone()];
-            cx.open_panel("project");
-        }
         ids::MINI_FLOW => {
             s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
                 stage, &info.path,
@@ -3048,6 +3131,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Open Layer Source", "打开图层源"),
     ("Add Footage to Comp", "将素材添加到合成"),
     ("Edit Original...", "编辑原稿..."),
+    ("Reveal Layer Source in Project", "在项目中显示图层源"),
+    ("Remember Interpretation", "记住解释"),
+    ("Apply Interpretation", "应用解释"),
     // AE 2026 zh_CN menus.
     ("Crop Comp to Region of Interest", "裁剪合成到目标区域"),
     (
@@ -3060,6 +3146,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Link Focus Distance to Layer", "将焦距链接到图层"),
     ("Set Focus Distance to Layer", "将焦距设置为图层"),
+    ("Enable Logging", "启用日志记录"),
+    ("Reveal Logging File", "显示日志记录文件"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

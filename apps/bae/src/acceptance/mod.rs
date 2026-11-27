@@ -69,10 +69,12 @@ mod shortcuts_dialog;
 mod startup;
 #[cfg(target_os = "macos")]
 mod stress;
+mod text_orientation;
 #[cfg(target_os = "macos")]
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod type_preferences;
 mod window_workspaces;
 
 use std::collections::VecDeque;

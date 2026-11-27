@@ -107,8 +107,8 @@
 | Set Proxy ▸ None | 9830403 | `motion.file.set_proxy_none` |  |  |  | E | ⏸ |
 | Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ✅ |
 | Interpret Footage ▸ Proxy... | 10420226 | `motion.file.interpret_footage_proxy` |  |  |  | E | ⏸ |
-| Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ☐ |
-| Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ☐ |
+| Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ✅ |
+| Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ✅ |
 | Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
 | Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
@@ -391,7 +391,7 @@
 | Arrange ▸ Send Backward | 12910595 | `motion.order` | `{"to":"backward"}` | Ctrl+[ / Ctrl+Alt+Down | Cmd+[ / Cmd+Opt+Down | B | ✅ |
 | Arrange ▸ Send to Back | 12910596 | `motion.order` | `{"to":"back"}` | Ctrl+Shift+[ / Ctrl+Alt+Shift+Down / Ctrl+Shift+- | Cmd+Shift+[ / Cmd+Opt+Shift+Down / Cmd+Shift+- | B | ✅ |
 | Reveal ▸ Reveal in Explorer | 23003137 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
-| Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ☐ |
+| Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Layer in Project Flowchart | 23003139 | `motion.layer.reveal_layer_in_project_flowchart` |  |  |  | E | ⏸ |
 | Reveal ▸ Reveal Composition in Project | 23003140 | `motion.layer.reveal_composition_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Expression Errors | 23003141 | `motion.layer.reveal_expression_errors` |  |  |  | C | ⏸ |
@@ -534,8 +534,8 @@
 | Snap to Guides | 589839 | `motion.view.snap_to_guides` |  | Ctrl+Shift+; | Cmd+Shift+; | B | ☐ |
 | Lock Guides | 589840 | `motion.view.lock_guides` |  | Ctrl+Alt+Shift+; | Cmd+Opt+Shift+; | B | ☐ |
 | Clear Guides | 589841 | `motion.view.clear_guides` |  |  |  | B | ☐ |
-| Import Guides... | 589842 | `motion.view.import_guides` |  |  |  | B | ⏸ |
-| Export Guides... | 589843 | `motion.view.export_guides` |  |  |  | B | ⏸ |
+| Import Guides... | 589842 | `motion.view.import_guides` |  |  |  | B | ✅ |
+| Export Guides... | 589843 | `motion.view.export_guides` |  |  |  | B | ✅ |
 | Show Grid | 589845 | `motion.view.show_grid` |  | Ctrl+' | Cmd+' | B | ☐ |
 | Snap to Grid | 589846 | `motion.view.snap_to_grid` |  | Ctrl+Shift+' | Cmd+Shift+' | B | ☐ |
 | View Options... | 589848 | `motion.view.view_options` |  | Ctrl+Alt+U | Cmd+Opt+U | E | ⏸ |
@@ -646,8 +646,8 @@
 | Animation Presets... | 720905 | `motion.help.animation_presets` |  |  |  | B | ⏸ |
 | Keyboard Shortcuts... | 720906 | `motion.help.keyboard_shortcuts` |  |  |  | B | ☐ |
 | System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ⏸ |
-| Enable Logging | 720909 | `motion.help.enable_logging` |  |  |  | B | ☐ |
-| Reveal Logging File | 720910 | `motion.help.reveal_logging_file` |  |  |  | B | ☐ |
+| Enable Logging | 720909 | `motion.help.enable_logging` |  |  |  | B | ✅ |
+| Reveal Logging File | 720910 | `motion.help.reveal_logging_file` |  |  |  | B | ✅ |
 | Online User Forums... | 720912 | `motion.help.online_user_forums` |  |  |  | B | ⏸ |
 | Provide Feedback... | 720913 | `motion.help.provide_feedback` |  |  |  | B | ☐ |
 
