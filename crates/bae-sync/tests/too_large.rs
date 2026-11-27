@@ -289,6 +289,8 @@ fn an_oversized_snapshot_is_not_exported_on_every_request() {
     p.pump();
     assert_eq!(p.too_large, 1);
     let exports = p.a.exports.get();
+    // Without the memo, each of these requests exports the snapshot again
+    // (10 exports; spec 2.4 cites this).
     for _ in 0..10 {
         p.tb.send(Message::SnapshotRequest { doc: big() }).unwrap();
         p.pump();
