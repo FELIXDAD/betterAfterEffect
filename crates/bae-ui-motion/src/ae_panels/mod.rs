@@ -80,6 +80,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Distribute Right", "按右分布"),
     // Character ($$$/AE/Character_Palette/*, $$$/AE/Plugin/CharPal/*).
     ("Set the font family", "设置字体系列"),
+    ("Recent Fonts", "最近使用的字体"),
+    ("Resolve Fonts", "解决字体问题"),
+    (
+        "These fonts are missing from this computer:",
+        "此电脑上缺少以下字体：",
+    ),
     ("Set the font style", "设置字体样式"),
     ("Set the font size", "设置字体大小"),
     ("Set the leading", "设置行距"),
