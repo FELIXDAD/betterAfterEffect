@@ -1,10 +1,12 @@
 //! The Puppet tools in the Composition viewer (AE's Puppet Position, Starch
 //! and Overlap Pin tools, Cmd/Ctrl+P): a click on a layer adds a pin there
 //! (`puppet.add_pin`; the first pin adds the Puppet effect); a click on a pin
-//! selects it (Shift: adds or removes it), a drag moves the selected pins
+//! selects it (Shift: adds or removes it), a marquee dragged from off the
+//! layer selects the pins inside it (Shift adds), a drag moves the selected pins
 //! together, previewed live, one undo step; Delete removes them. A selected
 //! Bend or Advanced pin shows AE's ring: drag the ring to rotate, the square
-//! on it to scale (live, one undo step). The selected
+//! on it to scale (live, one undo step). Cmd/Ctrl-dragging a pin records its
+//! motion as the comp time runs (Record Options: speed, smoothing). The selected
 //! layers' pins are drawn in AE's colours: yellow Position pins, red Starch,
 //! blue Overlap; selected pins are filled.
 
@@ -13,7 +15,7 @@ use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_model::{PrimPath, PrimType, Time, Value};
 use bae_motion::query;
 use bae_ui::PanelContext;
-use egui::{Color32, CursorIcon, Painter, Pos2, Response, Stroke, Ui};
+use egui::{Color32, CursorIcon, Painter, Pos2, Rect, Response, Stroke, Ui};
 
 use crate::render::View;
 use crate::session::{Scrub, SharedSession};
@@ -45,6 +47,24 @@ struct Drag {
     pins: Vec<(PrimPath, DVec2, DMat4)>,
 }
 
+/// A pin being recorded (Cmd/Ctrl-drag, AE): comp time runs on from the
+/// current time at the Record Options speed while the pointer moves the pin;
+/// releasing writes its Position keyframes (one undo step).
+struct Record {
+    pin: PrimPath,
+    /// Where the press was (comp space), the pin then (layer pixels), comp →
+    /// its layer's space.
+    start: DVec2,
+    at: DVec2,
+    to_layer: DMat4,
+    /// Comp time and input time (seconds) of the press; the comp's end.
+    from: Time,
+    t0: f64,
+    end: Time,
+    options: crate::tools::PuppetRecord,
+    samples: Vec<(Time, DVec2)>,
+}
+
 /// A Bend / Advanced pin's ring or square being dragged.
 struct Turn {
     pin: PrimPath,
@@ -62,6 +82,10 @@ pub(crate) struct PuppetState {
     turn: Option<Turn>,
     /// Selected pins.
     selected: Vec<PrimPath>,
+    /// A marquee dragged from off the layer: where it started and the pins
+    /// selected before it (kept while Shift is down).
+    marquee: Option<(Pos2, Vec<PrimPath>)>,
+    record: Option<Record>,
 }
 
 impl PuppetState {
@@ -319,12 +343,13 @@ pub(crate) fn frame(
         );
     }
     let mut out = PuppetFrame {
-        owns: state.drag.is_some() || state.turn.is_some(),
+        owns: state.drag.is_some() || state.turn.is_some() || state.record.is_some(),
         cursor: None,
     };
     let Some(kind) = pin_type(tool) else {
         state.drag = None;
         state.turn = None;
+        state.record = None;
         return out;
     };
     out.owns = true;
@@ -362,8 +387,37 @@ pub(crate) fn frame(
             });
         }
     }
+    // Cmd/Ctrl-drag a pin: record its motion (AE).
     if state.drag.is_none()
         && state.turn.is_none()
+        && state.record.is_none()
+        && pressed
+        && ui.input(|i| i.modifiers.command)
+        && let Some(p) = origin
+        && let Some(h) = near(p)
+        && let Some(info) = query::comp_info(cx.stage, &comp.path)
+    {
+        session.lock().stop();
+        state.selected = vec![h.pin.clone()];
+        let options = crate::tools::shared(cx.resources)
+            .lock()
+            .options
+            .puppet_record;
+        state.record = Some(Record {
+            pin: h.pin.clone(),
+            start: view.to_comp(p),
+            at: h.at,
+            to_layer: h.world.inverse(),
+            from: now,
+            t0: ui.input(|i| i.time),
+            end: info.duration,
+            options,
+            samples: Vec::new(),
+        });
+    }
+    if state.drag.is_none()
+        && state.turn.is_none()
+        && state.record.is_none()
         && pressed
         && let Some(p) = origin
     {
@@ -420,8 +474,73 @@ pub(crate) fn frame(
                     "density": density,
                 }),
             );
-        } else if !shift {
-            state.selected.clear();
+        } else {
+            // Off the layer: a click deselects, a drag selects the pins in
+            // its marquee (AE; Shift adds).
+            state.marquee = Some((p, state.selected.clone()));
+            if !shift {
+                state.selected.clear();
+            }
+        }
+    }
+    if let Some((from, base)) = &state.marquee
+        && let Some(to) = resp.interact_pointer_pos().or(resp.hover_pos())
+    {
+        let r = Rect::from_two_pos(*from, to);
+        let shift = ui.input(|i| i.modifiers.shift);
+        let mut picked = if shift { base.clone() } else { Vec::new() };
+        for h in handles.iter().filter(|h| r.contains(h.pos)) {
+            if !picked.contains(&h.pin) {
+                picked.push(h.pin.clone());
+            }
+        }
+        state.selected = picked;
+        if r.area() > 0.0 {
+            super::transform::paint_marquee(painter, r);
+        }
+        if !ui.input(|i| i.pointer.primary_down()) {
+            state.marquee = None;
+        }
+    }
+    if let Some(r) = state.record.as_mut() {
+        out.cursor = Some(CursorIcon::Grabbing);
+        let (down, input_now) = ui.input(|i| (i.pointer.primary_down(), i.time));
+        let t = r.from + Time::from_seconds((input_now - r.t0) * r.options.speed / 100.0);
+        let t = t.min(r.end);
+        if let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) {
+            let layer_of = |q: DVec2| r.to_layer.transform_point3(q.extend(0.0)).truncate();
+            let v = r.at + layer_of(view.to_comp(pos)) - layer_of(r.start);
+            r.samples.push((t, v));
+            let values = [(r.pin.clone(), Value::Vec2(v.to_array()))];
+            edit_pins(cx, session, "position", &values, t, false);
+        }
+        if let Some(info) = query::comp_info(cx.stage, &comp.path) {
+            session.lock().set_time(&info, t);
+        }
+        if r.options.show_mesh && !show_mesh {
+            paint_meshes(selected, comp, view, painter);
+        }
+        ui.ctx().request_repaint();
+        if !down || t >= r.end {
+            let r = state.record.take().expect("recording");
+            session.lock().scrub = None;
+            // Keyframes thinned by Smoothing, as Motion Sketch does.
+            let edits: Vec<serde_json::Value> =
+                super::motion_sketch::thin(&r.samples, r.options.smoothing)
+                    .into_iter()
+                    .map(|i| {
+                        let (t, v) = r.samples[i];
+                        serde_json::json!({
+                            "path": r.pin,
+                            "attr": "position",
+                            "time": query::to_key_time(cx.stage, &r.pin, t),
+                            "value": Value::Vec2(v.to_array()),
+                        })
+                    })
+                    .collect();
+            if !edits.is_empty() {
+                cx.invoke_with("attr.set_many", serde_json::json!({ "edits": edits }));
+            }
         }
     }
     if let Some(t) = &state.turn {
@@ -471,4 +590,60 @@ pub(crate) fn frame(
         out.cursor = Some(CursorIcon::Move);
     }
     out
+}
+
+/// Tools ▸ Puppet ▸ Record Options…: AE's Puppet Record Options dialog.
+pub(crate) fn record_options_ui(
+    ctx: &egui::Context,
+    cx: &PanelContext<'_>,
+    r: &mut crate::tools::PuppetRecord,
+) -> bool {
+    use bae_ui::dialog::{self, Outcome};
+    use bae_ui::tr;
+    let id = egui::Id::new("bae-ui-motion.puppet-record-options");
+    let shown = dialog::window(ctx, id, tr("Puppet Record Options"), |ui| {
+        ui.set_width(280.0);
+        ui.horizontal(|ui| {
+            ui.label(tr("Speed:"));
+            crate::dialogs::fields::number(ui, &mut r.speed, 1.0..=1000.0, 0, "", tr("Speed:"));
+            ui.label("%");
+        });
+        ui.horizontal(|ui| {
+            ui.label(tr("Smoothing:"));
+            crate::dialogs::fields::number(
+                ui,
+                &mut r.smoothing,
+                0.0..=100.0,
+                0,
+                "",
+                tr("Smoothing:"),
+            );
+        });
+        bae_ui::widgets::checkbox(ui, &mut r.draft, tr("Use Draft Deformation"));
+        bae_ui::widgets::checkbox(ui, &mut r.show_mesh, tr("Show Mesh"));
+        ui.add_space(4.0);
+        ui.label(tr(if cfg!(target_os = "macos") {
+            "Command-drag pins to record animation."
+        } else {
+            "Ctrl-drag pins to record animation."
+        }));
+        ui.add_space(4.0);
+        dialog::buttons(ui, true)
+    });
+    let outcome = match shown {
+        Some(o) => o,
+        None if dialog::closed_by_title_bar(ctx, id) => Outcome::Cancel,
+        None => Outcome::None,
+    };
+    match outcome {
+        Outcome::None => true,
+        Outcome::Cancel => false,
+        Outcome::Ok => {
+            crate::tools::shared(cx.resources)
+                .lock()
+                .options
+                .puppet_record = *r;
+            false
+        }
+    }
 }

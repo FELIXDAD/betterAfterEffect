@@ -423,10 +423,61 @@ impl Mesh {
         if area <= 0.0 {
             return Mesh::grid(min, max, density);
         }
-        Mesh::build(min, max, cell_for(area, density), |t| {
+        let mut mesh = Mesh::build(min, max, cell_for(area, density), |t| {
             let centre = (t[0] + t[1] + t[2]) / 3.0;
             mask.at(centre) || t.iter().any(|v| mask.at(*v))
-        })
+        });
+        mesh.hug(mask);
+        mesh
+    }
+
+    /// Pulls the outline vertices that lie off `mask` onto its edge, so the
+    /// mesh follows the traced shape instead of the grid's staircase.
+    fn hug(&mut self, mask: &Mask) {
+        let mut uses: HashMap<(u32, u32), u8> = HashMap::new();
+        for t in &self.tris {
+            for k in 0..3 {
+                let (u, v) = (t[k], t[(k + 1) % 3]);
+                *uses.entry((u.min(v), u.max(v))).or_default() += 1;
+            }
+        }
+        let mut outline = vec![false; self.rest.len()];
+        for ((u, v), n) in uses {
+            if n == 1 {
+                outline[u as usize] = true;
+                outline[v as usize] = true;
+            }
+        }
+        let rest = self.rest.clone();
+        for (i, on) in outline.into_iter().enumerate() {
+            let p = rest[i];
+            if !on || mask.at(p) {
+                continue;
+            }
+            // Towards the middle of its neighbours inside the shape.
+            let inside: Vec<DVec2> = self.neighbours[i]
+                .iter()
+                .map(|n| rest[*n as usize])
+                .filter(|q| mask.at(*q))
+                .collect();
+            if inside.is_empty() {
+                continue;
+            }
+            let target = inside.iter().copied().sum::<DVec2>() / inside.len() as f64;
+            if !mask.at(target) {
+                continue;
+            }
+            let (mut out, mut ins) = (p, target);
+            for _ in 0..10 {
+                let m = (out + ins) / 2.0;
+                if mask.at(m) {
+                    ins = m;
+                } else {
+                    out = m;
+                }
+            }
+            self.rest[i] = ins;
+        }
     }
 
     /// Grid triangles of side `cell` over `min .. max` that `keep` accepts,
@@ -1160,6 +1211,31 @@ mod tests {
             extent: 15.0,
             in_front: 0.0,
         }
+    }
+
+    #[test]
+    fn traced_meshes_follow_the_outline() {
+        // A disc of radius 30 in an 80 × 80 layer, cells of 1 px: the grid's
+        // corners outside it are pulled onto its edge.
+        let n = 80;
+        let alpha: Vec<f32> = (0..n * n)
+            .map(|i| {
+                let d = DVec2::new((i % n) as f64 + 0.5, (i / n) as f64 + 0.5) - 40.0;
+                if d.length() <= 30.0 { 1.0 } else { 0.0 }
+            })
+            .collect();
+        let mask = Mask::from_alpha(DVec2::ZERO, 1.0, n, n, &alpha, 0.0);
+        let mesh = Mesh::traced(DVec2::ZERO, DVec2::splat(80.0), 10.0, &mask);
+        assert!(
+            mesh.rest.iter().all(|p| mask.at(*p)),
+            "every vertex on the shape"
+        );
+        let far = mesh
+            .rest
+            .iter()
+            .map(|p| (*p - 40.0).length())
+            .fold(0.0, f64::max);
+        assert!(far > 28.0 && far <= 31.0, "out to the edge: {far}");
     }
 
     #[test]

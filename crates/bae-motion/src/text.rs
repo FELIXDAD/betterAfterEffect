@@ -166,6 +166,51 @@ impl Command for CreateText {
     }
 }
 
+pub struct ConvertTextOrientation;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ConvertTextOrientationParams {
+    pub layers: Vec<PrimPath>,
+    pub orientation: bae_model::LineOrientation,
+}
+
+impl Command for ConvertTextOrientation {
+    type Params = ConvertTextOrientationParams;
+    type Output = ();
+    const ID: &'static str = "text.convert_orientation";
+    const TITLE: &'static str = "Text Orientation";
+    const DESCRIPTION: &'static str = "Change the writing direction of the selected text layers, including every Source Text keyframe.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), p.layers.iter())?;
+        for layer in p.layers {
+            if query::layer_kind(tx.stage(), &layer).as_deref() != Some("text") {
+                return Err(fail(format!("{layer} is not a text layer")));
+            }
+            let Some(mut spec) = query::attr_spec(tx.stage(), &layer, SOURCE).cloned() else {
+                continue;
+            };
+            let mut changed = false;
+            for value in spec
+                .value
+                .iter_mut()
+                .chain(spec.keyframes.values_mut().map(|key| &mut key.value))
+            {
+                if let Value::TextDocument(doc) = value
+                    && doc.line_orientation != p.orientation
+                {
+                    doc.line_orientation = p.orientation;
+                    changed = true;
+                }
+            }
+            if changed {
+                crate::util::write_attr(tx, &layer, SOURCE, spec)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct SetText;
 
 /// One replacement captured by the viewer in character coordinates.
@@ -285,6 +330,7 @@ pub struct TextStyleChange {
     pub faux_italic: Option<bool>,
     pub all_caps: Option<bool>,
     pub small_caps: Option<bool>,
+    pub baseline_direction: Option<bae_model::BaselineDirection>,
     pub baseline_option: Option<bae_model::BaselineOption>,
     pub ligatures: Option<bool>,
     pub hindi_digits: Option<bool>,
@@ -316,6 +362,9 @@ impl TextStyleChange {
         doc.edit_styles(range.clone(), |doc| {
             if self.reset_character {
                 doc.clone_from(&defaults.style);
+            }
+            if let Some(direction) = self.baseline_direction {
+                doc.baseline_direction = direction;
             }
             if let Some(f) = &self.font {
                 doc.font = f.clone();

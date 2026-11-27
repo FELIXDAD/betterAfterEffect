@@ -10,7 +10,7 @@ mod comp_from_selection;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
-mod interpret_footage;
+pub(crate) mod interpret_footage;
 mod layer_time;
 mod light_settings;
 mod mask_value;
@@ -98,6 +98,8 @@ pub enum Dialog {
         steps: [u32; 2],
         nested: bool,
     },
+    /// Tools ▸ Puppet ▸ Record Options…
+    PuppetRecordOptions(crate::tools::PuppetRecord),
 }
 
 /// Open dialog and remembered values.
@@ -532,6 +534,7 @@ impl bae_ui::DialogHost for MotionDialogs {
     }
 
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
+        crate::import::auto_reload::on_focus(ctx, cx);
         if crate::effects::lut::poll(ctx, cx) {
             return;
         }
@@ -591,6 +594,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CustomResolution { steps, nested } => {
                 crate::viewer::view_options::custom_resolution_ui(ctx, cx, steps, *nested)
             }
+            Dialog::PuppetRecordOptions(r) => crate::viewer::puppet_record_options_ui(ctx, cx, r),
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {

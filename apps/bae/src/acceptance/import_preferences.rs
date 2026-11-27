@@ -299,3 +299,99 @@ fn footage_replacement_reuses_or_resets_interpretation_and_ntsc_display() {
         );
     }
 }
+
+#[test]
+fn returning_to_the_app_reloads_only_the_selected_footage_types() {
+    use std::io::Write;
+    use std::time::{Duration, Instant};
+    for mode in ["off", "non_sequence_footage", "all_footage_types"] {
+        let dir = tempfile::tempdir().unwrap();
+        let still = dir.path().join("Still.png");
+        let first = dir.path().join("Shot_001.png");
+        let next = dir.path().join("Shot_002.png");
+        for p in [&still, &first, &next] {
+            std::fs::write(p, PNG).unwrap();
+        }
+        let mut h = gui();
+        let mut prefs = (*h.state().prefs.current()).clone();
+        prefs.set("import.auto_reload_mode", mode);
+        h.state().prefs.set(prefs).unwrap();
+        for p in [&still, &first] {
+            h.state_mut()
+                .app
+                .insert_resource(SharedFilePicker::new(ImportPicker {
+                    first: p.clone(),
+                    alphabetical: false,
+                    photoshop_kind: Default::default(),
+                }));
+            h.state_mut().workspace.focus_panel("project");
+            h.state_mut()
+                .dispatch(Invocation::new("motion.file.import_file"));
+            settle(&mut h);
+        }
+        let focus = |h: &mut Ui, active| {
+            h.input_mut().focused = active;
+            send(h, Event::WindowFocused(active));
+        };
+        let append = |p: &Path| {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(p)
+                .unwrap()
+                .write_all(&[0])
+                .unwrap();
+        };
+        let size = |h: &Ui, path: &Path| {
+            h.state()
+                .stage()
+                .traverse()
+                .into_iter()
+                .filter_map(|item| {
+                    let view = h.state().stage().prim(&item)?;
+                    bae_model::AssetFile::from_prim(&view)
+                })
+                .find(|f| Path::new(&f.original).file_name() == path.file_name())
+                .unwrap()
+                .size
+        };
+        let wait_for = |h: &mut Ui, check: &dyn Fn(&Ui) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(6);
+            while !check(h) {
+                assert!(Instant::now() < deadline, "focus scan for {mode}");
+                frame(h);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        focus(&mut h, false);
+        append(&still);
+        append(&first);
+        focus(&mut h, true);
+        let original = PNG.len() as u64;
+        if mode != "off" {
+            wait_for(&mut h, &|h| size(h, &still) == original + 1);
+        }
+        if mode == "all_footage_types" {
+            wait_for(&mut h, &|h| size(h, &first) == original + 1);
+            // Both files came back in one step.
+            key(&mut h, Modifiers::COMMAND, Key::Z);
+            settle(&mut h);
+            assert_eq!((size(&h, &still), size(&h, &first)), (original, original));
+            key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+            settle(&mut h);
+            h.state_mut().dispatched.clear();
+            focus(&mut h, false);
+            append(&next);
+            focus(&mut h, true);
+            wait_for(&mut h, &|h| {
+                h.state()
+                    .dispatched
+                    .iter()
+                    .any(|i| i.id == "item.reload_files")
+            });
+        } else {
+            settle(&mut h);
+            assert_eq!(size(&h, &first), original);
+            assert_eq!(size(&h, &still), original + u64::from(mode != "off"));
+        }
+    }
+}
