@@ -164,6 +164,10 @@ struct OwnLog {
     /// and those adopted from an earlier session: an upper bound of its ops. A
     /// snapshot replaces the log only if its version includes this.
     vmax: VersionVector,
+    /// Holds records this build cannot read (a newer version's message types):
+    /// `vmax` may not bound them, so the log is never replaced, only appended
+    /// to.
+    foreign: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -335,6 +339,12 @@ pub struct DirTransport {
     /// a write failed. Nothing is appended to them until the session's snapshot
     /// rewrites the log (see [`DirTransport::fell_behind`]).
     behind: BTreeMap<DocKey, Behind>,
+    /// Documents whose own log is of a newer format version than this build
+    /// reads, and that version: the log is left as it is (not read, renamed,
+    /// rewritten or appended to) and nothing is written for the document.
+    newer: BTreeMap<DocKey, u64>,
+    /// Documents of `newer` the session sent edits of (not written).
+    refused: BTreeSet<DocKey>,
     inbox: VecDeque<Message>,
     scanned: bool,
     poll_now: bool,
@@ -399,6 +409,8 @@ impl DirTransport {
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
             behind: BTreeMap::new(),
+            newer: BTreeMap::new(),
+            refused: BTreeSet::new(),
             inbox: VecDeque::new(),
             scanned: false,
             poll_now: true,
@@ -499,7 +511,7 @@ impl DirTransport {
                 continue;
             };
             if stem == self.client.as_str() {
-                if !self.own.contains_key(&doc) {
+                if !self.own.contains_key(&doc) && !self.newer.contains_key(&doc) {
                     let r = self.adopt_own(&doc, &path);
                     self.note(r);
                 }
@@ -731,14 +743,29 @@ impl DirTransport {
 
     /// Read this client's existing log for `doc` (left by an earlier session):
     /// deliver its records, cut off a torn tail, and continue appending to it.
+    ///
+    /// A log of a newer format version (a newer build ran as this client, and
+    /// this one is older) is not ours to touch: it may be all that holds some
+    /// ops (since §4.7, those of deleted logs too). It is not read, renamed or
+    /// rewritten, and nothing is written for `doc` (see `newer`).
     fn adopt_own(&mut self, doc: &DocKey, path: &Path) -> Result<(), SyncError> {
         let mut f = File::open(path).map_err(SyncError::io(path))?;
-        let header = read_header(&mut f).map_err(SyncError::io(path))?;
-        let Some((header, header_len)) = header.filter(|(h, _)| h.doc == doc.as_str()) else {
-            // Unreadable: keep it for inspection, start a new log on the next write.
-            let aside = path.with_extension(format!("corrupt-{}", new_generation()));
-            fs::rename(path, &aside).map_err(SyncError::io(path))?;
-            return Ok(());
+        let header = read_header_kind(&mut f).map_err(SyncError::io(path))?;
+        let (header, header_len) = match header {
+            Header::Known(h, len) if h.doc == doc.as_str() => (h, len),
+            Header::Newer(version) => {
+                drop(f);
+                self.found_newer(doc, path, version);
+                return Ok(());
+            }
+            _ => {
+                // Unreadable: keep it for inspection, start a new log on the
+                // next write.
+                drop(f);
+                let aside = path.with_extension(format!("corrupt-{}", new_generation()));
+                fs::rename(path, &aside).map_err(SyncError::io(path))?;
+                return Ok(());
+            }
         };
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).map_err(SyncError::io(path))?;
@@ -762,9 +789,18 @@ impl DirTransport {
             self.stats.repairs += 1;
         }
         let mut vmax = VersionVector::new();
+        let mut foreign = msgs.len() < payloads.len();
         for msg in &msgs {
-            if let Message::Updates { version, .. } | Message::Snapshot { version, .. } = msg {
-                vmax.merge(version);
+            match msg {
+                Message::Updates {
+                    doc: d, version, ..
+                }
+                | Message::Snapshot {
+                    doc: d, version, ..
+                } if d == doc => {
+                    vmax.merge(version);
+                }
+                _ => foreign = true,
             }
         }
         self.own.insert(
@@ -776,6 +812,7 @@ impl DirTransport {
                 compacted_len: header_len + first_snapshot,
                 snapshot_requested: None,
                 vmax,
+                foreign,
             },
         );
         for msg in msgs {
@@ -871,6 +908,10 @@ impl DirTransport {
     /// If the session goes away before answering, the log still claims only what
     /// it holds, and the next session on the folder writes what is missing.
     fn fell_behind(&mut self, doc: &DocKey) {
+        if self.newer.contains_key(doc) {
+            // Nothing is written for it at all.
+            return;
+        }
         let now = Instant::now();
         let first = self
             .config
@@ -965,11 +1006,12 @@ impl DirTransport {
     ) -> Result<(), SyncError> {
         let record = encode_record(&msg.encode());
         let written = self.read_back_own(doc).and_then(|()| {
-            // No own log (none on disk either): nothing to cover.
+            // No own log (none on disk either): nothing to cover. One with
+            // records we cannot read is never replaced.
             let covers = self
                 .own
                 .get(doc)
-                .is_none_or(|own| version.includes_vv(&own.vmax));
+                .is_none_or(|own| !own.foreign && version.includes_vv(&own.vmax));
             if covers {
                 return self.write_fresh(doc, version, &record).map(|()| true);
             }
@@ -1011,7 +1053,7 @@ impl DirTransport {
     /// copy of their ops: replacing it unread would lose them. `Err` if it cannot
     /// be read; nothing is written then.
     fn read_back_own(&mut self, doc: &DocKey) -> Result<(), SyncError> {
-        if self.own.contains_key(doc) {
+        if self.own.contains_key(doc) || self.newer.contains_key(doc) {
             return Ok(());
         }
         let path = self.log_path(doc);
@@ -1024,12 +1066,27 @@ impl DirTransport {
 
     /// Write a new log (new generation) holding `record` (of `version`), via a
     /// temporary file and a rename so readers never see a partial header.
+    ///
+    /// Never over a log of a newer format version (one that appeared since we
+    /// read ours: a newer build running as this client where locks do not
+    /// work): that fails, and nothing is written for `doc` from then on.
     fn write_fresh(
         &mut self,
         doc: &DocKey,
         version: &VersionVector,
         record: &[u8],
     ) -> Result<(), SyncError> {
+        let path = self.log_path(doc);
+        match File::open(&path).and_then(|mut f| read_header_kind(&mut f)) {
+            Ok(Header::Newer(v)) => {
+                self.found_newer(doc, &path, v);
+                return Err(SyncError::io(&path)(io::Error::other(NEWER_LOG)));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            // Cannot tell what is there: do not replace it.
+            Err(e) => return Err(SyncError::io(&path)(e)),
+        }
         let dir = self.doc_dir(doc);
         fs::create_dir_all(&dir).map_err(SyncError::io(&dir))?;
         let generation = new_generation();
@@ -1042,7 +1099,6 @@ impl DirTransport {
         };
         let mut bytes = encode_record(&serde_json::to_vec(&header).expect("header serializes"));
         bytes.extend_from_slice(record);
-        let path = self.log_path(doc);
         let tmp = dir.join(format!("{}.tmp-{generation}", self.client));
         let write = || -> io::Result<()> {
             let mut f = File::create(&tmp)?;
@@ -1064,9 +1120,44 @@ impl DirTransport {
                 compacted_len: bytes.len() as u64,
                 snapshot_requested: None,
                 vmax: version.clone(),
+                foreign: false,
             },
         );
         Ok(())
+    }
+
+    /// Our log of `doc` at `path` is of format `version`, newer than this build
+    /// reads: leave it alone and write nothing for `doc` (`newer`).
+    fn found_newer(&mut self, doc: &DocKey, path: &Path, version: u64) {
+        self.own.remove(doc);
+        self.behind.remove(doc);
+        self.newer.insert(doc.clone(), version);
+        self.last_error = Some(format!(
+            "{}: {NEWER_LOG} (log format {version}, this build reads up to {LOG_VERSION}); \
+             it is left as it is and nothing is written for this document",
+            path.display()
+        ));
+    }
+
+    /// Whether nothing may be written for `doc` because our log of it is of a
+    /// newer format (reading it back first if the first scan missed it). A log
+    /// that cannot be read back is an error, handled like a failed write.
+    fn refuse_newer(&mut self, doc: &DocKey) -> Result<bool, SyncError> {
+        if let Err(e) = self.read_back_own(doc) {
+            self.fell_behind(doc);
+            return Err(e);
+        }
+        let Some(&version) = self.newer.get(doc) else {
+            return Ok(false);
+        };
+        self.refused.insert(doc.clone());
+        let path = self.log_path(doc);
+        self.last_error = Some(format!(
+            "{}: {NEWER_LOG} (log format {version}, this build reads up to {LOG_VERSION}); \
+             edits to this document are not written",
+            path.display()
+        ));
+        Ok(true)
     }
 
     // ---- cleanup of departed clients (§4.7) ----
@@ -1415,7 +1506,8 @@ impl DirTransport {
         ours: Option<&LogSummary>,
         pass: &mut CleanupPass,
     ) {
-        if !self.config.absorb_departed {
+        // Our log of a newer format cannot take anything over.
+        if !self.config.absorb_departed || self.newer.contains_key(doc) {
             return;
         }
         // Our log already holds it and only rule 4 stands in the way (the departed
@@ -1596,6 +1688,9 @@ impl Transport for DirTransport {
                     // The snapshot we asked for covers this too.
                     return Ok(());
                 }
+                if self.refuse_newer(&doc)? {
+                    return Ok(());
+                }
                 let r = self.append(&doc, &version.clone(), &msg);
                 if r.is_err() {
                     self.fell_behind(&doc);
@@ -1604,6 +1699,9 @@ impl Transport for DirTransport {
             }
             Message::Snapshot { doc, version, .. } => {
                 let doc = doc.clone();
+                if self.refuse_newer(&doc)? {
+                    return Ok(());
+                }
                 let r = self.compact(&doc, &version.clone(), &msg);
                 if r.is_ok() {
                     self.behind.remove(&doc);
@@ -1638,14 +1736,20 @@ impl Transport for DirTransport {
     /// behind (a write failed, or the log was deleted underneath us) and was not
     /// rewritten yet: the edits since are in no file. The next session on the
     /// folder writes them if the documents still hold them (see
-    /// [`DirTransport::fell_behind`]).
+    /// [`DirTransport::fell_behind`]). Likewise edits to a document whose log
+    /// is of a newer format were not written (a newer build writes them).
     fn close(&mut self) -> Result<(), SyncError> {
-        match self.behind.keys().next() {
-            Some(doc) => Err(SyncError::io(&self.log_path(doc))(io::Error::other(
+        if let Some(doc) = self.behind.keys().next() {
+            return Err(SyncError::io(&self.log_path(doc))(io::Error::other(
                 "the log lacks edits (a write failed, or it was deleted underneath us) and was not rewritten yet",
-            ))),
-            None => Ok(()),
+            )));
         }
+        if let Some(doc) = self.refused.iter().next() {
+            return Err(SyncError::io(&self.log_path(doc))(io::Error::other(
+                format!("{NEWER_LOG}: edits to this document were not written"),
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -2076,34 +2180,75 @@ fn next_record(buf: &[u8]) -> Option<(&[u8], usize)> {
     (buf[4..RECORD_HEADER] == checksum(payload)).then_some((payload, RECORD_HEADER + len))
 }
 
+/// Why a log is left alone.
+const NEWER_LOG: &str = "written by a newer version of BAE";
+
+/// A log's first record, as far as this build can tell.
+#[derive(Debug)]
+enum Header {
+    /// A header this build reads, and the size of its record.
+    Known(LogHeader, u64),
+    /// A complete, intact header of this format but a newer `version`: the log
+    /// is not ours to read, rewrite, rename or delete.
+    Newer(u64),
+    /// Not (yet) a complete, intact header of this format.
+    Unreadable,
+}
+
 /// The header record at the start of `f`, and its size; `None` if it is not
 /// (yet) complete and intact, or from a newer format version.
 fn read_header(f: &mut File) -> io::Result<Option<(LogHeader, u64)>> {
+    Ok(match read_header_kind(f)? {
+        Header::Known(header, len) => Some((header, len)),
+        Header::Newer(_) | Header::Unreadable => None,
+    })
+}
+
+/// What the record at the start of `f` is ([`Header`]).
+fn read_header_kind(f: &mut File) -> io::Result<Header> {
     f.seek(SeekFrom::Start(0))?;
     let mut head = [0u8; RECORD_HEADER];
     if let Err(e) = f.read_exact(&mut head) {
         return if e.kind() == io::ErrorKind::UnexpectedEof {
-            Ok(None)
+            Ok(Header::Unreadable)
         } else {
             Err(e)
         };
     }
     let len = u32::from_le_bytes(head[..4].try_into().expect("4 bytes")) as usize;
     if len > MAX_HEADER {
-        return Ok(None);
+        return Ok(Header::Unreadable);
     }
     let mut payload = vec![0u8; len];
     if let Err(e) = f.read_exact(&mut payload) {
         return if e.kind() == io::ErrorKind::UnexpectedEof {
-            Ok(None)
+            Ok(Header::Unreadable)
         } else {
             Err(e)
         };
     }
     if head[4..] != checksum(&payload) {
-        return Ok(None);
+        return Ok(Header::Unreadable);
     }
-    Ok(parse_header(&payload).map(|header| (header, (RECORD_HEADER + len) as u64)))
+    if let Some(version) = newer_version(&payload) {
+        return Ok(Header::Newer(version));
+    }
+    Ok(match parse_header(&payload) {
+        Some(header) => Header::Known(header, (RECORD_HEADER + len) as u64),
+        None => Header::Unreadable,
+    })
+}
+
+/// The version of a header record's payload of this format but newer than this
+/// build reads (whatever else it holds).
+fn newer_version(payload: &[u8]) -> Option<u64> {
+    #[derive(Deserialize)]
+    struct Probe {
+        format: String,
+        version: u64,
+    }
+    let probe = serde_json::from_slice::<Probe>(payload).ok()?;
+    (probe.format == LOG_FORMAT && probe.version > u64::from(LOG_VERSION)).then_some(probe.version)
 }
 
 /// A header record's payload, if it is one this build can read.
@@ -2984,5 +3129,179 @@ mod tests {
         }
         assert_eq!(reads, 7, "one record per read");
         assert_eq!(fields(&s), fields(&whole));
+    }
+
+    /// A header of the next format version, with a field this build does not
+    /// know.
+    fn newer_header(doc: &str) -> Vec<u8> {
+        let json = format!(
+            r#"{{"format":"{LOG_FORMAT}","version":{},"doc":"{doc}","client":"a","generation":"{}","compression":"zstd"}}"#,
+            LOG_VERSION + 1,
+            new_generation()
+        );
+        encode_record(json.as_bytes())
+    }
+
+    fn corrupt_files(dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().contains("corrupt"))
+            .collect()
+    }
+
+    /// Since §4.7 our own log may be all that holds some ops (those of logs
+    /// deleted because it held them). An older build running as the same
+    /// client (a downgrade) must not make them vanish: a log of a newer format
+    /// version is not renamed aside, rewritten or appended to, and nothing is
+    /// written for that document.
+    #[test]
+    fn an_own_log_of_a_newer_format_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let dir = tmp.path().join(UPDATES).join("root");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.log");
+        // Its records may not even be framed like ours.
+        let bytes = [newer_header("root"), b"\x01future framing".to_vec()].concat();
+        fs::write(&path, &bytes).unwrap();
+        let mut t = transport(tmp.path(), "a", quick());
+        let read = drain(&mut t);
+        assert!(corrupt_files(&dir).is_empty());
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert!(
+            t.last_error().is_some_and(|e| e.contains("newer version")),
+            "{:?}",
+            t.last_error()
+        );
+        assert!(
+            !read
+                .iter()
+                .any(|m| matches!(m, Message::Updates { .. } | Message::Snapshot { .. })),
+            "{read:?}"
+        );
+        // Edits and snapshots (compaction, taking over) are not written, and
+        // no repair is asked for.
+        t.send(updates(&b.v1, &b.snap1)).unwrap();
+        t.send(snapshot(&b.v2, &b.snap2)).unwrap();
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert!(corrupt_files(&dir).is_empty());
+        assert_eq!(t.stats().records_written, 0);
+        assert_eq!(requests(&mut t), 0);
+        // Closing says the edits were not written.
+        let e = t.close().unwrap_err();
+        assert!(e.to_string().contains("newer version"), "{e}");
+        // Other documents are written as usual.
+        let other = DocKey::parse("anim/a").unwrap();
+        t.send(Message::Updates {
+            doc: other.clone(),
+            version: b.v1.clone(),
+            data: b.snap1.clone(),
+        })
+        .unwrap();
+        assert_eq!(summary_of_doc(&t.log_path(&other), &other).records, 1);
+    }
+
+    fn summary_of_doc(path: &Path, doc: &DocKey) -> LogSummary {
+        summarize(&fs::read(path).unwrap(), doc, (0, None))
+    }
+
+    /// A newer build replaced our log while we ran (locks that do not work):
+    /// the repair that follows does not write over it.
+    #[test]
+    fn a_newer_log_that_appears_underneath_us_is_not_replaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let mut t = transport(tmp.path(), "a", quick());
+        drain(&mut t);
+        t.send(updates(&b.v1, &b.snap1)).unwrap();
+        let path = t.log_path(&root());
+        let newer = [newer_header("root"), b"whatever it holds".to_vec()].concat();
+        replace(&path, &newer);
+        // Noticed as a log replaced underneath us: the session is asked for a
+        // snapshot to rewrite it with, and that is refused.
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        assert!(requests(&mut t) >= 1);
+        assert!(t.send(snapshot(&b.v2, &b.snap2)).is_err());
+        assert_eq!(fs::read(&path).unwrap(), newer);
+        // From then on nothing is written for it, and nothing is asked for.
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        t.send(snapshot(&b.v2, &b.snap2)).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), newer);
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(requests(&mut t), 0);
+        assert!(t.close().is_err());
+    }
+
+    /// A record this build cannot read in our own log (a newer version's
+    /// message type) may hold ops `vmax` does not know of: such a log is only
+    /// appended to, never replaced by a snapshot.
+    #[test]
+    fn own_records_this_build_cannot_read_are_not_compacted_away() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let dir = tmp.path().join(UPDATES).join("root");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.log");
+        let before = [
+            header("root"),
+            record(updates(&b.v1, &b.snap1)),
+            encode_record(&[0x7f, 1, 2, 3]),
+        ]
+        .concat();
+        fs::write(&path, &before).unwrap();
+        let mut t = transport(tmp.path(), "a", quick());
+        drain(&mut t);
+        // Holds everything this build can see in the log, but not the record
+        // it cannot read.
+        t.send(snapshot(&b.v2, &b.snap2)).unwrap();
+        let after = fs::read(&path).unwrap();
+        assert!(after.len() > before.len() && after.starts_with(&before));
+        assert_eq!(t.stats().compactions, 0);
+        assert_eq!(t.stats().snapshots_appended, 1);
+        assert_eq!(t.last_error(), None);
+    }
+
+    /// The cleanup never deletes a log it cannot fully read, a newer format's
+    /// included, even where it would delete an older one.
+    #[test]
+    fn departed_logs_of_a_newer_format_are_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let anim = DocKey::parse("anim/a").unwrap();
+        for (doc, x_header) in [
+            (root(), header("root")),
+            (anim.clone(), newer_header("anim/a")),
+        ] {
+            let dir = tmp.path().join(UPDATES).join(doc.as_str());
+            fs::create_dir_all(&dir).unwrap();
+            let x = dir.join("x.log");
+            let held = doc_record(&doc, false, &b.v1, &b.snap1);
+            fs::write(&x, [x_header, held].concat()).unwrap();
+            two_hours_old(&x);
+            let container = doc_record(&doc, true, &b.v2, &b.snap2);
+            fs::write(
+                dir.join("c.log"),
+                [header(doc.as_str()), container].concat(),
+            )
+            .unwrap();
+        }
+        let config = DirConfig {
+            inactive_after: Some(Duration::from_secs(3600)),
+            cleanup_interval: Duration::ZERO,
+            cleanup_budget: Duration::MAX,
+            ..quick()
+        };
+        let mut a = transport(tmp.path(), "a", config);
+        for _ in 0..3 {
+            drain(&mut a);
+        }
+        assert_eq!(a.stats().logs_removed, 1);
+        assert!(!tmp.path().join(UPDATES).join("root/x.log").exists());
+        assert!(tmp.path().join(UPDATES).join("anim/a/x.log").exists());
+        // Nor is it taken over (our session could not hold what it cannot read).
+        assert_eq!(a.stats().absorb_requests, 0);
     }
 }
