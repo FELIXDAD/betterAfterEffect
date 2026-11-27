@@ -8,7 +8,7 @@ use bae_app::{AppBuilder, Resources};
 use bae_gpu::GpuContext;
 use bae_model::{PrimPath, Time, Value};
 use bae_motion::{
-    camera_track::{self, Settings, Solution},
+    camera_track::{self, Settings},
     query,
 };
 use bae_ui::{PanelContext, tr};
@@ -26,13 +26,15 @@ use std::{
 struct Analysis {
     jobs: BTreeMap<PrimPath, Job>,
     finished: BTreeMap<PrimPath, (Settings, String)>,
+    /// Solve again once the stage moved past this revision (points were deleted).
+    resolve: BTreeMap<PrimPath, u64>,
 }
 type Shared = Arc<Mutex<Analysis>>;
 struct Job {
     settings: Settings,
     stop: Arc<AtomicBool>,
     step: Arc<AtomicU8>,
-    result: mpsc::Receiver<Result<Solution, String>>,
+    result: mpsc::Receiver<Result<serde_json::Value, String>>,
     revision: u64,
     sources: Vec<PrimPath>,
     comp: PrimPath,
@@ -44,6 +46,7 @@ impl Drop for Job {
 }
 pub(super) fn register(app: &mut AppBuilder) {
     app.insert_resource(Shared::default());
+    bae_ui::i18n::register(crate::viewer::TRACKER_ZH);
     let _ = app.register_arc::<dyn bae_ui::DialogHost>("camera-tracker", Arc::new(Host));
     bae_ui::i18n::register(&[
         (
@@ -64,6 +67,7 @@ pub(super) fn register(app: &mut AppBuilder) {
             "Track points changed size during analysis",
             "分析期间素材尺寸发生变化",
         ),
+        ("Tracked layer has zero scale", "跟踪图层的缩放为零"),
         ("Average Error", "平均误差"),
         ("Analyze Camera", "分析摄像机"),
         ("Camera solved", "摄像机解算完成"),
@@ -86,6 +90,7 @@ fn start(
     };
     let comp = query::owning_comp(cx.stage, effect).ok_or("Missing composition")?;
     let source = query::owning_layer(cx.stage, effect).ok_or("Missing motion source")?;
+    let effect_path = effect.clone();
     let read = cx.stage.snapshot_reader();
     let sources = cx.resources.get::<PreviewSources>().cloned();
     let effects = cx.resources.get::<PreviewEffects>().cloned();
@@ -128,6 +133,38 @@ fn start(
             bae_gpu::warm_up::lower_priority();
             let run = || {
                 let stage = read().map_err(|e| e.to_string())?;
+                let prepare = |solution: camera_track::Solution| {
+                    if stop.load(Ordering::Relaxed) {
+                        return Err("Tracking stopped".into());
+                    }
+                    let record = camera_track::Recording::prepare(&stage, &effect_path, &solution)
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_value(record).map_err(|e| e.to_string())
+                };
+                if let Ok(prior) = camera_track::attach::solution(&stage, &effect_path)
+                    && prior.settings.detailed == settings.detailed
+                    && (prior.settings != settings
+                        || stage
+                            .prim(&effect_path)
+                            .and_then(|p| query::static_value(&p, "tracker:needs_solve"))
+                            == Some(Value::Bool(true)))
+                {
+                    step.store(2, Ordering::Relaxed);
+                    ui.request_repaint();
+                    let frames = prior
+                        .frames
+                        .into_iter()
+                        .map(|f| camera_track::Measurements {
+                            time: f.time,
+                            samples: f.samples,
+                            layer_from_comp: f.layer_from_comp,
+                        })
+                        .collect();
+                    return camera_track::solve(prior.size, frames, settings, || {
+                        stop.load(Ordering::Relaxed)
+                    })
+                    .and_then(prepare);
+                }
                 let info = query::comp_info(&stage, &comp).ok_or("Missing composition")?;
                 let duration = info.frame_duration().0.max(1);
                 let timing = query::layer_timing(&stage, &source);
@@ -173,7 +210,7 @@ fn start(
                             return Err("Track points changed size during analysis".into());
                         }
                         size = dimensions;
-                        let measured = ready.features.measure(
+                        let mut measured = ready.features.measure(
                             &ready.gpu,
                             previous
                                 .as_ref()
@@ -183,19 +220,48 @@ fn start(
                             settings.detailed,
                             &mut ids,
                         )?;
-                        frames.push((Time(t), measured));
+                        use bae_anim::glam::DVec2;
+                        let center =
+                            DVec2::new(size[0] as f64, size[1] as f64) * 0.5 + image.origin;
+                        let comp_center = DVec2::new(info.width as f64, info.height as f64) * 0.5;
+                        if image.placement.matrix2.determinant().abs() < 1e-10 {
+                            return Err("Tracked layer has zero scale".into());
+                        }
+                        for sample in &mut measured {
+                            sample.pixel = (image.placement.transform_point2(sample.xy() + center)
+                                - comp_center)
+                                .as_vec2()
+                                .to_array();
+                        }
+                        frames.push(camera_track::Measurements {
+                            time: Time(t),
+                            samples: measured,
+                            layer_from_comp: image.placement.inverse().to_cols_array(),
+                        });
                         previous = Some(image);
                     }
                 }
                 step.store(2, Ordering::Relaxed);
                 ui.request_repaint();
-                camera_track::solve(size, frames, settings, || stop.load(Ordering::Relaxed))
+                camera_track::solve([info.width, info.height], frames, settings, || {
+                    stop.load(Ordering::Relaxed)
+                })
+                .and_then(prepare)
             };
             let _ = send.send(run());
             ui.request_repaint();
         })
         .map_err(|e| e.to_string())?;
     Ok(Some(job))
+}
+/// Solves `effect` again once the stage moved past `revision` (its points were
+/// just deleted; the delete applies after this frame).
+pub(crate) fn request_solve(r: &Resources, effect: &PrimPath, revision: u64) {
+    shared(r)
+        .lock()
+        .unwrap()
+        .resolve
+        .insert(effect.clone(), revision);
 }
 fn shared(r: &Resources) -> Shared {
     r.get::<Shared>().expect("camera tracker state").clone()
@@ -222,12 +288,29 @@ pub(crate) fn controls(ui: &mut egui::Ui, cx: &PanelContext<'_>, effect: &PrimPa
     }
     let stored = query::attr_spec(cx.stage, effect, camera_track::SOLUTION).is_some();
     let completed = state.finished.get(effect);
-    let restart = completed.is_some_and(|(s, _)| *s != settings);
+    let prior_settings = cx.stage.prim(effect).and_then(|p| {
+        p.value(camera_track::RECORDED_SETTINGS)
+            .and_then(Value::as_str)
+            .and_then(|v| serde_json::from_str::<Settings>(v).ok())
+    });
+    // Settings that match the stored solution (an undo back to it) or the last
+    // attempt are not analyzed again.
+    let tried = completed.map(|(s, _)| *s);
+    let restart = (prior_settings.is_some() || tried.is_some())
+        && prior_settings != Some(settings)
+        && tried != Some(settings);
+    let dirty = cx
+        .stage
+        .prim(effect)
+        .and_then(|v| query::static_value(&v, "tracker:needs_solve"))
+        == Some(Value::Bool(true));
     let mut analyze = restart || (!stored && completed.is_none());
     if !analyze {
         ui.horizontal(|ui| {
             let status = completed.map_or("Camera solved", |(_, s)| s.as_str());
-            ui.label(tr(status));
+            if !dirty {
+                ui.label(tr(status));
+            }
             analyze = ui.button(tr("Analyze Camera")).clicked();
         });
     }
@@ -255,6 +338,32 @@ impl bae_ui::DialogHost for Host {
         let shared = shared(cx.resources);
         let mut state = shared.lock().unwrap();
         state.finished.retain(|p, _| cx.stage.has_prim(p));
+        let revision = cx.stage.revision();
+        let due: Vec<_> = state
+            .resolve
+            .iter()
+            .filter(|(p, r)| **r != revision && !state.jobs.contains_key(*p))
+            .map(|(p, _)| p.clone())
+            .collect();
+        for effect in due {
+            if !cx.stage.has_prim(&effect) || query::locked_layer_of(cx.stage, &effect).is_some() {
+                state.resolve.remove(&effect);
+                continue;
+            }
+            let settings = Settings::read(cx.stage, &effect);
+            match start(cx, ctx, &effect, settings) {
+                Ok(Some(job)) => {
+                    state.resolve.remove(&effect);
+                    state.jobs.insert(effect, job);
+                }
+                // Warming up: tried again next frame.
+                Ok(None) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(e) => {
+                    state.resolve.remove(&effect);
+                    state.finished.insert(effect, (settings, e));
+                }
+            }
+        }
         let mut completed = Vec::new();
         state.jobs.retain(|p, j| {
             if !cx.stage.has_prim(p) {
@@ -263,6 +372,13 @@ impl bae_ui::DialogHost for Host {
             let invalid = cx.stage.changes_since(j.revision).is_none_or(|events| {
                 events.flat_map(|e| &e.changes).any(|change| {
                     let path = change.path();
+                    // The points it solves changed (an undo or redo of a delete).
+                    if let bae_model::Change::AttrChanged { attr, .. } = change
+                        && path == p
+                        && (attr == camera_track::SOLUTION || attr == "tracker:needs_solve")
+                    {
+                        return true;
+                    }
                     if p.is_prefix_of(path) {
                         return Settings::read(cx.stage, p) != j.settings;
                     }
@@ -301,10 +417,7 @@ impl bae_ui::DialogHost for Host {
         for (p, settings, result) in completed {
             let message = match result {
                 Ok(solution) => {
-                    cx.invoke_with(
-                        "camera_tracker.record",
-                        serde_json::json!({"effect":p,"solution":solution}),
-                    );
+                    cx.invoke_with("camera_tracker.record", solution);
                     "Camera solved".into()
                 }
                 Err(e) => e,

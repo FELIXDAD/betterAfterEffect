@@ -125,6 +125,8 @@ pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     "RGB",
     // AE: 3D 位置 Gizmo, 三维旋转 Gizmo …
     "Gizmo",
+    // AE: 预览（Shift+数字小键盘 0）.
+    "Shift",
 ];
 
 #[test]

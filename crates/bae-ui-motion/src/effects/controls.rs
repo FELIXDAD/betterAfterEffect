@@ -401,7 +401,14 @@ fn params(
             });
             continue;
         }
-        param_row(ui, cx, session, eval, state, effect, def, param, depth, now);
+        if def.match_name == bae_motion::camera_track::MATCH_NAME && param.id == 414 {
+            let specified = bae_motion::camera_track::Settings::read(cx.stage, effect).shot == 4;
+            ui.add_enabled_ui(specified, |ui| {
+                param_row(ui, cx, session, eval, state, effect, def, param, depth, now);
+            });
+        } else {
+            param_row(ui, cx, session, eval, state, effect, def, param, depth, now);
+        }
     }
 }
 
