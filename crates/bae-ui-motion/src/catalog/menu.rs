@@ -494,9 +494,9 @@ const COMPOSITION: &[Node] = &[
     sub(
         "Responsive Design — Time",
         &[
-            it(2097153, "Create Intro", "motion.comp.create_intro", "", B, Later),
-            it(2097154, "Create Outro", "motion.comp.create_outro", "", B, Later),
-            it(2097155, "Create Protected Region from Work Area", "motion.comp.create_protected_region_from_work_area", "", B, Later),
+            it(2097153, "Create Intro", "motion.comp.create_intro", "", B, Done),
+            it(2097154, "Create Outro", "motion.comp.create_outro", "", B, Done),
+            it(2097155, "Create Protected Region from Work Area", "motion.comp.create_protected_region_from_work_area", "", B, Done),
         ],
     ),
     SEP,
@@ -692,7 +692,7 @@ const LAYER: &[Node] = &[
         &[
             it(23265281, "Add Marker", "motion.layer.add_marker", "", C, Done),
             it(23265282, "Update Markers From Source", "motion.layer.update_markers_from_source", "", C, Later),
-            it(23265283, "Lock Markers", "motion.layer.lock_markers", "", C, Todo),
+            it(23265283, "Lock Markers", "motion.layer.lock_markers", "", C, Done),
             it(23265284, "Delete All Markers", "motion.layer.delete_all_markers", "", C, Done),
         ],
     ),
@@ -966,7 +966,7 @@ const ANIMATION: &[Node] = &[
     it(851986, "Add Expression", "motion.anim.add_expression", "", C, Todo),
     it(851987, "Separate Dimensions", "motion.anim.separate_dimensions", "", B, Done),
     it(851988, "Track Camera", "motion.anim.track_camera", "", B, Done),
-    it(851989, "Warp Stabilizer VFX", "motion.anim.warp_stabilizer_vfx", "", B, Later),
+    it(851989, "Warp Stabilizer VFX", "motion.anim.warp_stabilizer_vfx", "", B, Done),
     it(851990, "Track Motion", "motion.anim.track_motion", "", B, Done),
     it(851991, "Track Mask", "motion.anim.track_mask", "", B, Later),
     it(851992, "Track this Property", "motion.anim.track_this_property", "", B, Later),

@@ -105,6 +105,7 @@ impl Drop for Slot {
 impl Slot {
     fn image(&self) -> Option<PreviewImage> {
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect,
         })
@@ -661,8 +662,12 @@ struct Evaluate {
 const SAMPLE_ROUNDS: usize = 4;
 
 impl Evaluate {
-    fn new(scene: Arc<Scene>, gpu: Arc<GpuContext>) -> Result<Self, String> {
-        let stage = scene.snapshot.restore()?;
+    fn new(
+        scene: Arc<Scene>,
+        gpu: Arc<GpuContext>,
+        replicas: &mut crate::preview_snapshot::Replicas,
+    ) -> Result<Self, String> {
+        let stage = scene.snapshot.restore_with(replicas)?;
         // Pure arithmetic over time has no project reads. General JavaScript
         // can look up other compositions or sample outside this frame.
         let dynamic = stage.sublayers().any(|l| {
@@ -777,6 +782,7 @@ fn worker(
             .expect("spawn playback render thread");
     }
     let mut current: Option<Evaluate> = None;
+    let mut replicas = crate::preview_snapshot::Replicas::default();
     loop {
         let (epoch, scene, time) = {
             let mut state = shared.state.lock().unwrap();
@@ -806,7 +812,7 @@ fn worker(
                 .as_ref()
                 .is_none_or(|c| !Arc::ptr_eq(&c.scene, &scene))
             {
-                current = Some(Evaluate::new(scene.clone(), gpu.clone())?);
+                current = Some(Evaluate::new(scene.clone(), gpu.clone(), &mut replicas)?);
             }
             current.as_mut().unwrap().frame(epoch, time)
         })();

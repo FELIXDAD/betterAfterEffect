@@ -160,6 +160,10 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
 fn comp_switches_and_layer_switches_reach_the_render_request() {
     use crate::actions::ids;
     let mut h = H::new();
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set("previews.auto_enable_frame_blending_motion_blur", false);
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
     h.keys(POS, &[(0.0, vec3(0.0, 0.0)), (1.0, vec3(600.0, 0.0))]);
     let comp = h.comp.clone();
     let mut tl = h.bars();
@@ -412,7 +416,11 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
     let r = h.click(&mut tl, row, Modifiers::NONE);
     assert_eq!(r.invocations.len(), 1);
     h.apply(&r);
-    for expected in [true, false, true] {
+    assert_eq!(
+        query::static_value(&h.stage.prim(&comp).unwrap(), "frame_blending"),
+        Some(Value::Bool(true))
+    );
+    for expected in [false, true, false] {
         let r = h.click(&mut tl, master, Modifiers::NONE);
         h.apply(&r);
         assert_eq!(
@@ -441,6 +449,10 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
     let pixel_motion = effects.contains(super::super::FRAME_INTERPOLATOR_ID);
     h.resources
         .insert(crate::gpu_preview::PreviewEffects(effects));
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set("previews.auto_enable_frame_blending_motion_blur", false);
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
     let modes = ["frame_mix", "pixel_motion", "off"];
     for expected in modes
         .into_iter()
@@ -450,8 +462,82 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
         assert_eq!(r.invocations.len(), 1, "one edit per click");
         h.apply(&r);
         assert_eq!(
+            query::static_value(&h.stage.prim(&comp).unwrap(), "frame_blending"),
+            Some(Value::Bool(false))
+        );
+        assert_eq!(
             query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
             Some(Value::Enum(expected.into()))
         );
+    }
+}
+
+/// AE: a camera or light row has Video, Solo, Lock and Shy only, a fixed axis
+/// icon in the 3D column and no Mode or Track Matte; double-clicking it opens
+/// Camera Settings or Light Settings instead of the Layer panel.
+#[test]
+fn camera_and_light_rows_show_only_their_switches_and_open_their_settings() {
+    use crate::dialogs::Dialog;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let camera = path(&h.run("layer.create", json!({"comp": comp, "kind": "camera"}))["path"]);
+    let light = path(&h.run("layer.create", json!({"comp": comp, "kind": "light"}))["path"]);
+    let mut tl = h.bars();
+    let y = |tl: &TimelinePanel, l: &PrimPath| bar_rect(tl, l).center().y;
+    let switches = tl.last_axis.unwrap().left - 2.0 - 120.0 - 134.0;
+    let cell = |col: usize, y| pos2(switches + 15.0 * (col as f32 + 0.5), y);
+    let attr = |h: &H, a: &str| {
+        h.stage
+            .prim(&camera)
+            .unwrap()
+            .value(a)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    let three_d = attr(&h, "three_d");
+    // Collapse … 3D: no switch to click.
+    for col in 1..8 {
+        let at = cell(col, y(&tl, &camera));
+        let r = h.click(&mut tl, at, Modifiers::NONE);
+        assert!(
+            r.invocations.is_empty(),
+            "column {col}: {:?}",
+            r.invocations
+        );
+        h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    }
+    assert_eq!(attr(&h, "three_d"), three_d);
+    assert!(!attr(&h, "motion_blur"));
+    // Shy is there.
+    let at = cell(0, y(&tl, &camera));
+    let r = h.click(&mut tl, at, Modifiers::NONE);
+    h.apply(&r);
+    assert!(attr(&h, "shy"));
+    // Modes: only the solid has Mode and Track Matte.
+    show_modes(&mut h, &mut tl);
+    let drawn: Vec<_> = tl.last_modes.iter().map(|(p, ..)| p.clone()).collect();
+    assert_eq!(drawn, [solid]);
+    show_modes(&mut h, &mut tl);
+    // Double-click the camera's name, the light's bar: Camera Settings, then
+    // Light Settings.
+    for (layer, camera_dialog) in [(&camera, true), (&light, false)] {
+        let at = if camera_dialog {
+            pos2(switches - 60.0, y(&tl, layer))
+        } else {
+            bar_rect(&tl, layer).center()
+        };
+        // Not part of an earlier click run (egui counts clicks within 0.3 s).
+        h.time += 1.0;
+        h.click(&mut tl, at, Modifiers::NONE);
+        let r = h.click(&mut tl, at, Modifiers::NONE);
+        assert!(r.open.is_empty(), "{:?}", r.open);
+        let dialogs = crate::dialogs::shared(&h.resources);
+        let mut d = dialogs.lock();
+        match d.open.take() {
+            Some(Dialog::CameraSettings(_)) if camera_dialog => {}
+            Some(Dialog::LightSettings(_)) if !camera_dialog => {}
+            _ => panic!("no settings dialog for {layer}"),
+        }
     }
 }

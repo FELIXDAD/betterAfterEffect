@@ -1339,7 +1339,7 @@ impl Panel for CompositionViewer {
         if playback.is_some() && self.gpu.is_some() && !editing {
             self.on_gpu = completed.is_some();
             if let Some(image) = completed {
-                paint_image(&clip, &view, image);
+                paint_image(&clip, &view, image, cx.resources, true);
             }
             if fullscreen {
                 return;
@@ -1475,6 +1475,8 @@ impl Panel for CompositionViewer {
         if let Some(g) = self.gpu.as_mut() {
             g.display = self.display.render();
             g.roi = self.display.roi();
+            // Edits render on the live thread, never on this one.
+            g.live_edit = editing.then(|| ui.input(|i| !i.raw.events.is_empty()));
         }
         // Display colour management for every preview (stills, playback,
         // value drags).
@@ -1607,7 +1609,7 @@ impl Panel for CompositionViewer {
         }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
         if let Some(img) = image {
-            paint_image(&clip, &view, img);
+            paint_image(&clip, &view, img, cx.resources, false);
             // Until 05's text source is registered, text layers are drawn here.
             let has_text = cx
                 .resources
@@ -1662,6 +1664,8 @@ impl Panel for CompositionViewer {
             );
             clip.extend(shapes);
         }
+        crate::tracker::stabilizer::points(cx, ui, &clip, &comp, &view);
+        crate::tracker::stabilizer::banner(cx, &info.path, &painter, comp_rect.intersect(area));
         if preparing {
             painter.text(
                 area.right_bottom() + vec2(-8.0, -8.0),
@@ -2125,7 +2129,31 @@ pub(crate) fn look_at_enabled(resources: &bae_app::Resources, all: bool) -> bool
     look_at::enabled(resources, all)
 }
 
-fn paint_image(clip: &egui::Painter, view: &View, img: crate::gpu_preview::PreviewImage) {
+fn paint_image(
+    clip: &egui::Painter,
+    view: &View,
+    img: crate::gpu_preview::PreviewImage,
+    resources: &bae_app::Resources,
+    playing: bool,
+) {
+    let prefs = crate::prefs::current(resources);
+    let fast = match prefs.str("previews.zoom_quality") {
+        "faster" => true,
+        "more_accurate_except_ram_preview" => playing,
+        _ => false,
+    };
+    if let Some(registry) =
+        resources.get::<std::sync::Arc<bae_gpu::viewport::ViewportTextureRegistry>>()
+    {
+        registry.set_filter(
+            img.viewport,
+            if fast {
+                bae_gpu::wgpu::FilterMode::Nearest
+            } else {
+                bae_gpu::wgpu::FilterMode::Linear
+            },
+        );
+    }
     let r = img.rect;
     let rect = Rect::from_min_max(
         view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),

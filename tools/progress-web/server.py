@@ -91,6 +91,9 @@ def initialize():
         db.execute("""create table if not exists items(
             id text primary key, kind text, module text, name text, status text, tag text,
             prs text, agent text default '', updated text, note text default '')""")
+        # Items belong to a release; everything before 0.2.0 was 0.1.0's.
+        if "release" not in {row[1] for row in db.execute("pragma table_info(items)")}:
+            db.execute("alter table items add column release text not null default '0.1.0'")
         db.execute("""create table if not exists activity(
             seq integer primary key, item text, agent text, status text, note text, updated text)""")
         db.execute("""create table if not exists pulls(
@@ -335,14 +338,32 @@ def register_legacy_effects(db):
 
 
 def register_milestones(db):
-    rows = []
-    for line in (HERE / "milestones.tsv").read_text(encoding="utf-8").splitlines():
-        module, item, name, status, *extra = line.split("\t")
-        pr, agent = (extra + ["", ""])[:2]
-        prs = [int(n) for n in pr.split(",")] if pr else []
-        rows.append((item, module, name, status, json.dumps(prs), agent, now()))
-    db.executemany("""insert into items(id,kind,module,name,status,tag,prs,agent,updated)
-        values(?,'milestone',?,?,?,'',?,?,?) on conflict(id) do nothing""", rows)
+    """Each release's list. Earlier releases only add missing items; the
+    current one also claims listed items reported before (their group, name
+    and release), keeping their status, PRs and reports."""
+    releases = BOARD.get("releases") or {BOARD["milestone"]: "milestones.tsv"}
+    for release, manifest in releases.items():
+        rows = []
+        for line in (HERE / manifest).read_text(encoding="utf-8").splitlines():
+            module, item, name, status, *extra = line.split("\t")
+            pr, agent = (extra + ["", ""])[:2]
+            prs = [int(n) for n in pr.split(",")] if pr else []
+            rows.append((item, module, name, status, json.dumps(prs), agent, now(), release))
+        claim = ("do update set module=excluded.module,name=excluded.name,release=excluded.release"
+                 if release == BOARD["milestone"] else "do nothing")
+        db.executemany(f"""insert into items(id,kind,module,name,status,tag,prs,agent,updated,release)
+            values(?,'milestone',?,?,?,'',?,?,?,?) on conflict(id) {claim}""", rows)
+
+
+def new_item_group(item, module):
+    """The group of a newly reported item: the reporter's, else by its ID
+    prefix (users' bugs), else 新增能力."""
+    if module:
+        return module
+    for prefix, group in BOARD.get("new_item_groups", {}).items():
+        if item.startswith(prefix):
+            return group
+    return "新增能力"
 
 
 def import_github():
@@ -425,7 +446,9 @@ def snapshot():
             issue["tasks"] = list(parity_tasks(issue["number"], issue["title"]))
             for task in issue["tasks"]:
                 task["merged"] = merged.get(task["fix"], [])
-        return dict(milestone=BOARD["milestone"], merge_queue=queue, items=items, agents=agents, activity=feed, parity=issues)
+        history = [r for r in BOARD.get("releases", {}) if r != BOARD["milestone"]]
+        return dict(milestone=BOARD["milestone"], history=history, merge_queue=queue, items=items,
+                    agents=agents, activity=feed, parity=issues)
 
 
 def field(data, key, limit, required=False):
@@ -443,7 +466,7 @@ def report(data):
     status = field(data, "status", 8, True)
     note = field(data, "note", 2000)
     name = field(data, "name", 160) or item
-    module = field(data, "module", 80) or "新增能力"
+    module = new_item_group(item, field(data, "module", 80))
     pr = str(data.get("pr", "")).lstrip("#")
     if status not in ("done", "doing", "todo") or (pr and not re.fullmatch("[1-9][0-9]{0,8}", pr)):
         raise ValueError("状态或 PR 编号无效")
@@ -464,8 +487,8 @@ def report(data):
             if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,119}", item):
                 raise ValueError("新增能力 ID 仅支持小写字母、数字、点、下划线和连字符")
             kind = "tool" if item.startswith("board-") else "milestone"
-            db.execute("insert into items(id,name,module,kind,tag,prs) values(?,?,?,?,?,?)",
-                       (item, name, module, kind, "", "[]"))
+            db.execute("insert into items(id,name,module,kind,tag,prs,release) values(?,?,?,?,?,?,?)",
+                       (item, name, module, kind, "", "[]", BOARD["milestone"]))
         prs = json.loads(row["prs"]) if row else []
         if pr and int(pr) not in prs:
             prs.append(int(pr))
