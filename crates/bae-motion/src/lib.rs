@@ -77,6 +77,7 @@ pub mod content;
 pub mod dimensions;
 pub mod effect;
 pub mod expressions;
+mod fill;
 pub mod import;
 pub mod interpret;
 pub mod keys;
@@ -160,6 +161,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
         r.register(roto::Freeze),
+        r.register(fill::AddFillLayer),
         r.register(puppet::AddPin),
         r.register(puppet::DeletePins),
         r.register(puppet::SetMesh),

@@ -628,6 +628,54 @@ fn gpu_preview_renders_a_value_drag_in_the_background() {
     assert_eq!(shown(&registry, &preview), own);
 }
 
+/// A viewer edit (a drag, a nudge, typing) renders on the live thread too:
+/// the UI thread neither converts nor renders the comp while it lasts.
+#[test]
+fn gpu_preview_renders_viewer_edits_in_the_background() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    let shown = |registry: &ViewportTextureRegistry, preview: &crate::gpu_preview::GpuPreview| {
+        registry
+            .get(preview.viewport())
+            .expect("published")
+            .view
+            .texture()
+            .clone()
+    };
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    let own = shown(&registry, &preview);
+    // The dragged layer, as the viewer applies the drag to the evaluated comp.
+    let mut dragged = evaluated.clone();
+    dragged
+        .layers
+        .iter_mut()
+        .find(|l| l.path == solid)
+        .unwrap()
+        .opacity = 0.0;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut input = true;
+    while shown(&registry, &preview) == own {
+        assert!(std::time::Instant::now() < deadline, "no live frame");
+        preview.live_edit = Some(std::mem::take(&mut input));
+        let image = preview.frame(&h.resources, &h.stage, &dragged, 1, None, false);
+        assert!(
+            image.is_some(),
+            "the last frame stays while the edit renders"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    assert_eq!(shown(&registry, &preview), own);
+}
+
 /// During a value drag the sampleImage reads run on the live renderer's thread
 /// too: the viewer keeps the last frame, the samples arrive, then the live
 /// frame (with the sampled value) shows.

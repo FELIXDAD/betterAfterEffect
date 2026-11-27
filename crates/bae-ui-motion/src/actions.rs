@@ -2993,12 +2993,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if !SWITCHES.iter().any(|(a, _)| *a == attr) {
                 return true;
             }
-            // Lock acts on the selected layers even when they are locked.
-            let targets = if attr == "locked" {
+            // Lock acts on the selected layers even when they are locked;
+            // layers without the switch (a camera's 3D) are left alone.
+            let targets: Vec<PrimPath> = if attr == "locked" {
                 s.selected_layers.clone()
             } else {
                 layers.clone()
-            };
+            }
+            .into_iter()
+            .filter(|l| crate::timeline::has_switch(stage, l, attr))
+            .collect();
             if targets.is_empty() {
                 return true;
             }
