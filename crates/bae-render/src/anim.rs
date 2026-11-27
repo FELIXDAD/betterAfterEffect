@@ -1067,6 +1067,13 @@ fn material(m: &bae_anim::MaterialState) -> Material {
         specular_intensity: percent(m.specular_intensity),
         specular_shininess: percent(m.specular_shininess),
         metal: percent(m.metal),
+        transparency: percent(m.transparency),
+        transparency_rolloff: percent(m.transparency_rolloff),
+        shadow_color: [
+            m.shadow_color[0] as f32,
+            m.shadow_color[1] as f32,
+            m.shadow_color[2] as f32,
+        ],
     }
 }
 

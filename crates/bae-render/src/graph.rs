@@ -869,6 +869,32 @@ pub(crate) fn plane_depth(
     }
 }
 
+/// Advanced 3D's Transparency of a 3D layer: the share of it that stays
+/// (1 − transparency), Transparency Rolloff taking transparency away where
+/// the layer is seen at a glancing angle (from the camera, at the centre of
+/// `rect`, its drawn rectangle in layer pixels).
+fn transparency_keep(comp: &RenderComp, layer: &RenderLayer, rect: &Rect) -> f32 {
+    let m = &layer.material;
+    let Some(matrix) = layer.matrix_3d.filter(|_| m.transparency > 0.0) else {
+        return 1.0;
+    };
+    let centre = matrix.transform_point3(glam::DVec3::new(
+        (rect.x0 + rect.x1) / 2.0,
+        (rect.y0 + rect.y1) / 2.0,
+        0.0,
+    ));
+    let normal = matrix
+        .x_axis
+        .truncate()
+        .cross(matrix.y_axis.truncate())
+        .normalize_or_zero();
+    let facing = normal
+        .dot((comp.view_camera().eye() - centre).normalize_or_zero())
+        .abs() as f32;
+    let t = m.transparency / 100.0 * (1.0 - m.transparency_rolloff / 100.0 * (1.0 - facing));
+    (1.0 - t).clamp(0.0, 1.0)
+}
+
 /// Converts a rectangle in space pixels to texel units at `pixel_scale`.
 pub fn units(rect: &Rect, pixel_scale: f64) -> IRect {
     Rect::new(
@@ -1227,7 +1253,7 @@ impl Builder<'_, '_> {
                 matches!(layer.content, LayerContent::Model(_))
                     && layer.material.casts_shadows != ShadowMode::Off
             })
-            .filter_map(|(_, op)| match op.input {
+            .filter_map(|(index, op)| match op.input {
                 OpInput::Image(id) => match &self.nodes[id.index()].kind {
                     NodeKind::Mesh(m) => {
                         m.models
@@ -1236,6 +1262,7 @@ impl Builder<'_, '_> {
                             .map(|m| ModelCaster {
                                 model: m.model.clone(),
                                 matrix: m.matrix,
+                                shadow_color: comp.layers[*index].material.shadow_color,
                             })
                     }
                     _ => None,
@@ -1478,6 +1505,7 @@ impl Builder<'_, '_> {
                 .hash(&mut h);
             c.opacity.to_bits().hash(&mut h);
             c.transmission.to_bits().hash(&mut h);
+            c.shadow_color.map(f32::to_bits).hash(&mut h);
             match c.pixels {
                 crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
                 crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
@@ -1486,6 +1514,7 @@ impl Builder<'_, '_> {
         for m in lighting.models.iter() {
             (Arc::as_ptr(&m.model) as usize).hash(&mut h);
             m.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
+            m.shadow_color.map(f32::to_bits).hash(&mut h);
         }
         let base = h.finish();
         let slot_keys: Vec<u64> = lighting
@@ -2280,7 +2309,7 @@ impl Builder<'_, '_> {
             layer: layer.path.clone(),
             input,
             transform,
-            opacity: layer.opacity.clamp(0.0, 1.0),
+            opacity: layer.opacity.clamp(0.0, 1.0) * transparency_keep(comp, layer, &content_rect),
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
             quality: layer.quality,
@@ -3500,6 +3529,7 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
                     opacity: op.opacity,
                     transmission: comp.layers[*index].material.light_transmission,
                     pixels,
+                    shadow_color: comp.layers[*index].material.shadow_color,
                     footprints: Arc::new([]),
                 },
             ))

@@ -745,6 +745,15 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Light Transmission", "透光率"),
     ("Accepts Shadows", "接受阴影"),
     ("Accepts Lights", "接受灯光"),
+    // Advanced 3D Material Options (AE 26's zh terms).
+    ("Shadow Color", "阴影颜色"),
+    ("Appears in Reflections", "在反射中显示"),
+    ("Reflection Intensity", "反射强度"),
+    ("Reflection Sharpness", "反射锐度"),
+    ("Reflection Rolloff", "反射衰减"),
+    ("Transparency", "透明度"),
+    ("Transparency Rolloff", "透明度衰减"),
+    ("Index of Refraction", "折射率"),
     // Environment light (AE 26's zh terms).
     ("Source", "源"),
     ("Background Visible", "背景可见"),

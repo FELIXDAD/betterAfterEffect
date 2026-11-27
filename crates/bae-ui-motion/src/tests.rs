@@ -3724,6 +3724,15 @@ fn camera_light_and_material_options_groups() {
         groups(&h, &solid).last(),
         Some(&("Material Options".to_owned(), 9))
     );
+    // The Advanced 3D renderer adds reflections, transparency and more.
+    h.run(
+        "attr.set",
+        json!({"path": comp, "attr": "renderer", "value": Value::Enum("advanced_3d".into())}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 17))
+    );
 }
 
 /// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label
