@@ -389,7 +389,7 @@ closing.wait(超时); // 退出时等关闭完成
 
 - `Target::Folder(工程目录)`：`DirTransport` 放在 `ThreadedTransport` 里；会话用 4.5 的推荐设置（`hello_interval = None`、`min_send_interval = 300 ms`）。
 - `Target::Hub { url, token }`（feature `hub`）：`HubTransport` 放在 `ThreadedTransport` 里；会话用默认设置（每 5 秒 `Hello`；Hub 60 秒一个字节都收不到会断开）。
-- `ConnectionConfig`：`client`；初始 `presence`；`wake`（只在后台线程调用，从不在 `Connection` 的方法里直接调用；接到"请求重绘"上，不能阻塞）；可选的 `session`（不给就用 `Target::session_config`；`client` 换成上面的；`send_data` 在对方只给 `Read` 时关掉，这里设成 `false` 的话一直不发，用于只看不改的客户端）；`backoff`；`folder`（`DirConfig`）；`io_tick`（后台 I/O 线程查看新消息的间隔，默认 Hub 2 ms、共享目录 10 ms）；`io_stall`（链路 I/O 卡住多久算没同步，默认 5 秒，7.4）；`hub_timeout`（连接、握手每一步的超时，默认 10 秒）；`hub_limits`（`HubLimits::default()`：两个方向单条消息 256 MiB；会话自己的流量控制是 `SessionConfig::max_backlog`，按整个链路的积压算：I/O 线程的队列加上 WebSocket 写缓冲，2.6）；`hub_idle_timeout`（Hub 静默多久算断开，默认 20 秒，`None` 不检查，7.4）。
+- `ConnectionConfig`：`client`；初始 `presence`；`wake`（只在后台线程调用，从不在 `Connection` 的方法里直接调用；接到"请求重绘"上，不能阻塞）；可选的 `session`（不给就用 `Target::session_config`；`client` 换成上面的；`send_data` 在对方只给 `Read` 时关掉，这里设成 `false` 的话一直不发，用于只看不改的客户端）；`backoff`；`folder`（`DirConfig`）；`io_tick`（后台 I/O 线程查看新消息的间隔，默认 Hub 2 ms、共享目录 10 ms）；`io_stall`（链路 I/O 卡住多久算没同步，默认 5 秒，7.4）；`unresponsive_after`（连接多久还没连上就报 `Unresponsive`，默认 10 秒，7.4）；`hub_timeout`（连接、握手每一步的超时，默认 10 秒）；`hub_limits`（`HubLimits::default()`：两个方向单条消息 256 MiB；会话自己的流量控制是 `SessionConfig::max_backlog`，按整个链路的积压算：I/O 线程的队列加上 WebSocket 写缓冲，2.6）；`hub_idle_timeout`（Hub 静默多久算断开，默认 20 秒，`None` 不检查，7.4）。
 - `Target` 的 `Debug` 不打印令牌，URL 里的 `?token=` 也换成 `…`。
 
 ### 7.2 线程
@@ -400,7 +400,7 @@ closing.wait(超时); // 退出时等关闭完成
 - 链路断开后，旧传输在后台线程丢弃（丢弃 `ThreadedTransport` 要等它的 I/O 线程，可能正卡在 NAS 的读写里）。连接中 `close` 或丢弃 `Connection` 时，连接线程已经做好、还没被 `pump` 接手的链路也在后台线程丢弃。
 - 本进程里正在放开的共享目录链路（丢弃、关闭、没人接手的）按"目录 + `ClientId`"登记；连接同一目录、同一 `ClientId` 时，连接线程先等它们放开文件锁（7.4）。
 - `close` 的 `Transport::close` 在后台线程（Hub 要等对方确认关闭）。
-- `wake` 的调用时机：收到消息；连接尝试结束；关闭结束；需要 `pump` 的时候到了：重试时间到、被 `min_send_interval` 推迟的修改、`Hello` 和在线状态心跳、链路 I/O 卡住快到 `io_stall`。应用空闲时也要按时 `pump`，否则 Hub 60 秒后断开。定时由每个 `Connection` 的一个闹钟线程负责，它只记最早的一个时间：每次唤醒都会引起一次 `pump`，每次 `pump` 再定下一个。一次 `pump` 收满 `max_messages_per_pump` 条时（可能还有没收的）也由闹钟线程立即调用，不在 `pump` 里直接调用（Agent 的 `wake` 可能要拿 `pump` 的线程正持有的锁）。
+- `wake` 的调用时机：收到消息；连接尝试结束；关闭结束；需要 `pump` 的时候到了：重试时间到、被 `min_send_interval` 推迟的修改、`Hello` 和在线状态心跳、链路 I/O 卡住快到 `io_stall`、连接到了 `unresponsive_after` 还没连上、只读共享目录该再探测能不能写了（7.5）。应用空闲时也要按时 `pump`，否则 Hub 60 秒后断开。定时由每个 `Connection` 的一个闹钟线程负责，它只记最早的一个时间：每次唤醒都会引起一次 `pump`，每次 `pump` 再定下一个。一次 `pump` 收满 `max_messages_per_pump` 条时（可能还有没收的）也由闹钟线程立即调用，不在 `pump` 里直接调用（Agent 的 `wake` 可能要拿 `pump` 的线程正持有的锁）。
 - 连接一个只接受 TCP、永远不握手的地址时，每次 `pump` 不到 0.1 ms（debug 构建）。
 
 ### 7.3 状态
@@ -409,7 +409,7 @@ closing.wait(超时); // 退出时等关闭完成
 
 | 字段 | 说明 |
 |---|---|
-| `state` | `Connecting`：正在连接，或者已经连上、对方还没发 `Hello`。`Online { since }`。`Offline { retry_in, error }`。`Failed { failure, reason }`：要用户处理（7.4） |
+| `state` | `Connecting`：正在连接，或者已经连上、对方还没发 `Hello`。`Unresponsive { since }`：从 `since` 起一直在连接，超过了 `unresponsive_after`（7.4），界面显示"NAS 无响应"。`Online { since }`。`Offline { retry_in, error }`。`Failed { failure, reason }`：要用户处理（7.4） |
 | `access` | `Read` / `Write` / `Unknown`（7.5）。离线时保留上一次的 |
 | `unsynced` | 有本地修改还不能确定对方有了（`SyncSession::unsynced` 非空）：离线、只读、被 `min_send_interval` 推迟、重连后对方还没发 `Hello`、交给了后来断开的链路而对方没确认（7.4），或者等在 I/O 卡住超过 `io_stall` 的链路里 |
 | `peers` | 在线的其他人数，不在线时为 0 |
@@ -421,6 +421,7 @@ closing.wait(超时); // 退出时等关闭完成
 
 - 任何传输错误或连接失败：进入 `Offline`，带错误文字。本地文档不受影响，离线时照常编辑。交给链路的消息可能没送到，所以会话退回对方确认过的版本（`SyncSession::forget_unconfirmed`，2.4）：交出去、对方还没确认的修改离线时算 `unsynced`，`close` 也报告它们，退出时会提示。共享目录的确认只有它的 `Hello`（第一次扫描完、回答我们因新文档发的 `Hello` 时）和它读到的别人的记录，自己写进去的不算确认：共享目录链路断开后，这个链路上改过的文档都算 `unsynced`，包括已经写进去的。偏保守，不会漏报。
 - Hub 静默：`hub_idle_timeout`（默认 20 秒）里一个字节都没收到，就当链路断了（3.1）。Hub 每 5 秒发一次 `Hello`，所以正常的空闲链路不会断；对方断电、VPN 断开时不会有重置，不检查的话 TCP 要很多分钟才发现，这期间状态一直是在线、已同步。
+- 连接迟迟连不上：从开始连接起超过 `unresponsive_after`（默认 10 秒）还没在线（连接线程卡在 NAS 上：等本进程的旧链路放开、等上一个丢弃线程结束、`DirTransport::open`；或者已经连上、对方还没发 `Hello`，比如共享目录的第一次扫描卡住），状态从 `Connecting` 变成 `Unresponsive { since }`，界面应显示"NAS 无响应"之类，不再只是"连接中"。连接线程照样等下去，不超时、不重开（再开一次也是等同一个 NAS），`retry()` 也不做什么；持有 Stage 的线程不受影响，闹钟按时唤醒一次，让只在被唤醒时 `pump` 的应用也看得到。连上或失败后状态照常变化。
 - 共享目录的 I/O 线程卡在一次读写里（NAS 不响应）超过 `io_stall`（默认 5 秒），而有交出去的消息在等（`ThreadedTransport::stalled`，2.6）：`unsynced` 为真，状态仍是 `Online`。不断开：大工程第一次扫描在慢 NAS 上本来就可能很久，断开重连只会从头再扫。
 - 重试间隔（`Backoff`）：从 0.5 秒起，每失败一次翻倍，最长 30 秒；每次随机减去最多 25%（`jitter`），免得同一个 Hub 的客户端同时涌回来。连接保持 10 秒（`stable_after`）以上再断开时，从 0.5 秒重新算。
 - 重连：新的传输 + `SyncSession::reset()`，双方交换 `Hello` 后各自补发对方缺的，离线时的修改就这样上传。自己的在线状态重连后立即重新发布（6.2）。
@@ -432,7 +433,7 @@ closing.wait(超时); // 退出时等关闭完成
   | `NoAccess` | Hub 403：令牌不能打开这个工程 |
   | `NoSuchProject` | Hub 404：工程不存在，令牌也不能新建（只读令牌） |
   | `Refused(状态码)` | 其他 4xx（408、429 除外），例如 400：工程 ID 不合法 |
-  | `ClientIdInUse` | 共享目录里同一个 `ClientId` 已经有会话。本进程里正在放开的同一目录、同一 `ClientId` 的链路（7.2）不算：连接线程先等它放开（NAS 卡住时可能很久，状态一直是 `Connecting`）。其他情况（例如刚退出、还没放开的另一个进程）持续 2 秒以上才算，之前照常重试（每次 `open` 本身也等锁 2 秒，4.7，所以默认设置下大约 4.5 秒才报） |
+  | `ClientIdInUse` | 共享目录里同一个 `ClientId` 已经有会话。本进程里正在放开的同一目录、同一 `ClientId` 的链路（7.2）不算：连接线程先等它放开（NAS 卡住时可能很久，超过 `unresponsive_after` 后状态是 `Unresponsive`）。其他情况（例如刚退出、还没放开的另一个进程）持续 2 秒以上才算，之前照常重试（每次 `open` 本身也等锁 2 秒，4.7，所以默认设置下大约 4.5 秒才报） |
   | `BadTarget` | URL 不能用（不是 `ws://`、没有主机）。启动时就判断，不尝试连接；`retry()` 也不尝试 |
 
   之后只在调用 `retry()` 时，或者每隔 `Backoff::failed_retry`（默认 60 秒；`None` 表示不自动重试）再试一次。`Offline` 时也可以用 `retry()` 跳过等待。其他状态码（5xx、408、429）、连不上、连接被重置都按 `Offline` 处理。
@@ -478,7 +479,7 @@ closing.wait(超时); // 退出时等关闭完成
 - 关闭：最后一次修改被 `min_send_interval` 推迟时也能送到（共享目录 300 ms；Hub 测试里设成 1 秒，去掉 `flush` 就收不到），"离开"立即可见，`Closing` 成功；之后加入 Hub 的人也拿到。Hub 确认关闭这一点由 `tests/hub.rs` 验证（`ThreadedTransport(HubTransport)` 关闭时 20 MiB 的最后一条已经送到）；回环上直接丢弃也能送到，这里区分不出来。
 - 共享目录打开时锁文件被拒（Windows/SMB 上"等待删除"的锁文件，测试钩子模拟）而目录能写：不当成只读，先 `Offline`、重试后可写连上，探测文件不留下；只读连上的目录变成可写后，下一次探测（测试里 100 ms）重新连接，`access` 变成 `Write`，只读期间的修改写进日志；还不能写时链路不动、只连了一次（单元测试）。
 - 共享目录还不存在：按退避重试，出现后加入并写进去。同一个 `ClientId` 已经在用：先照常重试 2 秒，然后 `Failed`、不再自动重试，对方退出后 `retry()` 成功。丢弃或关闭后立即重新分享同一个目录（6 轮）不报冲突；旧链路的 I/O 卡在 NAS 读里超过 2 秒宽限时，新连接等它放开再连上，不报 `ClientIdInUse`（单元测试）。
-- 连接只接受 TCP、永不握手的地址：500 ms 里每次 `pump` 不到 0.1 ms（上限 250 ms），状态一直是 `Connecting`，`close` 也立即返回。连接线程已经做好链路、I/O 线程卡在读里时 `close` 或丢弃，调用线程不等（单元测试）。
+- 连接只接受 TCP、永不握手的地址：500 ms 里每次 `pump` 不到 0.1 ms（上限 250 ms），状态一直是 `Connecting`，`close` 也立即返回。连接线程卡在 NAS 上（等旧链路放开，它的 I/O 卡在读里）：`unresponsive_after`（测试里 300 ms）后只在被唤醒时 `pump` 的应用也被闹钟唤醒，状态变成 `Unresponsive`（`generation` 只加一次），`pump` 照样很快；NAS 恢复后连上，只尝试了一次（单元测试）。连接线程已经做好链路、I/O 线程卡在读里时 `close` 或丢弃，调用线程不等（单元测试）。
 - 收到第一条消息、连接尝试结束时调用 `wake`；只在被唤醒时 `pump` 也能连上。只在被唤醒时 `pump` 的应用：共享目录还不存在时照样按退避重试，出现后连上；拖动的最后一步被 `min_send_interval` 推迟，也由闹钟唤醒发出（去掉闹钟就超时）。收满 `max_messages_per_pump` 的 `pump` 不在调用线程上调用 `wake`。
 - 假 Hub（`tests/connection.rs`，收下 `Hello` 后不再读写）：静默 `hub_idle_timeout`（测试里 500 ms）后 `Offline`，之前发出去的修改算 `unsynced`；挂断时刚交给链路的修改，离线时、以及还没 `pump` 就 `close` 时都在 `unsynced` 里。真实 Hub 上空闲 11 秒（`hub_idle_timeout` 设成 9 秒）链路不断。
 - 共享目录链路的 I/O 卡住时，交出去的修改超过 `io_stall` 后算 `unsynced`，卡住结束后恢复（单元测试）。

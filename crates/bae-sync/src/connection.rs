@@ -210,6 +210,9 @@ pub struct ConnectionConfig {
     /// one read or write (a NAS that does not answer) while they wait count
     /// as unsynced ([`ConnectionStatus::unsynced`]).
     pub io_stall: Duration,
+    /// A connect attempt still not online after this long is reported as
+    /// [`ConnectionState::Unresponsive`] (it keeps waiting).
+    pub unresponsive_after: Duration,
     /// Hubs: timeout of each connect step (TCP connect, handshake).
     #[cfg(feature = "hub")]
     pub hub_timeout: Duration,
@@ -238,6 +241,7 @@ impl ConnectionConfig {
             folder: DirConfig::default(),
             io_tick: None,
             io_stall: Duration::from_secs(5),
+            unresponsive_after: Duration::from_secs(10),
             #[cfg(feature = "hub")]
             hub_timeout: Duration::from_secs(10),
             #[cfg(feature = "hub")]
@@ -286,6 +290,15 @@ pub enum ConnectionState {
     /// A connect attempt is running, or the link is up and the remote has not
     /// said what it has yet.
     Connecting,
+    /// Still connecting after [`ConnectionConfig::unresponsive_after`] (since
+    /// `since`): the shared folder or the hub does not answer, e.g. a NAS
+    /// that hangs while the folder is opened or scanned, or while our
+    /// previous link to it lets go. Show "not responding"; the attempt keeps
+    /// waiting (nothing is lost, local edits stay unsynced), never on the
+    /// thread that pumps, and the state moves on once it is done.
+    /// [`Connection::retry`] does nothing meanwhile (another attempt would
+    /// wait for the same NAS).
+    Unresponsive { since: Instant },
     /// In sync: edits go out and come in as they happen.
     Online { since: Instant },
     /// The link failed; edits stay local. Retries in `retry_in` (counting down
@@ -701,6 +714,10 @@ pub struct Connection {
     /// A shared folder linked read-only: whether it can be written now is
     /// checked every [`Backoff::failed_retry`].
     write_check: WriteCheck,
+    /// When the current connect attempt started.
+    attempt_started: Instant,
+    /// Still connecting after `unresponsive_after` (as of the last pump).
+    unresponsive: bool,
     phase: Phase,
     access: Access,
     /// Failed attempts in a row since the last stable link.
@@ -749,6 +766,8 @@ impl Connection {
             session,
             send_data,
             write_check: WriteCheck::Idle,
+            attempt_started: Instant::now(),
+            unresponsive: false,
             phase: Phase::Closed,
             access: Access::Unknown,
             failures: 0,
@@ -818,6 +837,11 @@ impl Connection {
                 failure: *failure,
                 reason: reason.clone(),
             },
+            Phase::Connecting { .. } | Phase::Linked { since: None, .. } if self.unresponsive => {
+                ConnectionState::Unresponsive {
+                    since: self.attempt_started,
+                }
+            }
             Phase::Connecting { .. } | Phase::Linked { since: None, .. } | Phase::Closed => {
                 ConnectionState::Connecting
             }
@@ -868,6 +892,9 @@ impl Connection {
             self.lost(e, now);
         }
         self.check_writable(now);
+        self.unresponsive = self
+            .connecting_since()
+            .is_some_and(|t| now.saturating_duration_since(t) >= self.config.unresponsive_after);
         self.unsynced = stuck || !self.session.unsynced(docs).is_empty();
         let (changed, presence) = self.refresh(out.presence_changed);
         out.status_changed = changed;
@@ -1058,6 +1085,8 @@ impl Connection {
             return;
         }
         self.attempts += 1;
+        self.attempt_started = now;
+        self.unresponsive = false;
         let worker = Worker {
             client: self.config.client.clone(),
             folder: self.config.folder.clone(),
@@ -1276,6 +1305,9 @@ impl Connection {
                 reason,
                 retry_at,
             } => (3, None, *retry_at, reason.clone(), Some(*failure)),
+            Phase::Connecting { .. } | Phase::Linked { since: None, .. } if self.unresponsive => {
+                (4, Some(self.attempt_started), None, String::new(), None)
+            }
             Phase::Connecting { .. } | Phase::Linked { since: None, .. } | Phase::Closed => {
                 (0, None, None, String::new(), None)
             }
@@ -1306,6 +1338,26 @@ impl Connection {
         (changed || presence_changed, online_changed)
     }
 
+    /// Since when we have been connecting (the attempt runs, or the link is
+    /// up and the remote has not said what it has); `None` otherwise.
+    fn connecting_since(&self) -> Option<Instant> {
+        match self.phase {
+            Phase::Connecting { .. } | Phase::Linked { since: None, .. } => {
+                Some(self.attempt_started)
+            }
+            _ => None,
+        }
+    }
+
+    /// When a connection that is still connecting becomes unresponsive, if
+    /// that is still to come.
+    fn unresponsive_at(&self, now: Instant) -> Option<Instant> {
+        let at = self
+            .connecting_since()?
+            .checked_add(self.config.unresponsive_after)?;
+        (at > now).then_some(at)
+    }
+
     /// Arm the alarm for the next pump that is due on its own.
     fn schedule(&self, now: Instant) {
         let at = match &self.phase {
@@ -1334,11 +1386,17 @@ impl Connection {
                 if let WriteCheck::At(t) = self.write_check {
                     at = at.min(t);
                 }
+                if let Some(t) = self.unresponsive_at(now) {
+                    at = at.min(t);
+                }
                 Some(at)
             }
             Phase::Offline { retry_at, .. } => Some(*retry_at),
             Phase::Failed { retry_at, .. } => *retry_at,
-            Phase::Connecting { .. } | Phase::Closed => None,
+            // The attempt wakes us when it is done, or when it is reported
+            // as unresponsive.
+            Phase::Connecting { .. } => self.unresponsive_at(now),
+            Phase::Closed => None,
         };
         if let Some(at) = at {
             self.alarm.set(at);
@@ -1713,6 +1771,82 @@ mod tests {
             c.pump(&mut docs);
             dir.join("updates/root/upgrade.log").is_file()
         });
+    }
+
+    /// A connect attempt that hangs on the NAS (here: it waits for our old
+    /// link to the folder to let go, whose I/O is stuck in a read) is
+    /// reported as unresponsive after `unresponsive_after`, also to an app
+    /// that pumps only when woken; pumps stay fast; the attempt goes on and
+    /// links once the NAS answers.
+    #[test]
+    fn a_connect_that_hangs_on_the_nas_is_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_owned();
+        let client = ClientId::new("hang").unwrap();
+        let folder = DirConfig {
+            poll_interval: Duration::from_millis(20),
+            watch: false,
+            ..DirConfig::default()
+        };
+        let lock = DirTransport::open(&dir, client.clone(), folder.clone()).unwrap();
+        let (transport, release) = stuck_link(None, Some(lock));
+        let mut old = bare("hang", quiet());
+        old.target = Target::Folder(dir.clone());
+        linked(&mut old, transport);
+        drop(old);
+
+        let woken = Arc::new(AtomicUsize::new(0));
+        let w = woken.clone();
+        let mut config = ConnectionConfig::new(
+            client,
+            Arc::new(move || {
+                w.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        config.folder = folder;
+        config.unresponsive_after = Duration::from_millis(300);
+        let started = Instant::now();
+        let mut c = Connection::start(Target::Folder(dir), config);
+        let mut docs = MemDocs::new();
+        c.pump(&mut docs);
+        assert_eq!(c.status().state, ConnectionState::Connecting);
+        let generation = c.generation();
+        // Pumped only when woken: the alarm wakes us when it is due.
+        wait_for("a wake", || woken.load(Ordering::SeqCst) > 0);
+        let t = Instant::now();
+        let out = c.pump(&mut docs);
+        assert!(
+            t.elapsed() < Duration::from_millis(100),
+            "{:?}",
+            t.elapsed()
+        );
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        assert!(out.status_changed);
+        let state = c.status().state;
+        assert!(
+            matches!(state, ConnectionState::Unresponsive { since } if since >= started),
+            "{state:?}"
+        );
+        // It stays so without new generations while the NAS hangs.
+        let generation_unresponsive = c.generation();
+        assert!(generation_unresponsive > generation);
+        for _ in 0..20 {
+            c.pump(&mut docs);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(c.generation(), generation_unresponsive);
+        assert!(matches!(
+            c.status().state,
+            ConnectionState::Unresponsive { .. }
+        ));
+        assert_eq!(c.connect_attempts(), 1);
+        // The NAS answers: online.
+        drop(release);
+        wait_for("online", || {
+            c.pump(&mut docs);
+            c.is_online()
+        });
+        assert_eq!(c.connect_attempts(), 1);
     }
 
     /// Edits handed to a link whose I/O thread is stuck (a NAS read that
