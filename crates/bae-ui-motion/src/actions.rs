@@ -132,6 +132,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const TRACK_CAMERA: &str = "motion.anim.track_camera";
     pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
@@ -541,6 +542,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
     (ids::TRACK_MOTION, "Track Motion"),
+    (ids::TRACK_CAMERA, "Track Camera"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
@@ -572,6 +574,11 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         ids::PLAY,
         r#"{"preview":"numpad0"}"#,
         "Play/Stop (Numpad 0)",
+    ),
+    (
+        ids::PLAY,
+        r#"{"preview":"shift_numpad0"}"#,
+        "Play/Stop (Shift + Numpad 0)",
     ),
     (
         ids::BLENDING_MODE_STEP,
@@ -1545,6 +1552,13 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::TRACK_CAMERA {
+        let layers = session.lock().selected_layers.clone();
+        if !layers.is_empty() && layers.iter().all(|l| !query::is_locked(stage, l)) {
+            crate::effects::apply(cx, &layers, bae_motion::camera_track::MATCH_NAME);
+        }
+        return true;
+    }
     if id == ids::CACHE_WHEN_IDLE {
         if let Some(store) = cx.resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
             let mut prefs = (*store.current()).clone();
@@ -2043,7 +2057,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if s.is_playing() {
                 s.stop_preview(&info);
             } else {
+                use crate::session::PreviewShortcut;
+                let editing = s.preview.selected;
+                s.preview.selected = match inv.params["preview"].as_str() {
+                    Some("numpad0") => PreviewShortcut::Numpad,
+                    Some("shift_numpad0") => PreviewShortcut::ShiftNumpad,
+                    Some("panel") => editing,
+                    _ => PreviewShortcut::Space,
+                };
                 s.preview(cx, &info);
+                s.preview.selected = editing;
+                // AE: playback neither moves the keyboard focus nor switches
+                // tabs (the timeline's [ ] Delete and marker keys keep working).
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
