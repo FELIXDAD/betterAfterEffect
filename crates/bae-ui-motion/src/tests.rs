@@ -3449,6 +3449,46 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
     assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
+/// A Puppet Position Pin click in the Layer panel adds a pin in layer pixels.
+#[test]
+fn puppet_pins_go_on_in_the_layer_panel() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::PuppetPosition);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = pos2(320.0 + 100.0, 195.0 + 50.0);
+    let mut r = PanelRequests::default();
+    for press in [None, Some(true), Some(false)] {
+        let mut evs = Vec::new();
+        pointer(&mut evs, at, press);
+        let out = h.frame("layer", &mut panel, evs);
+        r.invocations.extend(out.invocations);
+    }
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "puppet.add_pin")
+        .expect("a pin");
+    assert_eq!(inv.params["at"], json!([100.0, 50.0]));
+    h.apply(r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    assert_eq!(bae_motion::puppet::pins_of(&h.stage, &effects[0]).len(), 1);
+}
+
 /// Shift-drag continues the previous Brush stroke; Ctrl/Cmd-drag only sizes
 /// the brush (AE).
 #[test]
@@ -3734,6 +3774,63 @@ fn add_footage_separate_dimensions_and_layer_controls() {
         &h.resources,
         "motion.view.show_layer_controls"
     ));
+}
+
+/// Layer ▸ Reveal ▸ Reveal Layer Source in Project selects the source in the
+/// Project panel; File ▸ Interpret Footage ▸ Remember / Apply Interpretation
+/// copy one item's interpretation to others.
+#[test]
+fn reveal_in_project_and_remember_interpretation() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (_, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::REVEAL_SOURCE_IN_PROJECT));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    assert_eq!(h.session().lock().reveal_in_project, Some(item.clone()));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    assert_eq!(h.session().lock().selected_items, vec![item]);
+    assert!(h.session().lock().reveal_in_project.is_none());
+
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<_> = ["a.mov", "b.mov"]
+        .iter()
+        .map(|n| {
+            let p = dir.path().join(n);
+            std::fs::write(&p, b"clip").unwrap();
+            json!({"path": p})
+        })
+        .collect();
+    let out = h.run("item.import", json!({ "files": files }));
+    let items: Vec<PrimPath> = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| PrimPath::new(v.as_str().unwrap()).unwrap())
+        .collect();
+    h.run(
+        "footage.interpret",
+        json!({"items": [items[0]], "alpha_mode": "premultiplied", "loop_count": 3}),
+    );
+    h.session().lock().selected_items = vec![items[0].clone()];
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::REMEMBER_INTERPRETATION))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().selected_items = vec![items[1].clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::APPLY_INTERPRETATION));
+    assert_eq!(r.invocations[0].id, "footage.interpret");
+    let p = &r.invocations[0].params;
+    assert_eq!(p["items"], json!([items[1]]));
+    assert_eq!(
+        (p["alpha_mode"].as_str(), p["loop_count"].as_i64()),
+        (Some("premultiplied"), Some(3))
+    );
 }
 
 /// Composition ▸ Crop Comp to Selected Layer(s) Bounds and Region of Interest;

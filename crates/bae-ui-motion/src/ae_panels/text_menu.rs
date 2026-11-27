@@ -6,7 +6,9 @@ use std::ops::Range;
 use super::character::Gesture;
 use crate::common;
 use crate::session::Scrub;
-use bae_model::{BaselineOption, PrimPath, TextDocument, TextJoin, Time, Value as ModelValue};
+use bae_model::{
+    BaselineDirection, BaselineOption, PrimPath, TextDocument, TextJoin, Time, Value as ModelValue,
+};
 use bae_motion::{
     query,
     text::{DEFAULT_FONT, DEFAULT_SIZE, SOURCE},
@@ -152,8 +154,8 @@ const CHARACTER: &[(&str, &str)] = &[
     ("faux_bold", "Faux Bold"),
     ("faux_italic", "Faux Italic"),
     ("", ""),
-    ("vertical", "Standard Vertical Roman Alignment"),
-    ("vertical", "Tate-Chuu-Yoko"),
+    ("upright_roman", "Standard Vertical Roman Alignment"),
+    ("tate_chu_yoko", "Tate-Chuu-Yoko"),
     ("", ""),
     ("all_caps", "All Caps"),
     ("small_caps", "Small Caps"),
@@ -190,8 +192,14 @@ const PARAGRAPH: &[(&str, &str)] = &[
 /// mixed over the selection).
 fn state(key: &str, sel: &common::SelectedStyles<'_>, smart: bool) -> (bool, Option<bool>) {
     let checked = match key {
-        // Vertical text and localized font names are not done yet.
-        "vertical" | "font_names" => return (false, None),
+        // Localized font names are not done yet.
+        "font_names" => return (false, None),
+        "upright_roman" => {
+            sel.character(|s| s.baseline_direction == BaselineDirection::UprightRoman)
+        }
+        "tate_chu_yoko" => {
+            sel.character(|s| s.baseline_direction == BaselineDirection::TateChuYoko)
+        }
         "faux_bold" => sel.character(|s| s.faux_bold),
         "faux_italic" => sel.character(|s| s.faux_italic),
         "all_caps" => sel.character(|s| s.all_caps),
@@ -222,6 +230,14 @@ fn change(key: &str, checked: bool) -> Value {
                 BaselineOption::Subscript
             };
             json!({ "baseline_option": if checked { BaselineOption::Normal } else { on } })
+        }
+        "upright_roman" | "tate_chu_yoko" => {
+            let on = if key == "upright_roman" {
+                BaselineDirection::UprightRoman
+            } else {
+                BaselineDirection::TateChuYoko
+            };
+            json!({ "baseline_direction": if checked { BaselineDirection::Default } else { on } })
         }
         "top_leading" | "bottom_leading" => json!({ "top_leading": key == "top_leading" }),
         "single_line" | "every_line" => json!({ "every_line": key == "every_line" }),
@@ -294,7 +310,11 @@ mod tests {
             .map(|&(k, _)| state(k, &sel, true))
             .collect();
         assert_eq!(CHARACTER.len(), 22);
-        assert_eq!(rows[3], (false, None), "vertical text greyed");
+        assert_eq!(rows[4], (true, Some(false)), "Tate-Chuu-Yoko off");
+        assert_eq!(
+            change("tate_chu_yoko", false),
+            json!({"baseline_direction": "tate_chu_yoko"})
+        );
         assert_eq!(rows[8], (true, Some(true)), "Superscript checked");
         assert_eq!(rows[16], (true, Some(true)), "smart quotes on");
         assert_eq!(PARAGRAPH.len(), 9);

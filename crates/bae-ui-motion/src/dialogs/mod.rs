@@ -10,7 +10,7 @@ mod comp_from_selection;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
-mod interpret_footage;
+pub(crate) mod interpret_footage;
 mod layer_time;
 mod light_settings;
 mod mask_value;

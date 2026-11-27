@@ -155,6 +155,23 @@ pub struct Lighting {
     /// Its receiver-space shadow map ([`crate::graph::ShadowMapNode`]): lit
     /// draws sample it instead of testing the casters.
     pub shadow_map: Option<crate::graph::NodeId>,
+    /// 3D models of its group that cast shadows on it (drawn into its shadow
+    /// map only: a layer with model casters always uses the map).
+    pub models: Arc<[ModelCaster]>,
+}
+
+/// A 3D model layer casting shadows on a lit layer.
+#[derive(Clone, Debug)]
+pub struct ModelCaster {
+    pub model: Arc<crate::model::Model>,
+    /// Model space → comp space.
+    pub matrix: DMat4,
+}
+
+impl PartialEq for ModelCaster {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.model, &other.model) && self.matrix == other.matrix
+    }
 }
 
 /// Largest side of a shadow map slot, in texels.
@@ -334,11 +351,12 @@ impl Lighting {
                 l.falloff_distance,
                 map_h as f32,
             ]);
-            let darkness = if l.casts_shadows && !self.casters.is_empty() {
-                l.shadow_darkness.clamp(0.0, 100.0) / 100.0
-            } else {
-                0.0
-            };
+            let darkness =
+                if l.casts_shadows && !(self.casters.is_empty() && self.models.is_empty()) {
+                    l.shadow_darkness.clamp(0.0, 100.0) / 100.0
+                } else {
+                    0.0
+                };
             // z: the light's shadow map slot (−1: test the casters), w: the
             // slot width in texels (the height is in the previous row's w).
             out.push([darkness, l.shadow_diffusion.max(0.0), slot, map_w as f32]);

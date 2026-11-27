@@ -25,29 +25,48 @@ static FONTS: std::sync::OnceLock<std::sync::Mutex<bae_text::FontSystem>> =
     std::sync::OnceLock::new();
 
 /// Starts scanning the installed fonts on a background thread (at startup,
-/// before the Character panel first needs them).
-/// The font menu indexes the families on the same font system afterwards.
+/// before the Character panel first needs them). The font menu then indexes
+/// the families on the same font system.
 pub(crate) fn prewarm() {
-    static START: std::sync::Once = std::sync::Once::new();
-    START.call_once(|| {
+    crate::render::vertical_text::start_worker(|| {
+        let fonts = FONTS.get_or_init(|| {
+            let mut fonts = bae_text::FontSystem::new();
+            bae_text::layout_text(&mut fonts, &bae_text::layout::vertical_warmup_document());
+            std::sync::Mutex::new(fonts)
+        });
+        // Its own thread: it goes on drawing sample pages on request.
         let spawned = std::thread::Builder::new()
-            .name("bae-font-scan".into())
-            .spawn(|| {
-                let fonts =
-                    FONTS.get_or_init(|| std::sync::Mutex::new(bae_text::FontSystem::new()));
+            .name("bae-font-menu".into())
+            .spawn(move || {
                 bae_gpu::warm_up::lower_priority();
                 font_menu::index(fonts);
             });
         if let Err(error) = spawned {
-            tracing::warn!(%error, "could not start the font scan");
+            tracing::warn!(%error, "could not start the font menu index");
         }
     });
 }
 
 /// Use the warmed font collection for a pointer hit without waiting for a font scan.
 pub(crate) fn hit_layout(doc: &TextDocument) -> Option<bae_text::TextLayout> {
+    // The viewer asks every frame (bounds, hit tests, the vertical preview):
+    // the last few layouts are kept.
+    static RECENT: std::sync::Mutex<Vec<(TextDocument, bae_text::TextLayout)>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(i) = recent.iter().position(|(d, _)| d == doc) {
+        let hit = recent.remove(i);
+        let layout = hit.1.clone();
+        recent.push(hit);
+        return Some(layout);
+    }
     let mut fonts = FONTS.get()?.try_lock().ok()?;
-    Some(bae_text::layout_text(&mut fonts, doc))
+    let layout = bae_text::layout_text(&mut fonts, doc);
+    if recent.len() >= 16 {
+        recent.remove(0);
+    }
+    recent.push((doc.clone(), layout.clone()));
+    Some(layout)
 }
 
 /// AE's size and leading presets (px).

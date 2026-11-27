@@ -29,11 +29,8 @@ impl TimelinePanel {
                 cx.invoke(ids::COMP_SETTINGS);
                 ui.close();
             }
-            if ui.button(tr("Reveal Composition in Project")).clicked()
-                && let Some(info) = &comp
-            {
-                session.lock().selected_items = vec![info.path.clone()];
-                cx.open_panel("project");
+            if ui.button(tr("Reveal Composition in Project")).clicked() {
+                cx.invoke(crate::actions::ids::REVEAL_COMP_IN_PROJECT);
                 ui.close();
             }
         });
