@@ -852,6 +852,18 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Transparency", "透明度"),
     ("Transparency Rolloff", "透明度衰减"),
     ("Index of Refraction", "折射率"),
+    // Advanced 3D Geometry Options.
+    ("Geometry Options", "几何选项"),
+    ("Bevel Style", "斜面样式"),
+    ("Bevel Direction", "斜面方向"),
+    ("Bevel Depth", "斜面深度"),
+    ("Hole Bevel Depth", "洞斜面深度"),
+    ("Extrusion Depth", "凸出深度"),
+    ("Angular", "尖角"),
+    ("Concave", "凹面"),
+    ("Convex", "凸面"),
+    ("Outward", "向外"),
+    ("Inward", "向内"),
     // Environment light (AE 26's zh terms).
     ("Source", "源"),
     ("Background Visible", "背景可见"),

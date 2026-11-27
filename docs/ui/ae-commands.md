@@ -78,12 +78,12 @@
 | Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ✅ |
 | New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ✅ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
-| Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ⏸ |
-| Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ⏸ |
-| Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ⏸ |
-| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ⏸ |
-| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ⏸ |
-| Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ⏸ |
+| Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ✅ |
+| Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ✅ |
+| Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ✅ |
+| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ✅ |
+| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ✅ |
+| Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ✅ |
 | Watch Folder... | 131099 | `motion.file.watch_folder` |  |  |  | B | Ⓐ |
 | Scripts ▸ Run Script File... | 917505 | `motion.file.run_script_file` |  |  |  | B | ⏸ |
 | Scripts ▸ Install Script File... | 917506 | `motion.file.install_script_file` |  |  |  | B | ⏸ |
@@ -111,8 +111,8 @@
 | Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ✅ |
 | Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
-| Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
-| Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ⏸ |
+| Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ✅ |
+| Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ✅ |
 | Reload Footage | 131107 | `motion.file.reload_footage` |  | Ctrl+Alt+L | Cmd+Opt+L | E | ✅ |
 | License... | 131108 | `motion.file.license` |  |  |  | B | Ⓐ |
 | Reveal in Explorer | 131109 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
@@ -275,13 +275,13 @@
 | Mask ▸ Unlock All Masks | 8519698 | `motion.layer.unlock_all_masks` |  |  |  | B | ✅ |
 | Mask ▸ Lock Other Masks | 8519699 | `motion.layer.lock_other_masks` |  |  |  | B | ✅ |
 | Mask ▸ Hide Locked Masks | 8519700 | `motion.layer.hide_locked_masks` |  |  |  | B | ⏸ |
-| Mask and Shape Path ▸ RotoBezier | 11010049 | `motion.layer.rotobezier` |  |  |  | A | ☐ |
-| Mask and Shape Path ▸ Closed | 11010050 | `motion.layer.path_closed` |  |  |  | A | ☐ |
-| Mask and Shape Path ▸ Convert To Bezier Path | 11010052 | `motion.layer.convert_to_bezier_path` |  |  |  | A | ☐ |
-| Mask and Shape Path ▸ Group Shapes | 11010054 | `motion.layer.group_shapes` |  | Ctrl+G | Cmd+G | A | ☐ |
-| Mask and Shape Path ▸ Ungroup Shapes | 11010055 | `motion.layer.ungroup_shapes` |  | Ctrl+Shift+G | Cmd+Shift+G | A | ☐ |
-| Mask and Shape Path ▸ Set First Vertex | 11010057 | `motion.layer.set_first_vertex` |  |  |  | A | ☐ |
-| Mask and Shape Path ▸ Free Transform Points | 11010059 | `motion.layer.free_transform_points` |  | Ctrl+T | Cmd+T | A | ☐ |
+| Mask and Shape Path ▸ RotoBezier | 11010049 | `motion.layer.rotobezier` |  |  |  | A | ✅ |
+| Mask and Shape Path ▸ Closed | 11010050 | `motion.layer.path_closed` |  |  |  | A | ✅ |
+| Mask and Shape Path ▸ Convert To Bezier Path | 11010052 | `motion.layer.convert_to_bezier_path` |  |  |  | A | ✅ |
+| Mask and Shape Path ▸ Group Shapes | 11010054 | `motion.layer.group_shapes` |  | Ctrl+G | Cmd+G | A | ✅ |
+| Mask and Shape Path ▸ Ungroup Shapes | 11010055 | `motion.layer.ungroup_shapes` |  | Ctrl+Shift+G | Cmd+Shift+G | A | ✅ |
+| Mask and Shape Path ▸ Set First Vertex | 11010057 | `motion.layer.set_first_vertex` |  |  |  | A | ✅ |
+| Mask and Shape Path ▸ Free Transform Points | 11010059 | `motion.layer.free_transform_points` |  | Ctrl+T | Cmd+T | A | ✅ |
 | Quality ▸ Best | 8585217 | `motion.layer.quality` | `{"quality":"best"}` | Ctrl+U | Cmd+U | B | ✅ |
 | Quality ▸ Draft | 8585218 | `motion.layer.quality` | `{"quality":"draft"}` | Ctrl+Shift+U | Cmd+Shift+U | B | ✅ |
 | Quality ▸ Wireframe | 8585219 | `motion.layer.quality` | `{"quality":"wireframe"}` | Ctrl+Alt+Shift+U | Cmd+Opt+Shift+U | B | ☐ |
@@ -490,7 +490,7 @@
 | Remove All Text Animators | 851984 | `motion.anim.remove_all_text_animators` |  |  |  | A | ✅ |
 | Add Expression | 851986 | `motion.anim.add_expression` |  | Alt+Shift+= | Opt+Shift+= | C | ☐ |
 | Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ✅ |
-| Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
+| Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ✅ |
 | Warp Stabilizer VFX | 851989 | `motion.anim.warp_stabilizer_vfx` |  |  |  | B | ⏸ |
 | Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ✅ |
 | Track Mask | 851991 | `motion.anim.track_mask` |  |  |  | B | ⏸ |
@@ -645,7 +645,7 @@
 | Effect Reference... | 720904 | `motion.help.effect_reference` |  |  |  | B | ⏸ |
 | Animation Presets... | 720905 | `motion.help.animation_presets` |  |  |  | B | ⏸ |
 | Keyboard Shortcuts... | 720906 | `motion.help.keyboard_shortcuts` |  |  |  | B | ☐ |
-| System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ⏸ |
+| System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ✅ |
 | Enable Logging | 720909 | `motion.help.enable_logging` |  |  |  | B | ✅ |
 | Reveal Logging File | 720910 | `motion.help.reveal_logging_file` |  |  |  | B | ✅ |
 | Online User Forums... | 720912 | `motion.help.online_user_forums` |  |  |  | B | ⏸ |

@@ -427,6 +427,18 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        actions::ids::TRACK_CAMERA => spec.enabled_when(|cx| {
+            let session = common::session(cx.resources);
+            let s = session.lock();
+            !s.selected_layers.is_empty()
+                && s.selected_layers.iter().all(|l| {
+                    !bae_motion::query::is_locked(cx.stage, l)
+                        && matches!(
+                            bae_motion::query::layer_kind(cx.stage, l).as_deref(),
+                            Some("footage" | "solid" | "pre_comp" | "shape" | "text")
+                        )
+                })
+        }),
         actions::ids::CACHE_WHEN_IDLE => spec.checked_when(|cx| {
             crate::prefs::current(cx.resources).bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
         }),
@@ -477,6 +489,19 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
         }
 
+        crate::path_menu::ROTOBEZIER => spec
+            .enabled_when(crate::path_menu::any_target)
+            .checked_when(crate::path_menu::all_roto),
+        crate::path_menu::CLOSED => spec
+            .enabled_when(crate::path_menu::any_open)
+            .checked_when(crate::path_menu::all_closed),
+        crate::path_menu::SET_FIRST_VERTEX => spec.enabled_when(crate::path_menu::one_vertex),
+        crate::path_menu::CONVERT => spec.enabled_when(crate::path_menu::can_convert),
+        crate::tools::ids::FREE_TRANSFORM => {
+            spec.enabled_when(|cx| crate::path_menu::can_free_transform(cx.stage, cx.resources))
+        }
+        crate::path_menu::GROUP => spec.enabled_when(crate::path_menu::can_group),
+        crate::path_menu::UNGROUP => spec.enabled_when(crate::path_menu::can_ungroup),
         crate::viewer::view3d::ids::LAYOUT => {
             let n = item
                 .params

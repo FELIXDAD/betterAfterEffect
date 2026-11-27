@@ -361,6 +361,7 @@ pub(crate) fn execute(
                 };
                 ctx.composite(
                     &mut encoder,
+                    graph,
                     node,
                     c,
                     &target,
@@ -606,7 +607,7 @@ pub(crate) fn execute(
                     // Packed in layer pixels; the hardest edge a layer pixel or
                     // a map texel wide (the map does not depend on the camera).
                     let mut record = Vec::new();
-                    l.pack(&glam::DAffine2::IDENTITY, 1.0, &uv, false, &mut record);
+                    l.pack(&glam::DAffine2::IDENTITY, 1.0, &uv, false, 0, &mut record);
                     let (k, [w, h]) = l.shadow_map_size();
                     let edge = k.max(1.0) * l.matrix.x_axis.truncate().length();
                     record[4][3] = -(edge as f32);
@@ -922,6 +923,7 @@ impl ExecCtx<'_> {
     fn composite(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
+        graph: &RenderGraph,
         node: &Node,
         c: &CompositeNode,
         target: &GpuImage,
@@ -948,6 +950,24 @@ impl ExecCtx<'_> {
                 kind = BlendKind::Normal;
                 backdrop = false;
             }
+            // Reflecting layers: the environment picture's maps (built once).
+            let env_map = match op.lighting.as_ref().and_then(|l| l.reflection) {
+                Some(r) => {
+                    let e = &r.environment;
+                    let mesh = self.pipelines.mesh();
+                    let mut mesh = mesh.lock();
+                    mesh.get_or_insert_with(|| mesh::MeshPipelines::new(device))
+                        .env_map(
+                            device,
+                            encoder,
+                            graph.nodes[e.input.index()].key,
+                            outputs[e.input.index()].as_ref(),
+                            e.width,
+                            r.linear,
+                        )
+                }
+                None => None,
+            };
             let Some(mut data) = plan_op(
                 node,
                 op,
@@ -958,6 +978,7 @@ impl ExecCtx<'_> {
                 &mut lighting,
                 atlas,
                 &self.skipped_maps,
+                env_map.as_ref().map_or(0, |m| m.levels),
             )?
             else {
                 continue;
@@ -1048,11 +1069,13 @@ impl ExecCtx<'_> {
                     .filter(|_| op.lighting.as_ref().is_some_and(|l| !l.casters.is_empty()))
                     .map(|(image, _)| &image.view),
             };
+            let env_view = env_map.as_ref().map(|m| &m.view);
             let textures = if src_view.is_none()
                 && matte_view.is_none()
                 && dst_view.is_none()
                 && mask_view.is_none()
                 && shadow_view.is_none()
+                && env_view.is_none()
             {
                 None
             } else {
@@ -1063,6 +1086,7 @@ impl ExecCtx<'_> {
                     dst_view,
                     mask_view,
                     shadow_view,
+                    env_view,
                 ))
             };
             let bounds = if op.blend.is_stencil() {
@@ -1418,6 +1442,7 @@ fn plan_op(
     lighting: &mut Vec<[f32; 4]>,
     atlas: Option<&ShadowAtlas>,
     skipped_maps: &rustc_hash::FxHashSet<NodeId>,
+    reflection_levels: u32,
 ) -> Result<Option<DrawData>, RenderError> {
     // Composite texel → … : target texel = comp px / scale − rect origin.
     let to_target = DAffine2::from_translation(DVec2::new(
@@ -1531,12 +1556,26 @@ fn plan_op(
                     samples: std::sync::Arc::new([]),
                     ..(**l).clone()
                 };
-                at.pack(&from_texel, node.pixel_scale, &map, false, lighting);
+                at.pack(
+                    &from_texel,
+                    node.pixel_scale,
+                    &map,
+                    false,
+                    reflection_levels,
+                    lighting,
+                );
             }
             data.mode[1] |= flags::LIT_SAMPLES;
         } else {
             let use_map = l.shadow_map.is_some_and(|id| !skipped_maps.contains(&id));
-            data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, use_map, lighting);
+            data.extra[3] = l.pack(
+                &from_texel,
+                node.pixel_scale,
+                &map,
+                use_map,
+                reflection_levels,
+                lighting,
+            );
         }
         data.mode[1] |= flags::LIT;
     }
