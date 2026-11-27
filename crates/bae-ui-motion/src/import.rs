@@ -25,7 +25,7 @@ use serde_json::json;
 
 use crate::session::SharedSession;
 
-fn formats() -> &'static MediaFormats {
+pub(crate) fn formats() -> &'static MediaFormats {
     static FORMATS: OnceLock<MediaFormats> = OnceLock::new();
     FORMATS.get_or_init(MediaFormats::builtin)
 }
@@ -177,6 +177,7 @@ fn probe_file(
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v))
                 .collect();
+            crate::progress_metadata::import_xmp(path, &mut attrs);
             use bae_media::MediaKind;
             if info.timecode.is_none() && info.video.as_ref().and_then(|v| v.frame_rate).is_some_and(bae_media::time::is_ntsc) {
                 attrs.insert("timecode:drop_frame".into(), bae_model::Value::Bool(defaults.ntsc_drop_frame));

@@ -361,12 +361,21 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::PreComp | LayerKind::Footage | LayerKind::Audio => {
-                let src = p.source.clone().expect("checked above");
+                let src = p.source.as_ref().expect("checked above");
                 let (size, duration) = source_info.expect("checked above");
-                set(tx, &path, "source", Value::PrimRef(src))?;
+                set(tx, &path, "source", Value::PrimRef(src.clone()))?;
                 anchor = [size[0] / 2.0, size[1] / 2.0];
                 if let Some(d) = duration {
-                    set(tx, &path, "out_point", Value::Time(start + d))?;
+                    let (first, end) = if matches!(kind, LayerKind::Footage | LayerKind::Audio) {
+                        query::footage_range(tx.stage(), src, d)
+                    } else {
+                        (Time::ZERO, d)
+                    };
+                    if first != Time::ZERO {
+                        set(tx, &path, "start_time", Value::Time(start - first))?;
+                        set(tx, &path, "in_point", Value::Time(start))?;
+                    }
+                    set(tx, &path, "out_point", Value::Time(start + (end - first)))?;
                 }
             }
             LayerKind::Null => {
