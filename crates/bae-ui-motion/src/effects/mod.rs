@@ -218,12 +218,55 @@ pub(crate) struct EffectDrag(pub String);
 /// The match name of the last applied effect (Effect ▸ Last Effect).
 static LAST: Mutex<Option<String>> = Mutex::new(None);
 
-/// Applies `match_name` to `layers` (one undo step) and remembers it for
-/// Effect ▸ Last Effect.
+/// The layers of `layers` that can take an effect (AE: not lights or
+/// cameras; audio layers only audio effects), and whether a light or camera
+/// was left out.
+fn applicable(cx: &PanelContext<'_>, layers: &[PrimPath], audio: bool) -> (Vec<PrimPath>, bool) {
+    let mut refused = false;
+    let layers = layers
+        .iter()
+        .filter(
+            |l| match bae_motion::query::layer_kind(cx.stage, l).as_deref() {
+                Some("camera" | "light") => {
+                    refused = true;
+                    false
+                }
+                Some("audio") => audio,
+                _ => true,
+            },
+        )
+        .cloned()
+        .collect();
+    (layers, refused)
+}
+
+/// Whether `match_name` is an audio effect (the only kind audio layers take).
+fn is_audio(cx: &PanelContext<'_>, match_name: &str) -> bool {
+    registries(cx.resources)
+        .and_then(|r| r.def(match_name))
+        .is_some_and(|d| d.category == "Audio")
+}
+
+/// AE's message when an effect only met lights and cameras.
+pub(crate) fn refuse_lights_and_cameras(cx: &PanelContext<'_>) {
+    crate::dialogs::alert(
+        cx,
+        bae_ui::tr("Effect"),
+        bae_ui::tr("Effects cannot be applied to lights or cameras.").to_owned(),
+    );
+}
+
+/// Applies `match_name` to the `layers` that can take it (one undo step) and
+/// remembers it for Effect ▸ Last Effect.
 pub(crate) fn apply(cx: &mut PanelContext<'_>, layers: &[PrimPath], match_name: &str) {
+    let (layers, refused) = applicable(cx, layers, is_audio(cx, match_name));
     if layers.is_empty() {
+        if refused {
+            refuse_lights_and_cameras(cx);
+        }
         return;
     }
+    let layers = layers.as_slice();
     // AE selects the applied effect (its point controls show in the viewer).
     let before = layers
         .iter()
@@ -247,7 +290,8 @@ pub(crate) fn apply(cx: &mut PanelContext<'_>, layers: &[PrimPath], match_name: 
     *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(match_name.to_owned());
 }
 
-fn selected_layers(cx: &PanelContext<'_>) -> Vec<PrimPath> {
+/// The selected layers of the active composition.
+pub(crate) fn selected_layers(cx: &PanelContext<'_>) -> Vec<PrimPath> {
     let session = common::session(cx.resources);
     if common::active_comp(cx.stage, &session).is_none() {
         return Vec::new();

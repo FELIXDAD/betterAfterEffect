@@ -24,6 +24,8 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 mod camera_tool;
+mod camera_tracks;
+pub(crate) use camera_tracks::ZH as TRACKER_ZH;
 pub(crate) mod display;
 mod effect_points;
 pub(crate) mod errors;
@@ -309,6 +311,7 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    camera_tracks: camera_tracks::Selection,
     /// Puppet tools: the pin being dragged.
     puppet: puppet_tool::PuppetState,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
@@ -841,6 +844,9 @@ impl Panel for CompositionViewer {
                 self.puppet.delete_selected(cx);
                 true
             }
+            crate::actions::ids::DELETE if self.camera_tracks.has_selection() => {
+                self.camera_tracks.delete_selected(cx)
+            }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
                     self.delete_vertices(cx, &session, &info);
@@ -1333,7 +1339,7 @@ impl Panel for CompositionViewer {
         if playback.is_some() && self.gpu.is_some() && !editing {
             self.on_gpu = completed.is_some();
             if let Some(image) = completed {
-                paint_image(&clip, &view, image);
+                paint_image(&clip, &view, image, cx.resources, true);
             }
             if fullscreen {
                 return;
@@ -1470,6 +1476,14 @@ impl Panel for CompositionViewer {
             g.display = self.display.render();
             g.roi = self.display.roi();
         }
+        // Display colour management for every preview (stills, playback,
+        // value drags).
+        let options = session.lock().view_options;
+        crate::display_color::update(
+            cx.stage,
+            options.display_color_management,
+            options.simulate_output,
+        );
         let frame_nr = ui.ctx().cumulative_frame_nr();
         let measure = session
             .lock()
@@ -1593,7 +1607,7 @@ impl Panel for CompositionViewer {
         }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
         if let Some(img) = image {
-            paint_image(&clip, &view, img);
+            paint_image(&clip, &view, img, cx.resources, false);
             // Until 05's text source is registered, text layers are drawn here.
             let has_text = cx
                 .resources
@@ -1871,6 +1885,9 @@ impl Panel for CompositionViewer {
             &painter,
         );
         // Effect point controls: a press on a crosshair is theirs.
+        let tracks = self.camera_tracks.frame(
+            ui, &resp, cx, &session, &comp, &view, time, &painter, effective,
+        );
         let points = effect_points::frame(
             &mut self.effect_points,
             ui,
@@ -1934,10 +1951,12 @@ impl Panel for CompositionViewer {
             area,
             rulers,
             &opts,
-            effective == Tool::Selection && !path.owns && !points.owns,
+            effective == Tool::Selection && !path.owns && !points.owns && !tracks,
         );
         let select_cursor = if puppet.owns {
             puppet.cursor
+        } else if tracks {
+            Some(egui::CursorIcon::Crosshair)
         } else if points.owns {
             points.cursor
         } else if path.owns || sketching || guide_busy {
@@ -1998,16 +2017,18 @@ impl Panel for CompositionViewer {
                 }
             }
         }
-        menu::frame(
-            &mut self.menu_layers,
-            self.menu_key.as_ref(),
-            &resp,
-            cx,
-            &session,
-            &comp,
-            &view,
-            self.type_tool.editing.is_some(),
-        );
+        if !tracks {
+            menu::frame(
+                &mut self.menu_layers,
+                self.menu_key.as_ref(),
+                &resp,
+                cx,
+                &session,
+                &comp,
+                &view,
+                self.type_tool.editing.is_some(),
+            );
+        }
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
@@ -2104,7 +2125,31 @@ pub(crate) fn look_at_enabled(resources: &bae_app::Resources, all: bool) -> bool
     look_at::enabled(resources, all)
 }
 
-fn paint_image(clip: &egui::Painter, view: &View, img: crate::gpu_preview::PreviewImage) {
+fn paint_image(
+    clip: &egui::Painter,
+    view: &View,
+    img: crate::gpu_preview::PreviewImage,
+    resources: &bae_app::Resources,
+    playing: bool,
+) {
+    let prefs = crate::prefs::current(resources);
+    let fast = match prefs.str("previews.zoom_quality") {
+        "faster" => true,
+        "more_accurate_except_ram_preview" => playing,
+        _ => false,
+    };
+    if let Some(registry) =
+        resources.get::<std::sync::Arc<bae_gpu::viewport::ViewportTextureRegistry>>()
+    {
+        registry.set_filter(
+            img.viewport,
+            if fast {
+                bae_gpu::wgpu::FilterMode::Nearest
+            } else {
+                bae_gpu::wgpu::FilterMode::Linear
+            },
+        );
+    }
     let r = img.rect;
     let rect = Rect::from_min_max(
         view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),

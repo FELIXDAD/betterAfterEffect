@@ -48,6 +48,11 @@ fn fs_out(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             c = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
     }
+    // Viewer display colour management (display_color.rs; the plain
+    // pipeline's hook returns the values as they are): RGB views only.
+    if ch == 0u || ch == 5u {
+        c = display_color(c);
+    }
     if params.mode.y == 0u {
         c = vec4<f32>(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(c.a)), c.a);
     }

@@ -356,7 +356,7 @@ pub const KEYS: &[Key] = &[
     k("CPanoProjFootage", "TimeTrimOut", "Alt+]", "motion.trim_out", "", B, Done, 0),
     k("CPanoProjItem", "FitItemView", "Shift+/", "viewer.fit", "", A, Done, 0),
     k("CPanoProjItem", "FitItemViewUpTo100", "Alt+/", "motion.viewer.fit_up_to_100", "", A, Done, 0),
-    k("CPanoProjItem", "ProofColors", "Shift+PadSlash|macControl+Alt+/", "motion.view.use_display_color_management", "", B, Later, 0),
+    k("CPanoProjItem", "ProofColors", "Shift+PadSlash|macControl+Alt+/", "motion.view.use_display_color_management", "", B, Done, 0),
     k("CPanoProjItem", "SelectNextMask", "Alt+`", "motion.layer.select_next_mask", "", A, Later, 0),
     k("CPanoProjItem", "SelectPreviousMask", "Alt+Shift+`", "motion.layer.select_previous_mask", "", A, Later, 0),
     k("CPanoProjItem", "Zoom100Percent", "/", "motion.viewer.zoom_100", "", A, Todo, 0),
