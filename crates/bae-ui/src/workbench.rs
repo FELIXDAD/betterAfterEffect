@@ -875,7 +875,7 @@ impl Workbench {
         for (i, (icon, name)) in AE_TOOLS.into_iter().enumerate() {
             let selected = i == self.tool;
             // One tool is active at a time: radio buttons.
-            let resp = icons::button(&mut tools, icon, 24.0, selected).labeled_toggle(
+            let resp = icons::tool_button(&mut tools, icon, 24.0, selected).labeled_toggle(
                 egui::WidgetType::RadioButton,
                 tr(name),
                 selected,

@@ -4130,3 +4130,80 @@ fn find_missing_effects_lists_the_comps_using_them() {
     assert!(shown.contains(&comp), "{shown:?}");
     assert!(!shown.contains(&other), "{shown:?}");
 }
+
+/// Previews draw an item's proxy that is on, at the item's size; renders
+/// (no proxies by default), a proxy that is off or whose file is gone use the
+/// original.
+#[test]
+fn previews_draw_proxies_at_the_item_size() {
+    use bae_render::{AnimEvaluator, CompEvaluator, LayerContent, ProxyUse, RenderPurpose};
+    let mut h = Harness::new();
+    let dir = tempfile::tempdir().unwrap();
+    let (clip, small) = (dir.path().join("clip.mov"), dir.path().join("small.mov"));
+    std::fs::write(&clip, b"clip").unwrap();
+    std::fs::write(&small, b"proxy").unwrap();
+    let out = h.run(
+        "item.import",
+        json!({"files": [{"path": clip, "attrs": {
+            "width": {"type": "int", "value": 1920}, "height": {"type": "int", "value": 1080}}}]}),
+    );
+    let item = PrimPath::new(out["items"][0].as_str().unwrap()).unwrap();
+    let comp = PrimPath::new(
+        h.run("comp.create", json!({"width": 1920, "height": 1080}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.run(
+        "layer.create",
+        json!({"comp": comp, "kind": "footage", "source": item}),
+    );
+    h.run(
+        "item.set_proxy",
+        json!({"items": [item], "file": {"path": small}}),
+    );
+    let footage = |eval: &mut AnimEvaluator, stage: &bae_model::Stage| {
+        let rc = eval.evaluate(stage, &comp, bae_model::Time::ZERO).unwrap();
+        match &rc.layers[0].content {
+            LayerContent::Footage(f) => (f.file.clone(), f.proxy_of.is_some(), f.size),
+            other => panic!("{other:?}"),
+        }
+    };
+    let mut preview = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+    let (file, scaled, size) = footage(&mut preview, &h.stage);
+    assert_eq!(
+        file.as_deref().and_then(|f| f.file_name()),
+        small.file_name()
+    );
+    assert!(scaled);
+    assert_eq!(size, Some([1920, 1080]), "drawn at the item's size");
+    // Cached frames drawn with the proxy depend on the item: turning its proxy
+    // off (an attribute of the item) redraws them.
+    let rc = preview
+        .evaluate(&h.stage, &comp, bae_model::Time::ZERO)
+        .unwrap();
+    assert!(rc.dependencies().iter().any(|d| d.path == item));
+    let mut render = AnimEvaluator::new(None);
+    assert!(
+        !footage(&mut render, &h.stage).1,
+        "renders use no proxies by default"
+    );
+    render.set_proxy_use(ProxyUse::All);
+    assert!(footage(&mut render, &h.stage).1);
+    h.run(
+        "item.set_proxy_enabled",
+        json!({"items": [item], "enabled": false}),
+    );
+    assert!(!footage(&mut preview, &h.stage).1, "a proxy that is off");
+    h.run(
+        "item.set_proxy_enabled",
+        json!({"items": [item], "enabled": true}),
+    );
+    std::fs::remove_file(&small).unwrap();
+    let mut fresh = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+    assert!(
+        !footage(&mut fresh, &h.stage).1,
+        "a missing proxy falls back"
+    );
+    assert!(fresh.take_warnings().iter().any(|w| w.contains("proxy")));
+}

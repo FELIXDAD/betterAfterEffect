@@ -150,6 +150,7 @@ impl Gpu {
                     sequence: (footage.kind == "sequence").then(|| footage.rate()),
                     // The footage panel shows source frames as they are.
                     blend: None,
+                    proxy_of: None,
                 }),
             };
             let mut layer = RenderLayer::new(footage.asset.clone(), content);

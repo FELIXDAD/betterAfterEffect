@@ -105,6 +105,12 @@ pub(crate) const MISSING_FOOTAGE: &str = "Missing Footage";
 pub(crate) const MISSING_EFFECTS: &str = "Missing Effects";
 pub(crate) const MISSING_FONTS: &str = "Missing Fonts";
 
+/// Whether `item` has a proxy: `Some(true)` while it is used.
+fn proxy_state(stage: &Stage, item: &PrimPath) -> Option<bool> {
+    bae_model::asset::proxy_of(stage, item)?;
+    Some(bae_model::asset::proxy_in_use(stage, item).is_some())
+}
+
 /// The search `needle` is (in English or as shown).
 fn is_search(needle: &str, term: &str) -> bool {
     needle == tr(term).to_lowercase() || needle == term.to_lowercase()
@@ -694,6 +700,23 @@ impl Panel for ProjectPanel {
                             } else {
                                 self.collapsed.remove(&row.path);
                             }
+                        }
+                    }
+                    // AE's proxy square left of the item: filled while the
+                    // proxy is used, hollow while it is off; a click toggles.
+                    if row.kind != ItemKind::Folder
+                        && let Some(on) = proxy_state(stage, &row.path)
+                    {
+                        let r = Rect::from_center_size(pos2(x + 6.0, rect.center().y), vec2(7.0, 7.0));
+                        if on {
+                            ui.painter().rect_filled(r, 0.0, color::TEXT);
+                        } else {
+                            ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(1.0, color::TEXT), egui::StrokeKind::Inside);
+                        }
+                        if ui.input(|i| i.pointer.primary_clicked())
+                            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|pos| r.expand(3.0).contains(pos))
+                        {
+                            cx.invoke_with("item.set_proxy_enabled", json!({"items": [row.path]}));
                         }
                     }
                     x += 14.0;

@@ -20,17 +20,18 @@ pub struct CleanUpOutput {
 
 /// Project items (comps, footage, solids, folders): not the prims inside comps.
 fn items(stage: &Stage) -> Vec<PrimPath> {
-    let mut comps = Vec::new();
+    // Comps and footage items own prims (layers, proxies) that are not items.
+    let mut owners: Vec<PrimPath> = Vec::new();
     let mut out = Vec::new();
     for p in stage.traverse() {
-        if comps.iter().any(|c: &PrimPath| c.is_ancestor_of(&p)) {
+        if owners.iter().any(|c| c.is_ancestor_of(&p)) {
             continue;
         }
         let Some(v) = stage.prim(&p) else { continue };
-        if v.is_a(&PrimType::COMP) {
-            comps.push(p.clone());
+        if v.is_a(&PrimType::COMP) || v.is_a(&PrimType::ASSET) {
+            owners.push(p.clone());
             out.push(p);
-        } else if v.is_a(&PrimType::ASSET) || v.is_a(&PrimType::FOLDER) {
+        } else if v.is_a(&PrimType::FOLDER) {
             out.push(p);
         }
     }
