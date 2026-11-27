@@ -802,6 +802,9 @@ impl Shell {
                 }
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
+            // Edit ▸ Purge: the motion module empties the memory caches; the
+            // undo steps and the disk cache belong to the shell.
+            "motion.edit.purge" => self.purge(inv.params.get("what").and_then(|w| w.as_str())),
             _ => match self.document.run(&inv) {
                 Outcome::Changed => self.set_notice(String::new()),
                 Outcome::Unchanged => {}
@@ -859,6 +862,44 @@ impl Shell {
             self.build_menu();
         }
         self.request_redraw();
+    }
+
+    /// Edit ▸ Purge ▸ Undo, All Memory (undo steps too) and the disk cache items
+    /// (asking first, like Preferences ▸ Media & Disk Cache ▸ Empty Disk Cache).
+    fn purge(&mut self, what: Option<&str>) {
+        if matches!(what, Some("undo" | "all_memory" | "memory_and_disk_cache")) {
+            self.document.clear_undo();
+            if let Some(menu) = &mut self.menu {
+                menu.set_undo_state(self.document.undo_state());
+            }
+        }
+        if !matches!(what, Some("disk_cache" | "memory_and_disk_cache")) {
+            return;
+        }
+        let Some(cache) = self
+            .app
+            .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
+            .cloned()
+        else {
+            return;
+        };
+        let mut dialog = rfd::MessageDialog::new()
+            .set_title(crate::i18n::tr("Empty Disk Cache"))
+            .set_description(crate::i18n::tr(
+                "Delete cached preview frames from this folder?",
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo);
+        if let Some(view) = &self.view {
+            dialog = dialog.set_parent(&*view.window);
+        }
+        if dialog.show() == rfd::MessageDialogResult::Yes {
+            let prefs = self
+                .app
+                .resource::<Arc<bae_prefs::PrefsStore>>()
+                .map(|s| s.current())
+                .unwrap_or_default();
+            cache.clear_folder(&prefs);
+        }
     }
 
     /// Builds the menu bar from the registered menus in the current language and

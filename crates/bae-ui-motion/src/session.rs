@@ -446,6 +446,9 @@ pub struct Session {
     pub selected_effects: Vec<PrimPath>,
     /// Latest request to re-evaluate a generated source without editing project data.
     pub(crate) solid_reload: Option<(u64, PrimPath)>,
+    /// Edit ▸ Purge generation: viewers drop their rendered frames when it
+    /// changes.
+    pub(crate) purge: u64,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
