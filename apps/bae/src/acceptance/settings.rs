@@ -219,22 +219,39 @@ fn transparency_settings_change_the_checkerboard_cells() {
     assert_eq!(dialog.draft().color(keys::TRANSPARENCY_SECOND), second);
     h.get_by_label("OK").click();
     settle(&mut h);
-    h.get_by_label("Transparency Grid").click();
+    h.get_by_label("Toggle Transparency Grid").click();
     settle(&mut h);
-    let is_rect = |color, size: Option<f32>| {
-        h.output().shapes.iter().any(|shape| {
-            let egui::Shape::Rect(rect) = &shape.shape else {
-                return false;
-            };
-            rect.fill == color && size.is_none_or(|s| rect.rect.size() == egui::vec2(s, s))
+    // One rectangle tiled with a 2×2 texture of the two colours; large
+    // cells are 16 px, so it repeats every 32 px.
+    let (colors, texture) = h
+        .ctx
+        .data(|d| {
+            d.get_temp::<([egui::Color32; 2], egui::TextureHandle)>(egui::Id::new(
+                "bae.checkerboard",
+            ))
         })
-    };
-    assert!(is_rect(
-        egui::Color32::from_rgb(0x12, 0x56, 0x98),
-        Some(16.0)
-    ));
-    assert!(is_rect(
-        egui::Color32::from_rgb(second[0], second[1], second[2]),
-        None
-    ));
+        .expect("checkerboard texture");
+    assert_eq!(
+        colors,
+        [
+            egui::Color32::from_rgb(0x12, 0x56, 0x98),
+            egui::Color32::from_rgb(second[0], second[1], second[2])
+        ]
+    );
+    let tiled = h.output().shapes.iter().any(|shape| {
+        let egui::Shape::Mesh(mesh) = &shape.shape else {
+            return false;
+        };
+        let span = |f: &dyn Fn(&egui::epaint::Vertex) -> f32| {
+            let (lo, hi) = mesh
+                .vertices
+                .iter()
+                .map(f)
+                .fold((f32::MAX, f32::MIN), |(l, h), v| (l.min(v), h.max(v)));
+            hi - lo
+        };
+        mesh.texture_id == texture.id()
+            && (span(&|v| v.uv.x) * 32.0 - span(&|v| v.pos.x)).abs() < 0.5
+    });
+    assert!(tiled);
 }

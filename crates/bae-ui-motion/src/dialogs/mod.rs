@@ -6,6 +6,7 @@
 //! values; OK runs one `bae-motion` command (one undo step), Cancel runs none.
 
 mod camera_settings;
+mod comp_from_selection;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
@@ -15,6 +16,7 @@ mod light_settings;
 mod mask_value;
 pub mod memory;
 pub(crate) mod photoshop;
+mod placeholder;
 mod precompose;
 mod project_settings;
 mod render_output;
@@ -67,6 +69,8 @@ pub enum Dialog {
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
+    /// File ▸ Import ▸ Placeholder….
+    NewPlaceholder(Box<placeholder::NewPlaceholder>),
     EffectManager(Box<crate::effects::manager::EffectManager>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
@@ -77,6 +81,8 @@ pub enum Dialog {
     RenderSettings(Box<render_output::RenderSettings>),
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
+    /// File ▸ New Comp from Selection….
+    CompFromSelection(Box<comp_from_selection::CompFromSelection>),
     /// An alert: a message and OK (import errors …).
     Alert {
         title: String,
@@ -208,6 +214,27 @@ pub(crate) fn new_solid(cx: &PanelContext<'_>, session: &SharedSession) {
     if let Some(s) = SolidSettings::new_solid(cx.stage, session, &d.solid) {
         d.open = Some(Dialog::SolidSettings(Box::new(s)));
     }
+}
+
+/// File ▸ Import ▸ Placeholder…: New Placeholder.
+pub(crate) fn import_placeholder(cx: &PanelContext<'_>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::NewPlaceholder(Box::default()));
+    }
+}
+
+/// File ▸ Import ▸ Solid…: Solid Settings for a new solid item.
+pub(crate) fn import_solid(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    remember(cx.resources, &mut d);
+    let s = SolidSettings::new_item(cx.stage, session, &d.solid);
+    d.open = Some(Dialog::SolidSettings(Box::new(s)));
 }
 
 /// Open the settings dialog of a layer or a solid item: Solid Settings
@@ -374,12 +401,12 @@ pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
 }
 
 /// Open Output Module Settings for render queue item `item`.
-pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64) {
+pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64, module: usize) {
     let queue = crate::render_queue::shared(cx.resources);
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
     if d.open.is_none()
-        && let Some(o) = render_output::OutputModule::new(&queue, item)
+        && let Some(o) = render_output::OutputModule::new(&queue, item, module)
     {
         d.open = Some(Dialog::OutputModule(Box::new(o)));
     }
@@ -429,6 +456,22 @@ pub(crate) fn transform_value(
     }
 }
 
+/// File ▸ New Comp from Selection… for `items` (Project panel selection).
+pub(crate) fn comp_from_selection(
+    cx: &PanelContext<'_>,
+    items: Vec<PrimPath>,
+    still: Option<bae_model::Time>,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = comp_from_selection::CompFromSelection::new(cx.stage, items, still) {
+        d.open = Some(Dialog::CompFromSelection(Box::new(v)));
+    }
+}
+
 /// Open the mask value dialog of `kind` for `masks` at comp time `now`.
 pub(crate) fn mask_value(
     cx: &PanelContext<'_>,
@@ -462,6 +505,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        placeholder::STRINGS,
         interpret_footage::STRINGS,
         layer_time::STRINGS,
         go_to_time::STRINGS,
@@ -469,6 +513,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         transform_value::STRINGS,
         mask_value::STRINGS,
         render_output::STRINGS,
+        comp_from_selection::STRINGS,
     ]
     .concat()
 }
@@ -491,10 +536,21 @@ impl bae_ui::DialogHost for MotionDialogs {
             return;
         }
         let dialogs = shared(cx.resources);
+        // Comps New Comp from Selection made, for the Render Queue.
+        let queue = std::mem::take(&mut crate::common::session(cx.resources).lock().queue_comps);
+        if !queue.is_empty() {
+            let rq = crate::render_queue::shared(cx.resources);
+            for comp in &queue {
+                if let Some(info) = query::comp_info(cx.stage, comp) {
+                    rq.lock()
+                        .add(&info, &crate::render_queue::default_output_dir());
+                }
+            }
+            cx.open_panel("render_queue");
+        }
         // Draw without holding the lock (a dialog may read the memory).
         let open = {
             let mut d = dialogs.lock();
-            d.frame_checks.repaint_while_running(ctx);
             d.open
                 .take()
                 .or_else(|| d.frame_checks.next_notice())
@@ -515,6 +571,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::NewPlaceholder(d) => d.ui(ctx, cx),
             Dialog::InterpretFootage(d) => d.ui(ctx, cx),
             Dialog::TimeStretch(d) => d.ui(ctx, cx),
             Dialog::AutoOrient(d) => d.ui(ctx, cx),
@@ -525,6 +582,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::MaskValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
+            Dialog::CompFromSelection(d) => d.ui(ctx, cx, &session),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
             Dialog::ViewOptions(v) => crate::viewer::view_options::view_options_ui(ctx, cx, v),
             Dialog::BackgroundColor(c) => {

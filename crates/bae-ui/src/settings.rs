@@ -11,6 +11,8 @@
 //! Choose Folder…) from [`SettingsDialog::take_requests`]; every other button is
 //! drawn disabled.
 
+mod expression_preview;
+
 use bae_prefs::schema::{self, Item, Kind, PAGES, Pref, Style};
 use bae_prefs::{Preferences, parse_color, parse_timecode};
 use egui::{Color32, Key, RichText, Ui, vec2};
@@ -111,24 +113,32 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     let _ = app.register(ACTION, bindings);
 }
 
+/// The displayed swatch for a label in this palette.
+pub fn label_color(prefs: &Preferences, index: usize) -> Color32 {
+    if index == 0 || prefs.label_color_is_default(index) {
+        crate::theme::LABELS
+            .get(index)
+            .unwrap_or(&crate::theme::LABELS[0])
+            .1
+    } else {
+        let [r, g, b] = prefs.label_color(index);
+        Color32::from_rgb(r, g, b)
+    }
+}
+
 /// Applies the preferences the UI shell draws with: label colors and names
 /// (Labels page) and the color theme (Appearance). Call at startup and after OK.
 /// A label color left at AE's value is drawn as measured on screen in AE
 /// (`theme::LABELS`); a changed one is drawn as chosen.
 pub fn apply(prefs: &Preferences) {
     use bae_prefs::keys;
-    crate::theme::set_label_colors(std::array::from_fn(|i| {
-        if i == 0 || prefs.label_color_is_default(i) {
-            crate::theme::LABELS[i].1
-        } else {
-            let [r, g, b] = prefs.label_color(i);
-            Color32::from_rgb(r, g, b)
-        }
-    }));
+    crate::theme::set_label_colors(std::array::from_fn(|i| label_color(prefs, i)));
     crate::theme::set_label_names(std::array::from_fn(|i| {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
+    crate::theme::set_gradients(prefs.bool("appearance.use_gradients"));
+    crate::theme::set_accessible_contrast(prefs.bool("appearance.accessibility_color_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
     ));
@@ -317,6 +327,7 @@ pub struct SettingsDialog {
     installed_ram: Option<u64>,
     open: bool,
     confirm_reset: bool,
+    save_theme_name: Option<String>,
     display_changed: bool,
     page: usize,
     draft: Preferences,
@@ -378,6 +389,7 @@ impl SettingsDialog {
         self.draft = current.clone();
         self.open = true;
         self.confirm_reset = false;
+        self.save_theme_name = None;
         self.display_changed = false;
         self.lang_at_open = Some((
             crate::i18n::lang(),
@@ -440,6 +452,36 @@ impl SettingsDialog {
             .fixed_size(SIZE)
             .default_pos(screen.center() - SIZE / 2.0)
             .show(ctx, |ui| outcome = self.contents(ui));
+        if let Some(name) = &mut self.save_theme_name {
+            let mut closed = false;
+            egui::Modal::new(egui::Id::new("save-expression-theme")).show(ctx, |ui| {
+                ui.heading(tr("Save Theme"));
+                let label = ui.label(tr("Theme name"));
+                let input = ui.text_edit_singleline(name).labelled_by(label.id);
+                if !input.has_focus() && ui.ctx().memory(|m| m.focused().is_none()) {
+                    input.request_focus();
+                }
+                ui.horizontal(|ui| {
+                    let available = self.draft.can_save_expression_theme(name);
+                    if ui
+                        .add_enabled(available, egui::Button::new(tr("Save")))
+                        .clicked()
+                        || available && ui.input(|i| i.key_pressed(Key::Enter))
+                    {
+                        self.draft.save_expression_theme(name);
+                        closed = true;
+                    }
+                    if ui.button(tr("Cancel")).clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                    {
+                        closed = true;
+                    }
+                });
+            });
+            if closed {
+                self.save_theme_name = None;
+            }
+            return Outcome::None;
+        }
         if self.confirm_reset {
             egui::Modal::new(egui::Id::new("reset-all-preferences")).show(ctx, |ui| {
                 ui.label(tr("Reset All Preferences to Default..."));
@@ -575,7 +617,7 @@ impl SettingsDialog {
             }
             Item::Group(title, list) => {
                 ui.add_space(4.0);
-                ui.add_enabled_ui(*title != "Mercury Transmit", |ui| {
+                ui.add_enabled_ui(!Item::unsupported(list), |ui| {
                     ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
                     egui::Frame::new()
                         .stroke(egui::Stroke::new(1.0, color::DIVIDER))
@@ -589,6 +631,24 @@ impl SettingsDialog {
                 ui.add_space(4.0);
             }
             Item::Button(id, label) => {
+                if *id == "scripting_expressions.expr_save_theme" {
+                    if ui.button(tr(label)).clicked() {
+                        self.save_theme_name = Some(String::new());
+                    }
+                    return;
+                }
+                if *id == "scripting_expressions.expr_delete_theme" {
+                    if ui
+                        .add_enabled(
+                            self.draft.selected_expression_theme().is_some(),
+                            egui::Button::new(tr(label)),
+                        )
+                        .clicked()
+                    {
+                        self.draft.delete_selected_expression_theme();
+                    }
+                    return;
+                }
                 if *id == "startup_repair.reset_all_preferences" {
                     if ui.button(tr(label)).clicked() {
                         self.confirm_reset = true;
@@ -605,11 +665,6 @@ impl SettingsDialog {
             Item::Info(label, value) => {
                 ui.horizontal(|ui| {
                     if !label.is_empty() {
-                        let label = if *value == "<InstalledRAM - ReservedRAM> GB" {
-                            "RAM Available for BAE:"
-                        } else {
-                            label
-                        };
                         ui.label(tr(label));
                     }
                     if *label == "Sample Rate:" && self.page() == "audio" {
@@ -662,7 +717,7 @@ impl SettingsDialog {
                         ui.add_space(40.0);
                     });
             }
-            Item::Preview(_) => self.expression_preview(ui),
+            Item::Preview(_) => expression_preview::show(ui, &self.draft),
             Item::When(w, item) => {
                 let on = self.draft.holds(w);
                 ui.add_enabled_ui(on, |ui| self.item(ui, item));
@@ -686,10 +741,7 @@ impl SettingsDialog {
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
-        let enabled = !matches!(
-            p.key,
-            "project.dynamic_link_highest_number" | "export.preview_output_during_render_queue"
-        ) && self.draft.enabled(p);
+        let enabled = !p.unsupported && self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 if p.indent {
@@ -707,8 +759,15 @@ impl SettingsDialog {
         let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = p.key != "video.enable_mercury_transmit" && draft.bool(p.key);
-                if widgets::checkbox(ui, &mut v, label).changed() {
+                // A setting BAE does not support shows AE's default (greyed;
+                // Mercury Transmit: off), whatever a preferences file saved for
+                // it; the saved value stays.
+                let mut v = if p.unsupported {
+                    matches!(p.default, bae_prefs::DefaultValue::Bool(true))
+                } else {
+                    draft.bool(p.key)
+                };
+                if widgets::checkbox(ui, &mut v, label).changed() && !p.unsupported {
                     self.set(p.key, v);
                 }
             }
@@ -774,6 +833,7 @@ impl SettingsDialog {
                         .iter()
                         .map(|(id, name)| (id.as_str(), name.as_str())),
                 );
+                let available = choices.len();
                 let current = draft.str(p.key);
                 let mut selected = choices
                     .iter()
@@ -783,13 +843,40 @@ impl SettingsDialog {
                         choices.len() - 1
                     });
                 let labels: Vec<_> = choices.iter().map(|(_, name)| *name).collect();
-                if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0).changed() {
+                let source = |index| match index {
+                    0 => Some(crate::a11y::SYSTEM_OUTPUT),
+                    i if i < available => Some(crate::a11y::VERBATIM_VALUE),
+                    _ => None, // The unavailable-device fallback is UI text.
+                };
+                if widgets::dropdown_with_source(ui, p.key, &mut selected, &labels, 220.0, source)
+                    .changed()
+                {
                     self.set(p.key, choices[selected].0.to_owned());
                 }
             }
             Kind::Choice { options, style } => {
                 let current = draft.str(p.key).to_owned();
                 match style {
+                    Style::Dropdown if p.key == bae_prefs::keys::EXPR_THEME => {
+                        field_label(ui, shown);
+                        let built_in = options.iter().map(|o| tr(o.label));
+                        let names: Vec<_> =
+                            built_in.chain(draft.saved_expression_themes()).collect();
+                        let mut selected = draft
+                            .selected_expression_theme()
+                            .and_then(|name| names[options.len()..].iter().position(|&n| n == name))
+                            .map(|i| i + options.len())
+                            .or_else(|| options.iter().position(|o| o.value == current))
+                            .unwrap_or(0);
+                        if widgets::dropdown(ui, p.key, &mut selected, &names, 220.0).changed() {
+                            if let Some(o) = options.get(selected) {
+                                self.set(p.key, o.value);
+                            } else {
+                                let name = names[selected].to_owned();
+                                self.draft.select_expression_theme(&name);
+                            }
+                        }
+                    }
                     Style::Dropdown => {
                         field_label(ui, shown);
                         if matches!(p.key, "audio.audio_map_left" | "audio.audio_map_right") {
@@ -810,8 +897,15 @@ impl SettingsDialog {
                             selected = selected.min(names.len() - 1);
                             let labels: Vec<_> = names.iter().map(String::as_str).collect();
                             ui.add_enabled_ui(self.audio_channels > 0, |ui| {
-                                if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0)
-                                    .changed()
+                                if widgets::dropdown_with_source(
+                                    ui,
+                                    p.key,
+                                    &mut selected,
+                                    &labels,
+                                    220.0,
+                                    |_| Some(crate::a11y::VERBATIM_VALUE),
+                                )
+                                .changed()
                                 {
                                     self.set(p.key, options[selected].value);
                                 }
@@ -916,44 +1010,12 @@ impl SettingsDialog {
             Kind::Path => {
                 let path = draft.str(p.key);
                 let path = if path.is_empty() { "—" } else { path };
-                ui.label(RichText::new(path).color(color::TEXT_DIM))
+                let response = ui
+                    .label(RichText::new(path).color(color::TEXT_DIM))
                     .on_hover_text(label);
+                crate::a11y::value_source(&response, crate::a11y::VERBATIM_VALUE);
             }
         }
-    }
-
-    /// Expression editor preview (Scripting & Expressions): a few lines of code
-    /// in the editor's font size and colors.
-    fn expression_preview(&self, ui: &mut Ui) {
-        let p = &self.draft;
-        let c = |k: &str| {
-            let [r, g, b] = p.color(&format!("scripting_expressions.expr_color_{k}"));
-            Color32::from_rgb(r, g, b)
-        };
-        let size = p.int(bae_prefs::keys::EXPR_FONT_SIZE) as f32;
-        let font = egui::FontId::monospace(size);
-        let mut job = egui::text::LayoutJob::default();
-        let mut add = |text: &str, color: Color32| {
-            job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
-        };
-        add("// wiggle the position\n", c("comments"));
-        add("var ", c("keywords"));
-        add("amp", c("identifiers"));
-        add(" = ", c("operators"));
-        add("20", c("numbers"));
-        add(";\n", c("default"));
-        add("wiggle", c("identifiers"));
-        add("(", c("default"));
-        add("2", c("numbers"));
-        add(", amp); ", c("default"));
-        add("\"done\"", c("strings"));
-        egui::Frame::new()
-            .fill(c("background"))
-            .inner_margin(6)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 4.0);
-                ui.label(job);
-            });
     }
 }
 
@@ -1030,7 +1092,7 @@ fn label_index(key: &str) -> usize {
 }
 
 /// A label's name as shown: the user's name, or the translated default.
-fn label_name(p: &Preferences, i: usize) -> String {
+pub fn label_name(p: &Preferences, i: usize) -> String {
     let name = p.label_name(i);
     if i == 0 || name.is_empty() || name == schema::LABEL_NAMES[i] {
         tr(schema::LABEL_NAMES[i]).to_owned()
