@@ -292,6 +292,11 @@ pub struct RenderLayer {
     pub blend_mode: BlendMode,
     /// Layer sampling quality after any nested quality limit.
     pub quality: bae_anim::LayerQuality,
+    /// Advanced 3D Extrusion Depth of a 3D text or shape layer, in layer
+    /// pixels (0: flat): drawn as a solid ([`crate::model::extrude`]).
+    pub extrusion: f64,
+    /// Its bevel (Geometry Options), when extruded.
+    pub bevel: Option<crate::model::extrude::Bevel>,
     /// 保留基础透明度: the layer only shows where the layers below are opaque.
     pub preserve_transparency: bool,
     /// Track matte (AE 23.0+ model: any layer of the same comp).
@@ -460,6 +465,8 @@ impl RenderLayer {
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
             quality: bae_anim::LayerQuality::Best,
+            extrusion: 0.0,
+            bevel: None,
             preserve_transparency: false,
             track_matte: None,
             visible: true,
@@ -512,6 +519,11 @@ impl RenderLayer {
         self.opacity.to_bits().hash(h);
         self.blend_mode.hash(h);
         self.quality.hash(h);
+        self.extrusion.to_bits().hash(h);
+        if let Some(b) = &self.bevel {
+            (b.style, b.inward).hash(h);
+            [b.depth, b.hole_scale].map(f64::to_bits).hash(h);
+        }
         self.preserve_transparency.hash(h);
         self.track_matte.hash(h);
         self.visible.hash(h);
@@ -531,8 +543,14 @@ impl RenderLayer {
                     mat.specular_intensity,
                     mat.specular_shininess,
                     mat.metal,
+                    mat.transparency,
+                    mat.transparency_rolloff,
+                    mat.reflection_intensity,
+                    mat.reflection_sharpness,
+                    mat.reflection_rolloff,
                 ]
                 .map(f32::to_bits),
+                mat.shadow_color.map(f32::to_bits),
             )
                 .hash(h);
         }

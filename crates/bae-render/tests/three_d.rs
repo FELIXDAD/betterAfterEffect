@@ -939,3 +939,283 @@ fn collapsed_3d_precomp_layers_join_the_scene() {
         "{centre}"
     );
 }
+
+/// Models receive the shadows of models (AE's Advanced 3D: spot and
+/// parallel lights): a small cube in front of a slab, lit at an angle by a
+/// parallel light, darkens the slab beside it when it casts shadows.
+#[test]
+fn models_receive_model_shadows() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-model-receive-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let boxed = |name: &str, z: f64| {
+        let mut obj = String::new();
+        for zz in [-z, z] {
+            for y in [-1.0, 1.0] {
+                for x in [-1.0, 1.0] {
+                    obj += &format!("v {x} {y} {zz}\n");
+                }
+            }
+        }
+        for f in [
+            "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+        ] {
+            obj += &format!("f {f}\n");
+        }
+        let file = dir.join(name);
+        std::fs::write(&file, obj).unwrap();
+        file
+    };
+    let (cube, slab) = (boxed("cube.obj", 1.0), boxed("slab.obj", 0.05));
+    let mut r = Renderer::new(gpu.clone());
+    use bae_render::light::{Falloff, Light, LightKind, ShadowMode};
+    let model = |name: &str, file: &std::path::Path, m: DMat4| {
+        let mut l = RenderLayer::new(
+            p(&format!("/comps/main/layers/{name}")),
+            LayerContent::Model(bae_render::ModelRef {
+                asset: p(&format!("/assets/{name}")),
+                file: Some(file.to_owned()),
+            }),
+        );
+        l.matrix_3d = Some(m);
+        l
+    };
+    let scene = |casts: ShadowMode| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut caster = model(
+            "cube",
+            &cube,
+            DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+                * DMat4::from_scale(DVec3::splat(0.4)),
+        );
+        caster.material.casts_shadows = casts;
+        let receiver = model(
+            "slab",
+            &slab,
+            DMat4::from_translation(DVec3::new(100.0, 100.0, 50.0))
+                * DMat4::from_scale(DVec3::splat(2.0)),
+        );
+        comp.layers = vec![caster, receiver];
+        let d = DVec3::new(0.3, 0.0, 1.0).normalize();
+        comp.lights = vec![Light {
+            kind: LightKind::Parallel,
+            world: DMat4::from_translation(DVec3::new(100.0, 100.0, -300.0))
+                * bae_render::camera::look_at(d),
+            point_of_interest: DVec3::new(100.0, 100.0, 0.0),
+            color: [1.0, 1.0, 1.0],
+            intensity: 100.0,
+            cone_angle: 90.0,
+            cone_feather: 50.0,
+            falloff: Falloff::None,
+            radius: 500.0,
+            falloff_distance: 500.0,
+            casts_shadows: true,
+            shadow_darkness: 100.0,
+            shadow_diffusion: 0.0,
+            scope_below: None,
+            environment: None,
+        }];
+        comp
+    };
+    let lit = render(&mut r, &scene(ShadowMode::Off));
+    let shadowed = render(&mut r, &scene(ShadowMode::On));
+    let luma =
+        |img: &Image, x, y| -> i32 { img.px(x, y).iter().take(3).map(|&c| i32::from(c)).sum() };
+    assert!(
+        luma(&shadowed, 128, 100) + 150 < luma(&lit, 128, 100),
+        "shadow on the slab: {:?} vs {:?}",
+        shadowed.px(128, 100),
+        lit.px(128, 100)
+    );
+    assert_eq!(luma(&shadowed, 60, 100), luma(&lit, 60, 100), "lit");
+    // A still scene draws its light maps once (no frame cache here).
+    let mut r = Renderer::with_config(
+        gpu,
+        bae_render::RendererConfig {
+            frame_cache_bytes: 0,
+            ..bae_render::RendererConfig::default()
+        },
+    );
+    // (Moved a little: the maps above are shared by every renderer.)
+    let mut comp = scene(ShadowMode::On);
+    comp.layers[0].matrix_3d = Some(
+        DMat4::from_translation(DVec3::new(101.0, 100.0, 0.0))
+            * DMat4::from_scale(DVec3::splat(0.4)),
+    );
+    let draws: Vec<usize> = (0..3)
+        .map(|_| {
+            r.render_frame(&comp, &RenderRequest::full())
+                .unwrap()
+                .stats
+                .draw_calls
+        })
+        .collect();
+    assert!(draws[1] < draws[0], "light maps reused: {draws:?}");
+    assert_eq!(draws[1], draws[2], "{draws:?}");
+    // A 3D solid casting shadows throws its shadow on the slab as well.
+    let mut card_scene = scene(ShadowMode::Off);
+    card_scene.layers[0].visible = false;
+    let mut card = solid_3d(
+        "card",
+        RED,
+        [40, 40],
+        DVec3::new(100.0, 100.0, 0.0),
+        DVec3::ZERO,
+    );
+    card.material.casts_shadows = ShadowMode::On;
+    card_scene.layers.insert(0, card.clone());
+    let with_card = render(&mut r, &card_scene);
+    card.material.casts_shadows = ShadowMode::Off;
+    card_scene.layers[0] = card;
+    let without = render(&mut r, &card_scene);
+    assert!(
+        luma(&with_card, 125, 100) + 150 < luma(&without, 125, 100),
+        "card shadow: {:?} vs {:?}",
+        with_card.px(125, 100),
+        without.px(125, 100)
+    );
+    assert_eq!(luma(&with_card, 60, 100), luma(&without, 60, 100));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// Advanced 3D Transparency lets what is behind a 3D layer through;
+/// Transparency Rolloff takes transparency away at glancing angles.
+#[test]
+fn transparency_shows_what_is_behind() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let scene = |transparency: f32, rolloff: f32, tilt: f64| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut front = solid_3d(
+            "front",
+            RED,
+            [200, 200],
+            DVec3::new(100.0, 100.0, 0.0),
+            DVec3::new(tilt, 0.0, 0.0),
+        );
+        front.material.transparency = transparency;
+        front.material.transparency_rolloff = rolloff;
+        comp.layers = vec![front, solid("back", BLUE, [200, 200])];
+        comp
+    };
+    let opaque = render(&mut r, &scene(0.0, 0.0, 0.0)).px(100, 100);
+    assert!(opaque[0] > 250 && opaque[2] < 5, "{opaque:?}");
+    let half = render(&mut r, &scene(50.0, 0.0, 0.0)).px(100, 100);
+    assert!(
+        (i32::from(half[0]) - 128).abs() <= 3 && (i32::from(half[2]) - 127).abs() <= 3,
+        "{half:?}"
+    );
+    // Tilted 60° (seen at about cos 0.5 from the camera): full rolloff
+    // halves the transparency.
+    let tilted = render(&mut r, &scene(50.0, 100.0, 60.0)).px(100, 100);
+    assert!(tilted[0] > half[0] + 20, "{tilted:?} vs {half:?}");
+}
+
+/// Advanced 3D reflections: a 3D layer with Reflection Intensity reflects
+/// the picture of an environment light that reaches it.
+#[test]
+fn layers_reflect_the_environment_picture() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    use bae_render::light::{EnvironmentSource, Falloff, Light, LightKind};
+    let scene = |intensity: f32| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut plane = solid_3d(
+            "plane",
+            [1.0; 4],
+            [200, 200],
+            DVec3::new(100.0, 100.0, 0.0),
+            DVec3::ZERO,
+        );
+        plane.material.reflection_intensity = intensity;
+        let mut picture = solid("picture", RED, [400, 200]);
+        picture.visible = false;
+        comp.layers = vec![plane, picture];
+        comp.lights = vec![Light {
+            kind: LightKind::Environment,
+            world: DMat4::IDENTITY,
+            point_of_interest: DVec3::ZERO,
+            color: [1.0, 1.0, 1.0],
+            intensity: 100.0,
+            cone_angle: 90.0,
+            cone_feather: 50.0,
+            falloff: Falloff::None,
+            radius: 500.0,
+            falloff_distance: 500.0,
+            casts_shadows: false,
+            shadow_darkness: 100.0,
+            shadow_diffusion: 0.0,
+            scope_below: None,
+            environment: Some(EnvironmentSource {
+                layer: 1,
+                background: None,
+            }),
+        }];
+        comp
+    };
+    let plain = render(&mut r, &scene(0.0)).px(100, 100);
+    assert!(plain[1] > 200 && plain[2] > 200, "lit white: {plain:?}");
+    let mirror = render(&mut r, &scene(100.0)).px(100, 100);
+    assert!(
+        mirror[0] > 200 && mirror[1] < 30 && mirror[2] < 30,
+        "reflects the red picture: {mirror:?}"
+    );
+    let half = render(&mut r, &scene(50.0)).px(100, 100);
+    assert!(half[1] > 60 && half[1] < 200, "half: {half:?}");
+}
+
+/// Advanced 3D Extrusion Depth: a 3D layer whose provider gives outlines is
+/// drawn as a solid that deep — turned away, its sides show beside the face.
+#[test]
+fn extruded_layers_are_solids() {
+    use bae_render::source::{OutlineFill, Outlines, SourceProvider};
+    struct Square;
+    impl SourceProvider for Square {
+        fn id(&self) -> &str {
+            "test.square"
+        }
+        fn source(
+            &self,
+            _: &bae_render::CustomContent,
+        ) -> Result<Arc<dyn bae_render::LayerSource>, bae_render::RenderError> {
+            Err(bae_render::RenderError::Other("drawn as a solid".into()))
+        }
+        fn outlines(&self, _: &bae_render::CustomContent) -> Option<Arc<Outlines>> {
+            Some(Arc::new(Outlines {
+                fills: vec![OutlineFill {
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    contours: vec![vec![[0.0, 0.0], [80.0, 0.0], [80.0, 80.0], [0.0, 80.0]]],
+                }],
+            }))
+        }
+    }
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    r.providers_mut().register(Arc::new(Square));
+    let row = |r: &mut Renderer, depth: f64| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut layer = RenderLayer::new(
+            p("/comps/main/layers/square"),
+            LayerContent::Custom(bae_render::CustomContent {
+                provider: "test.square".into(),
+                prim: p("/comps/main/layers/square"),
+                size: Some([80, 80]),
+                hash: 1,
+                data: Arc::new(()),
+            }),
+        );
+        layer.matrix_3d = Some(
+            DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+                * bae_render::camera::xyz_rotation(DVec3::new(0.0, 60.0, 0.0))
+                * DMat4::from_translation(DVec3::new(-40.0, -40.0, 0.0)),
+        );
+        layer.extrusion = depth;
+        comp.layers = vec![layer];
+        let img = render(r, &comp);
+        (0..200).filter(|&x| img.px(x, 100)[3] > 128).count()
+    };
+    let thin = row(&mut r, 1.0);
+    let deep = row(&mut r, 100.0);
+    assert!(thin > 20, "the face: {thin}");
+    assert!(deep > thin + 40, "the side too: {deep} vs {thin}");
+}

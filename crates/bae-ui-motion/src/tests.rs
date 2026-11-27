@@ -512,7 +512,7 @@ fn panels_render_a_project() {
     let mut viewer = CompositionViewer::new(None);
     let mut props = crate::PropertiesPanel::default();
     let mut fx = crate::EffectControlsPanel::default();
-    let mut preview = crate::PreviewPanel;
+    let mut preview = crate::PreviewPanel::default();
     h.session().lock().selected_layers = vec![shape.clone()];
     for _ in 0..2 {
         assert!(
@@ -3724,6 +3724,15 @@ fn camera_light_and_material_options_groups() {
         groups(&h, &solid).last(),
         Some(&("Material Options".to_owned(), 9))
     );
+    // The Advanced 3D renderer adds reflections, transparency and more.
+    h.run(
+        "attr.set",
+        json!({"path": comp, "attr": "renderer", "value": Value::Enum("advanced_3d".into())}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 17))
+    );
 }
 
 /// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label
@@ -3774,6 +3783,63 @@ fn add_footage_separate_dimensions_and_layer_controls() {
         &h.resources,
         "motion.view.show_layer_controls"
     ));
+}
+
+/// Layer ▸ Reveal ▸ Reveal Layer Source in Project selects the source in the
+/// Project panel; File ▸ Interpret Footage ▸ Remember / Apply Interpretation
+/// copy one item's interpretation to others.
+#[test]
+fn reveal_in_project_and_remember_interpretation() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (_, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::REVEAL_SOURCE_IN_PROJECT));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    assert_eq!(h.session().lock().reveal_in_project, Some(item.clone()));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    assert_eq!(h.session().lock().selected_items, vec![item]);
+    assert!(h.session().lock().reveal_in_project.is_none());
+
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<_> = ["a.mov", "b.mov"]
+        .iter()
+        .map(|n| {
+            let p = dir.path().join(n);
+            std::fs::write(&p, b"clip").unwrap();
+            json!({"path": p})
+        })
+        .collect();
+    let out = h.run("item.import", json!({ "files": files }));
+    let items: Vec<PrimPath> = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| PrimPath::new(v.as_str().unwrap()).unwrap())
+        .collect();
+    h.run(
+        "footage.interpret",
+        json!({"items": [items[0]], "alpha_mode": "premultiplied", "loop_count": 3}),
+    );
+    h.session().lock().selected_items = vec![items[0].clone()];
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::REMEMBER_INTERPRETATION))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().selected_items = vec![items[1].clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::APPLY_INTERPRETATION));
+    assert_eq!(r.invocations[0].id, "footage.interpret");
+    let p = &r.invocations[0].params;
+    assert_eq!(p["items"], json!([items[1]]));
+    assert_eq!(
+        (p["alpha_mode"].as_str(), p["loop_count"].as_i64()),
+        (Some("premultiplied"), Some(3))
+    );
 }
 
 /// Composition ▸ Crop Comp to Selected Layer(s) Bounds and Region of Interest;
@@ -3834,4 +3900,104 @@ fn crop_comp_and_camera_focus() {
         .as_f64()
         .unwrap();
     assert!(d > 0.0, "{d}");
+}
+
+/// File ▸ Replace Footage ▸ Solid… / Placeholder…: the dialog opens for the
+/// selected footage and OK makes the new item replace it in one step.
+#[test]
+fn replace_footage_with_solid_or_placeholder() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (_, solid, _) = h.comp_with_layers();
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_items = vec![item.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::REPLACE_WITH_PLACEHOLDER));
+    assert!(r.invocations.is_empty(), "the dialog comes first");
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "item.new");
+    assert_eq!(r.invocations[0].params["kind"], "placeholder");
+    assert_eq!(r.invocations[0].params["replace"], json!(item));
+    h.apply(r);
+    assert!(!h.stage.has_prim(&item));
+    let source = h
+        .stage
+        .prim(&solid)
+        .unwrap()
+        .value("source")
+        .and_then(|v| v.as_prim_ref())
+        .cloned();
+    assert!(source.is_some_and(|s| h.stage.has_prim(&s)));
+}
+
+/// File ▸ Dependencies ▸ Find Missing Footage: the Project panel searches for
+/// "Missing Footage" and lists only footage whose file is gone.
+#[test]
+fn find_missing_footage_lists_footage_without_a_file() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let dir = tempfile::tempdir().unwrap();
+    let here = dir.path().join("here.mov");
+    let gone = dir.path().join("gone.mov");
+    std::fs::write(&here, b"clip").unwrap();
+    std::fs::write(&gone, b"clip").unwrap();
+    let out = h.run(
+        "item.import",
+        json!({"files": [{"path": here}, {"path": gone}]}),
+    );
+    let gone_item = PrimPath::new(out["items"][1].as_str().unwrap()).unwrap();
+    std::fs::remove_file(&gone).unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::FIND_MISSING_FOOTAGE));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    let shown = project.shown_items(&h.stage, None);
+    assert!(shown.contains(&gone_item), "{shown:?}");
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|p| h
+                .stage
+                .prim(p)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET)))
+            .count(),
+        1
+    );
+}
+
+/// File ▸ Dependencies ▸ Find Missing Effects: the Project panel lists the
+/// comps with an effect the app has no definition for.
+#[test]
+fn find_missing_effects_lists_the_comps_using_them() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let other = PrimPath::new(
+        h.run("comp.create", json!({"name": "Clean"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let fx = solid.child("missing_fx").unwrap();
+    h.run("prim.create", json!({"path": fx, "prim_type": "Effect"}));
+    h.run(
+        "attr.set",
+        json!({"path": fx, "attr": "match_name", "value": {"type": "string", "value": "Vendor Gone"}}),
+    );
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::FIND_MISSING_EFFECTS));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    let effects = crate::effects::EffectRegistries {
+        defs: std::sync::Arc::new(bae_app::Registry::new()),
+        infos: std::sync::Arc::new(bae_app::Registry::new()),
+    };
+    let shown = project.shown_items(&h.stage, Some(&effects));
+    assert!(shown.contains(&comp), "{shown:?}");
+    assert!(!shown.contains(&other), "{shown:?}");
 }

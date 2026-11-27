@@ -17,6 +17,7 @@ use egui::{Align2, Color32, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::{Value as Json, json};
 
 use crate::common;
+pub(crate) mod font_menu;
 
 /// The installed fonts, scanned once in the background ([`prewarm`]) so the
 /// panel never waits for the scan.
@@ -24,29 +25,48 @@ static FONTS: std::sync::OnceLock<std::sync::Mutex<bae_text::FontSystem>> =
     std::sync::OnceLock::new();
 
 /// Starts scanning the installed fonts on a background thread (at startup,
-/// before the Character panel first needs them).
+/// before the Character panel first needs them). The font menu then indexes
+/// the families on the same font system.
 pub(crate) fn prewarm() {
-    if FONTS.get().is_some() {
-        return;
-    }
-    let _ = std::thread::Builder::new()
-        .name("bae-font-scan".into())
-        .spawn(|| {
-            FONTS.get_or_init(|| std::sync::Mutex::new(bae_text::FontSystem::new()));
+    crate::render::vertical_text::start_worker(|| {
+        let fonts = FONTS.get_or_init(|| {
+            let mut fonts = bae_text::FontSystem::new();
+            bae_text::layout_text(&mut fonts, &bae_text::layout::vertical_warmup_document());
+            std::sync::Mutex::new(fonts)
         });
-}
-
-/// `f` on the installed fonts, or `None` while they are still being scanned.
-fn with_fonts<R>(f: impl FnOnce(&mut bae_text::FontSystem) -> R) -> Option<R> {
-    let fonts = FONTS.get()?;
-    let mut fonts = fonts.lock().unwrap_or_else(|e| e.into_inner());
-    Some(f(&mut fonts))
+        // Its own thread: it goes on drawing sample pages on request.
+        let spawned = std::thread::Builder::new()
+            .name("bae-font-menu".into())
+            .spawn(move || {
+                bae_gpu::warm_up::lower_priority();
+                font_menu::index(fonts);
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "could not start the font menu index");
+        }
+    });
 }
 
 /// Use the warmed font collection for a pointer hit without waiting for a font scan.
 pub(crate) fn hit_layout(doc: &TextDocument) -> Option<bae_text::TextLayout> {
+    // The viewer asks every frame (bounds, hit tests, the vertical preview):
+    // the last few layouts are kept.
+    static RECENT: std::sync::Mutex<Vec<(TextDocument, bae_text::TextLayout)>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(i) = recent.iter().position(|(d, _)| d == doc) {
+        let hit = recent.remove(i);
+        let layout = hit.1.clone();
+        recent.push(hit);
+        return Some(layout);
+    }
     let mut fonts = FONTS.get()?.try_lock().ok()?;
-    Some(bae_text::layout_text(&mut fonts, doc))
+    let layout = bae_text::layout_text(&mut fonts, doc);
+    if recent.len() >= 16 {
+        recent.remove(0);
+    }
+    recent.push((doc.clone(), layout.clone()));
+    Some(layout)
 }
 
 /// AE's size and leading presets (px).
@@ -68,7 +88,6 @@ enum Swatch {
 /// The Character panel.
 #[derive(Default)]
 pub struct CharacterPanel {
-    families: Option<Vec<String>>,
     picking: Option<Swatch>,
 }
 
@@ -140,11 +159,13 @@ impl Panel for CharacterPanel {
         let mut change = json!({});
         let mut gesture = Gesture::None;
         let id = ui.id().with("character");
-        let (family, face_style) = with_fonts(|f| match f.resolve(&font) {
-            bae_text::FontMatch::Found(face) => (face.family.clone(), style_name(&face)),
-            bae_text::FontMatch::Missing => (font.clone(), String::new()),
-        })
-        .unwrap_or_else(|| (font.clone(), String::new()));
+        let catalog = font_menu::CATALOG.get();
+        let active = catalog.and_then(|c| c.lookup(&font).map(|(i, face)| (&c.families[i], face)));
+        let family = active.map_or(font.as_str(), |(f, _)| f.name.as_str());
+        let face_style = active
+            .and_then(|(_, face)| face)
+            .map(style_name)
+            .unwrap_or_default();
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         ui.add_space(4.0);
 
@@ -152,28 +173,59 @@ impl Panel for CharacterPanel {
         let top = ui.cursor().min;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            let resp = combo(ui, &family, 122.0, tr("Set the font family"));
+            let resp = combo(ui, family, 122.0, tr("Set the font family"));
             bae_ui::a11y::value_source(&resp, bae_ui::a11y::VERBATIM_VALUE);
-            if self.families.is_none() {
-                self.families = with_fonts(|f| f.families());
-            }
-            let families = self.families.clone().unwrap_or_default();
             egui::Popup::menu(&resp).id(id.with("family")).show(|ui| {
+                let Some(catalog) = catalog else {
+                    ui.spinner();
+                    return;
+                };
+                let prefs = crate::prefs::current(cx.resources);
+                let height = match prefs.str("type.font_preview_size") {
+                    "medium" => 26.0,
+                    "large" => 34.0,
+                    "extra_large" => 42.0,
+                    _ => 20.0,
+                };
+                let count = prefs.str("type.recent_fonts_count").parse().unwrap_or(0);
+                let recent: Vec<_> = crate::dialogs::project_fonts::recent(cx.resources, count)
+                    .iter()
+                    .filter_map(|name| catalog.lookup(name).map(|(i, _)| i))
+                    .collect();
+                let first = if recent.is_empty() {
+                    0
+                } else {
+                    recent.len() + 2
+                };
                 egui::ScrollArea::vertical().max_height(320.0).show_rows(
                     ui,
-                    20.0,
-                    families.len(),
-                    |ui, range| {
-                        for name in &families[range] {
-                            let response = ui.selectable_label(*name == family, name);
-                            bae_ui::a11y::value_source(&response, bae_ui::a11y::VERBATIM_VALUE);
-                            if response.clicked() {
-                                let ps = with_fonts(|f| match f.resolve(name) {
-                                    bae_text::FontMatch::Found(face) => face.postscript_name,
-                                    bae_text::FontMatch::Missing => name.clone(),
-                                })
-                                .unwrap_or_else(|| name.clone());
-                                change["font"] = json!(ps);
+                    height,
+                    first + catalog.families.len(),
+                    |ui, rows| {
+                        for row in rows {
+                            if first > 0 && row == 0 {
+                                ui.add_sized([250.0, height], egui::Label::new(tr("Recent Fonts")));
+                                continue;
+                            }
+                            if first > 0 && row == first - 1 {
+                                ui.add_sized(
+                                    [250.0, height],
+                                    egui::Separator::default().horizontal(),
+                                );
+                                continue;
+                            }
+                            let i = if row < first {
+                                recent[row - 1]
+                            } else {
+                                row - first
+                            };
+                            let f = &catalog.families[i];
+                            let row = font_menu::row(ui, &f.name, f.name == family, i, height);
+                            bae_ui::a11y::value_source(&row, bae_ui::a11y::VERBATIM_VALUE);
+                            if row.clicked() {
+                                change["font"] = json!(f.default_face());
+                                crate::dialogs::project_fonts::selected(cx.resources, &f.name);
+                                ui.close();
                             }
                         }
                     },
@@ -187,14 +239,15 @@ impl Panel for CharacterPanel {
             ui.add_space(4.0);
             let resp = combo(ui, &face_style, 122.0, tr("Set the font style"));
             bae_ui::a11y::value_source(&resp, bae_ui::a11y::VERBATIM_VALUE);
-            let faces = with_fonts(|f| f.faces(&family)).unwrap_or_default();
+            let faces = active.map_or(&[][..], |(f, _)| f.faces());
             egui::Popup::menu(&resp).id(id.with("style")).show(|ui| {
-                for face in &faces {
+                for face in faces {
                     let name = style_name(face);
                     let response = ui.selectable_label(name == face_style, &name);
                     bae_ui::a11y::value_source(&response, bae_ui::a11y::VERBATIM_VALUE);
                     if response.clicked() {
                         change["font"] = json!(face.postscript_name);
+                        crate::dialogs::project_fonts::selected(cx.resources, family);
                     }
                 }
             });

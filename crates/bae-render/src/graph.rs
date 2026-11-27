@@ -192,11 +192,25 @@ pub enum NodeKind {
 #[derive(Debug)]
 pub struct MeshNode {
     pub models: Vec<MeshModel>,
+    /// The 3D planes of the group that cast shadows on the models (drawn
+    /// into the light maps).
+    pub planes: Vec<PlaneCaster>,
     pub camera: crate::camera::Camera,
     /// The comp's size in pixels.
     pub comp_size: [u32; 2],
     /// A linear working space (the shading is not display-encoded).
     pub linear: bool,
+}
+
+/// A 3D plane casting shadows on models: opaque where its pixels are.
+#[derive(Clone, Debug)]
+pub struct PlaneCaster {
+    /// Layer pixels → comp space.
+    pub matrix: DMat4,
+    /// The drawn rectangle in layer pixels.
+    pub rect: Rect,
+    /// Its pixels (alpha decides); `None`: a solid, opaque everywhere.
+    pub image: Option<NodeId>,
 }
 
 /// One model layer of a [`MeshNode`].
@@ -213,6 +227,10 @@ pub struct MeshModel {
     pub opacity: f32,
     /// An environment light with a picture (diffuse light and reflections).
     pub environment: Option<EnvironmentInput>,
+    /// Material Options: it casts shadows on the models (and itself).
+    pub casts_shadows: bool,
+    /// Material Options: the models' shadows fall on it.
+    pub accepts_shadows: bool,
 }
 
 /// Where a 3D plane passes behind the 3D models drawn under it
@@ -229,7 +247,7 @@ pub struct Occlusion {
 }
 
 /// An environment light's picture as a node input (`exec/env.rs`).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnvironmentInput {
     /// The source layer's pixels (equirectangular).
     pub input: NodeId,
@@ -332,6 +350,9 @@ impl NodeKind {
                     if let Some(o) = &op.occlusion {
                         f(o.mesh);
                     }
+                    if let Some(r) = op.lighting.as_ref().and_then(|l| l.reflection) {
+                        f(r.environment.input);
+                    }
                 }
             }
             NodeKind::Effect(e) => {
@@ -352,6 +373,9 @@ impl NodeKind {
             NodeKind::Mesh(m) => {
                 for e in m.models.iter().filter_map(|m| m.environment.as_ref()) {
                     f(e.input);
+                }
+                for id in m.planes.iter().filter_map(|p| p.image) {
+                    f(id);
                 }
             }
             NodeKind::Sky(s) => f(s.environment.input),
@@ -611,6 +635,12 @@ pub trait SourceResolver {
 
     /// The source of custom content.
     fn custom(&mut self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError>;
+
+    /// The filled outlines of custom content (3D extrusion); `None` when its
+    /// provider has none.
+    fn outlines(&mut self, _content: &CustomContent) -> Option<Arc<crate::source::Outlines>> {
+        None
+    }
 }
 
 /// A resolver without footage or providers (solids and nested comps only).
@@ -846,6 +876,32 @@ pub(crate) fn plane_depth(
             })
         }
     }
+}
+
+/// Advanced 3D's Transparency of a 3D layer: the share of it that stays
+/// (1 − transparency), Transparency Rolloff taking transparency away where
+/// the layer is seen at a glancing angle (from the camera, at the centre of
+/// `rect`, its drawn rectangle in layer pixels).
+fn transparency_keep(comp: &RenderComp, layer: &RenderLayer, rect: &Rect) -> f32 {
+    let m = &layer.material;
+    let Some(matrix) = layer.matrix_3d.filter(|_| m.transparency > 0.0) else {
+        return 1.0;
+    };
+    let centre = matrix.transform_point3(glam::DVec3::new(
+        (rect.x0 + rect.x1) / 2.0,
+        (rect.y0 + rect.y1) / 2.0,
+        0.0,
+    ));
+    let normal = matrix
+        .x_axis
+        .truncate()
+        .cross(matrix.y_axis.truncate())
+        .normalize_or_zero();
+    let facing = normal
+        .dot((comp.view_camera().eye() - centre).normalize_or_zero())
+        .abs() as f32;
+    let t = m.transparency / 100.0 * (1.0 - m.transparency_rolloff / 100.0 * (1.0 - facing));
+    (1.0 - t).clamp(0.0, 1.0)
 }
 
 /// Converts a rectangle in space pixels to texel units at `pixel_scale`.
@@ -1118,8 +1174,34 @@ impl Builder<'_, '_> {
                 None => {}
             }
         }
-        attach_shadows(comp, &mut planned);
-        self.attach_model_shadows(comp, &mut planned);
+        // Ops drawn by a model pass (models, extruded text and shapes).
+        let solids: rustc_hash::FxHashSet<usize> = planned
+            .iter()
+            .filter(|(_, op)| self.is_mesh_op(op))
+            .map(|(index, _)| *index)
+            .collect();
+        attach_shadows(comp, &mut planned, &solids);
+        self.attach_model_shadows(comp, &mut planned, &solids);
+        // The planes casting shadows on models (Only casters too).
+        let plane_casters: Vec<PlaneCaster> = planned
+            .iter()
+            .filter(|(index, op)| {
+                let layer = &comp.layers[*index];
+                !solids.contains(index)
+                    && layer.material.casts_shadows != crate::light::ShadowMode::Off
+                    && op.opacity > 0.0
+            })
+            .filter_map(|(index, op)| {
+                Some(PlaneCaster {
+                    matrix: comp.layers[*index].matrix_3d?,
+                    rect: op.content,
+                    image: match op.input {
+                        OpInput::Image(id) => Some(id),
+                        OpInput::Solid { .. } => None,
+                    },
+                })
+            })
+            .collect();
         // Casts Shadows: Only: a caster that is not drawn itself.
         planned.retain(|(index, _)| {
             comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
@@ -1129,7 +1211,37 @@ impl Builder<'_, '_> {
         }
         // 3D models: one depth-buffered pass under the planes; each plane
         // over them is cut where it passes behind them.
-        let models = self.merge_models(comp, &mut planned);
+        let mut models = self.merge_models(comp, &mut planned, &solids);
+        if let Some((op, _)) = &mut models
+            && let OpInput::Image(id) = op.input
+            && !plane_casters.is_empty()
+        {
+            // The models read the planes' pixels: their pass moves after
+            // them (the emptied node is not run).
+            let keys: Vec<u64> = plane_casters
+                .iter()
+                .map(|p| p.image.map_or(0, |i| self.nodes[i.index()].key))
+                .collect();
+            let old = &mut self.nodes[id.index()];
+            let (rect, pixel_scale, key) = (old.rect, old.pixel_scale, hash_of(&(old.key, keys)));
+            if let NodeKind::Mesh(mesh) = &mut old.kind {
+                let moved = MeshNode {
+                    models: std::mem::take(&mut mesh.models),
+                    planes: plane_casters,
+                    camera: mesh.camera,
+                    comp_size: mesh.comp_size,
+                    linear: mesh.linear,
+                };
+                let node = self.push(Node {
+                    kind: NodeKind::Mesh(Box::new(moved)),
+                    rect,
+                    pixel_scale,
+                    key,
+                    cacheable: false,
+                });
+                op.input = OpInput::Image(node);
+            }
+        }
         let drawn = Self::depth_order_3d(comp, planned);
         if let Some((op, _)) = &models {
             ops.push(op.clone());
@@ -1147,16 +1259,20 @@ impl Builder<'_, '_> {
     /// 3D models with Casts Shadows on throw shadows on the lit layers of
     /// their 3D group that accept shadows (drawn into the layers' shadow
     /// maps, `exec/mesh.rs`).
-    fn attach_model_shadows(&self, comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
+    fn attach_model_shadows(
+        &self,
+        comp: &RenderComp,
+        planned: &mut [(usize, LayerOp)],
+        solids: &rustc_hash::FxHashSet<usize>,
+    ) {
         use crate::light::{ModelCaster, ShadowMode};
         let models: Arc<[ModelCaster]> = planned
             .iter()
             .filter(|(index, _)| {
-                let layer = &comp.layers[*index];
-                matches!(layer.content, LayerContent::Model(_))
-                    && layer.material.casts_shadows != ShadowMode::Off
+                solids.contains(index)
+                    && comp.layers[*index].material.casts_shadows != ShadowMode::Off
             })
-            .filter_map(|(_, op)| match op.input {
+            .filter_map(|(index, op)| match op.input {
                 OpInput::Image(id) => match &self.nodes[id.index()].kind {
                     NodeKind::Mesh(m) => {
                         m.models
@@ -1165,6 +1281,7 @@ impl Builder<'_, '_> {
                             .map(|m| ModelCaster {
                                 model: m.model.clone(),
                                 matrix: m.matrix,
+                                shadow_color: comp.layers[*index].material.shadow_color,
                             })
                     }
                     _ => None,
@@ -1180,7 +1297,7 @@ impl Builder<'_, '_> {
             let Some(lighting) = &op.lighting else {
                 continue;
             };
-            if matches!(layer.content, LayerContent::Model(_))
+            if solids.contains(index)
                 || layer.material.accepts_shadows == ShadowMode::Off
                 || !lighting.lights.iter().any(|l| l.casts_shadows)
             {
@@ -1193,6 +1310,11 @@ impl Builder<'_, '_> {
         }
     }
 
+    /// Whether `op` draws a model pass ([`MeshNode`]).
+    fn is_mesh_op(&self, op: &LayerOp) -> bool {
+        matches!(op.input, OpInput::Image(id) if matches!(self.nodes[id.index()].kind, NodeKind::Mesh(_)))
+    }
+
     /// Takes the model layers out of `planned` and joins them into one
     /// [`MeshNode`] (one depth buffer). Returns its op and the camera depth
     /// of the models' nearest corner.
@@ -1200,8 +1322,9 @@ impl Builder<'_, '_> {
         &mut self,
         comp: &RenderComp,
         planned: &mut Vec<(usize, LayerOp)>,
+        solids: &rustc_hash::FxHashSet<usize>,
     ) -> Option<(LayerOp, f64)> {
-        let is_model = |i: &usize| matches!(comp.layers[*i].content, LayerContent::Model(_));
+        let is_model = |i: &usize| solids.contains(i);
         let mut found: Vec<LayerOp> = Vec::new();
         planned.retain(|(index, op)| {
             let model = is_model(index);
@@ -1239,16 +1362,8 @@ impl Builder<'_, '_> {
         let nearest = mesh
             .models
             .iter()
-            .flat_map(|m| {
-                (0..8).map(move |k| {
-                    let corner = glam::DVec3::new(
-                        if k & 1 == 0 { -0.5 } else { 0.5 },
-                        if k & 2 == 0 { -0.5 } else { 0.5 },
-                        if k & 4 == 0 { -0.5 } else { 0.5 },
-                    );
-                    view.transform_point3(m.matrix.transform_point3(corner)).z
-                })
-            })
+            .flat_map(|m| m.model.corners(&m.matrix))
+            .map(|c| view.transform_point3(c).z)
             .fold(f64::MAX, f64::min);
         if found.len() > 1 {
             // Joined models draw with Normal (each keeps its opacity).
@@ -1407,6 +1522,7 @@ impl Builder<'_, '_> {
                 .hash(&mut h);
             c.opacity.to_bits().hash(&mut h);
             c.transmission.to_bits().hash(&mut h);
+            c.shadow_color.map(f32::to_bits).hash(&mut h);
             match c.pixels {
                 crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
                 crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
@@ -1415,6 +1531,7 @@ impl Builder<'_, '_> {
         for m in lighting.models.iter() {
             (Arc::as_ptr(&m.model) as usize).hash(&mut h);
             m.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
+            m.shadow_color.map(f32::to_bits).hash(&mut h);
         }
         let base = h.finish();
         let slot_keys: Vec<u64> = lighting
@@ -1656,6 +1773,27 @@ impl Builder<'_, '_> {
             }
         };
         let matrix = model_matrix(comp, layer);
+        self.plan_mesh(comp, index, mesh, matrix, canvas, scale, depth)
+    }
+
+    /// A 3D solid (a model, or an extruded text or shape layer; `matrix`:
+    /// its space → comp space) drawn through the comp's camera
+    /// ([`MeshNode`]) in the layer's place.
+    #[allow(clippy::too_many_arguments)]
+    fn plan_mesh(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        mesh: Arc<crate::model::Model>,
+        matrix: DMat4,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+    ) -> Result<Option<LayerOp>, RenderError> {
+        let layer = &comp.layers[index];
+        if layer.opacity <= 0.0 {
+            return Ok(None);
+        }
         let camera = comp.view_camera();
         // Where the model's box lands on screen (all of the canvas when a
         // corner is behind the camera).
@@ -1663,13 +1801,8 @@ impl Builder<'_, '_> {
         let mut lo = DVec2::splat(f64::MAX);
         let mut hi = DVec2::splat(f64::MIN);
         let mut everywhere = false;
-        for k in 0..8 {
-            let c = glam::DVec3::new(
-                if k & 1 == 0 { -0.5 } else { 0.5 },
-                if k & 2 == 0 { -0.5 } else { 0.5 },
-                if k & 4 == 0 { -0.5 } else { 0.5 },
-            );
-            match camera.project(matrix.transform_point3(c), size) {
+        for c in mesh.corners(&matrix) {
+            match camera.project(c, size) {
                 Some(p) => {
                     lo = lo.min(p);
                     hi = hi.max(p);
@@ -1722,7 +1855,11 @@ impl Builder<'_, '_> {
                     lights,
                     opacity: layer.opacity.clamp(0.0, 1.0),
                     environment,
+                    casts_shadows: layer.material.casts_shadows != crate::light::ShadowMode::Off,
+                    accepts_shadows: layer.material.accepts_shadows
+                        != crate::light::ShadowMode::Off,
                 }],
+                planes: Vec::new(),
                 camera,
                 comp_size: [comp.width, comp.height],
                 linear,
@@ -1888,6 +2025,27 @@ impl Builder<'_, '_> {
         let layer = &comp.layers[index];
         if let LayerContent::Model(model) = &layer.content {
             return self.plan_model(comp, index, model, canvas, scale, depth);
+        }
+        // Advanced 3D: an extruded text or shape layer is a solid.
+        if layer.extrusion > 0.0
+            && let (LayerContent::Custom(content), Some(matrix)) = (&layer.content, layer.matrix_3d)
+        {
+            let depth_px = layer.extrusion;
+            let bevel = layer.bevel;
+            let key = hash_of(&(
+                content.hash,
+                &content.provider,
+                depth_px.to_bits(),
+                bevel.map(|b| (b.style, b.inward, b.depth.to_bits(), b.hole_scale.to_bits())),
+            ));
+            let outlines = self.sources.outlines(content);
+            if let Some(mesh) = outlines.and_then(|o| {
+                crate::model::extrude::cached(key, || {
+                    crate::model::extrude::extrude(&o, depth_px, bevel)
+                })
+            }) {
+                return self.plan_mesh(comp, index, mesh, matrix, canvas, scale, depth);
+            }
         }
         let motion_samples = if self.native_motion_blur {
             &layer.motion_samples[..]
@@ -2186,9 +2344,38 @@ impl Builder<'_, '_> {
                         rect: content_rect,
                         shadow_map: None,
                         models: Arc::new([]),
+                        reflection: None,
                     })
                 })
             });
+        // Advanced 3D reflections of the picture of an environment light
+        // that reaches the layer.
+        let lighting = match lighting {
+            Some(l) if l.material.reflection_intensity > 0.0 => {
+                let light = l.lights.iter().find(|x| x.environment.is_some()).copied();
+                let environment = match light {
+                    Some(light) => self.environment_input(comp, &light, depth)?,
+                    None => None,
+                };
+                Some(match environment {
+                    Some(environment) => {
+                        let m = &l.material;
+                        Arc::new(Lighting {
+                            reflection: Some(crate::light::Reflection {
+                                environment,
+                                intensity: (m.reflection_intensity / 100.0).clamp(0.0, 1.0),
+                                sharpness: (m.reflection_sharpness / 100.0).clamp(0.0, 1.0),
+                                rolloff: (m.reflection_rolloff / 100.0).clamp(0.0, 1.0),
+                                linear: self.linear,
+                            }),
+                            ..(*l).clone()
+                        })
+                    }
+                    None => l,
+                })
+            }
+            other => other,
+        };
         let (transform, projection, motion) = match placement {
             Placement::Affine(t) => (t, None, None),
             Placement::General {
@@ -2205,7 +2392,7 @@ impl Builder<'_, '_> {
             layer: layer.path.clone(),
             input,
             transform,
-            opacity: layer.opacity.clamp(0.0, 1.0),
+            opacity: layer.opacity.clamp(0.0, 1.0) * transparency_keep(comp, layer, &content_rect),
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
             quality: layer.quality,
@@ -3403,14 +3590,18 @@ fn placement(
 /// Shadows inside one 3D group (AE-CMP-437): every lit layer that accepts
 /// shadows gets the other layers of the group that cast shadows, when one of
 /// its lights casts shadows.
-fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
+fn attach_shadows(
+    comp: &RenderComp,
+    planned: &mut [(usize, LayerOp)],
+    solids: &rustc_hash::FxHashSet<usize>,
+) {
     use crate::light::{CasterPixels, ShadowCaster, ShadowMode};
     let casters: Vec<(usize, ShadowCaster)> = planned
         .iter()
         .filter(|(index, op)| {
             comp.layers[*index].material.casts_shadows != ShadowMode::Off
                 && op.opacity > 0.0
-                && !matches!(comp.layers[*index].content, LayerContent::Model(_))
+                && !solids.contains(index)
         })
         .filter_map(|(index, op)| {
             let pixels = match &op.input {
@@ -3425,6 +3616,7 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
                     opacity: op.opacity,
                     transmission: comp.layers[*index].material.light_transmission,
                     pixels,
+                    shadow_color: comp.layers[*index].material.shadow_color,
                     footprints: Arc::new([]),
                 },
             ))

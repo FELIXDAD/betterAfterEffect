@@ -364,7 +364,20 @@ impl AeToolbar {
                     .labeled(egui::WidgetType::DragValue, tr(label))
                     .on_hover_text(tr(label));
                 }
-                ui.add_enabled_ui(false, |ui| widgets::link(ui, tr("Record Options...")));
+                let tip = if cfg!(target_os = "macos") {
+                    "To record pin motion, Command-click and drag pins"
+                } else {
+                    "To record pin motion, Ctrl-click and drag pins"
+                };
+                if widgets::link(ui, tr("Record Options..."))
+                    .on_hover_text(tr(tip))
+                    .clicked()
+                {
+                    crate::dialogs::open(
+                        cx.resources,
+                        crate::dialogs::Dialog::PuppetRecordOptions(o.puppet_record),
+                    );
+                }
             }
             Group::Hand | Group::Zoom | Group::Mesh | Group::Roto => {}
         }
@@ -425,7 +438,7 @@ fn add_targets(stage: &bae_model::Stage, session: &crate::session::SharedSession
 }
 
 /// The Add link and its menu (AE): one `shape.add_item` per pick.
-fn add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, o: &ToolOptions) {
+pub(crate) fn add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, o: &ToolOptions) {
     let session = common::session(cx.resources);
     let targets = add_targets(cx.stage, &session);
     let mut picked = None;

@@ -22,6 +22,8 @@ pub struct NewPlaceholder {
     /// Duration in frames at `fps`.
     frames: i64,
     name_focused: bool,
+    /// File ▸ Replace Footage ▸ Placeholder…: the item it takes the place of.
+    pub(crate) replace: Option<bae_model::PrimPath>,
 }
 
 impl Default for NewPlaceholder {
@@ -34,27 +36,38 @@ impl Default for NewPlaceholder {
             fps: 30.0,
             frames: 60 * 30,
             name_focused: false,
+            replace: None,
         }
     }
 }
 
 impl NewPlaceholder {
+    /// File ▸ Replace Footage ▸ Placeholder…: the placeholder takes `item`'s
+    /// place.
+    pub(crate) fn replacing(item: bae_model::PrimPath) -> Self {
+        NewPlaceholder {
+            replace: Some(item),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn ui(&mut self, ctx: &egui::Context, cx: &mut PanelContext<'_>) -> bool {
         let id = Id::new("bae-ui-motion.new-placeholder");
         let shown = dialog::window(ctx, id, tr("New Placeholder"), |ui| self.body(ui, id));
         match shown {
             Some(Outcome::Ok) => {
-                cx.invoke_with(
-                    "item.new",
-                    json!({
-                        "kind": "placeholder",
-                        "name": self.name.trim(),
-                        "width": self.width as u32,
-                        "height": self.height as u32,
-                        "frame_rate": self.fps,
-                        "duration": Time::from_seconds(self.frames as f64 / self.fps),
-                    }),
-                );
+                let mut params = json!({
+                    "kind": "placeholder",
+                    "name": self.name.trim(),
+                    "width": self.width as u32,
+                    "height": self.height as u32,
+                    "frame_rate": self.fps,
+                    "duration": Time::from_seconds(self.frames as f64 / self.fps),
+                });
+                if let Some(old) = &self.replace {
+                    params["replace"] = json!(old);
+                }
+                cx.invoke_with("item.new", params);
                 false
             }
             Some(Outcome::Cancel) => false,
