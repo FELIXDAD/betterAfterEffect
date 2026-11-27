@@ -27,6 +27,7 @@ mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
 mod camera_preferences;
+mod camera_tracker;
 mod classic_effects;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
@@ -106,6 +107,7 @@ pub(crate) fn build_app() -> App {
         .add_module(crate::mcp_cli::McpCliModule)
         .add_module(crate::pack_cli::PackCliModule)
         .add_module(bae_render::RenderModule)
+        .add_module(bae_effects::EffectsModule)
         .add_module(bae_motion::MotionModule)
         .add_module(bae_plugin::PluginModule)
         .add_module(crate::shell::ShellModule)

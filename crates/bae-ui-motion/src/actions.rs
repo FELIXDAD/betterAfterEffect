@@ -79,6 +79,10 @@ pub mod ids {
     /// File > Import > Solid... / Placeholder...: a new solid or placeholder item.
     pub const IMPORT_SOLID: &str = "motion.file.import_solid";
     pub const IMPORT_PLACEHOLDER: &str = "motion.file.import_placeholder";
+    /// File ▸ Replace Footage ▸ Solid… / Placeholder…: a new solid or
+    /// placeholder takes the selected footage item's place.
+    pub const REPLACE_WITH_SOLID: &str = "motion.file.replace_footage_solid";
+    pub const REPLACE_WITH_PLACEHOLDER: &str = "motion.file.replace_footage_placeholder";
     /// File > New Comp from Selection... (Alt+\).
     pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
@@ -128,6 +132,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const TRACK_CAMERA: &str = "motion.anim.track_camera";
     pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
@@ -273,6 +278,10 @@ pub mod ids {
     /// File ▸ Dependencies ▸ Find Missing Footage: the Project panel lists the
     /// footage whose file is not found.
     pub const FIND_MISSING_FOOTAGE: &str = "motion.file.find_missing_footage";
+    /// File ▸ Dependencies ▸ Find Missing Effects / Fonts: the Project panel
+    /// lists the comps that use them.
+    pub const FIND_MISSING_EFFECTS: &str = "motion.file.find_missing_effects";
+    pub const FIND_MISSING_FONTS: &str = "motion.file.find_missing_fonts";
     /// Help ▸ System Compatibility Report…
     pub const SYSTEM_REPORT: &str = "motion.help.system_compatibility_report";
     pub const CONSOLIDATE: &str = "motion.file.consolidate_all_footage";
@@ -399,6 +408,11 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::IMPORT_FILE, "Import File"),
     (ids::IMPORT_SOLID, "Solid..."),
     (ids::IMPORT_PLACEHOLDER, "Placeholder..."),
+    (ids::REPLACE_WITH_SOLID, "Replace Footage: Solid..."),
+    (
+        ids::REPLACE_WITH_PLACEHOLDER,
+        "Replace Footage: Placeholder...",
+    ),
     (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
@@ -508,6 +522,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ENABLE_LOGGING, "Enable Logging"),
     (ids::REMOVE_UNUSED, "Remove Unused Footage"),
     (ids::FIND_MISSING_FOOTAGE, "Find Missing Footage"),
+    (ids::FIND_MISSING_EFFECTS, "Find Missing Effects"),
+    (ids::FIND_MISSING_FONTS, "Find Missing Fonts"),
     (ids::SYSTEM_REPORT, "System Compatibility Report..."),
     (ids::CONSOLIDATE, "Consolidate All Footage"),
     (ids::REDUCE_PROJECT, "Reduce Project"),
@@ -526,6 +542,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
     (ids::TRACK_MOTION, "Track Motion"),
+    (ids::TRACK_CAMERA, "Track Camera"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
@@ -1302,6 +1319,25 @@ fn clean_up(cx: &mut PanelContext<'_>, session: &SharedSession, id: &str) {
     crate::dialogs::alert(cx, tr(title), message.replace("{n}", &n.to_string()));
 }
 
+/// The footage item File ▸ Replace Footage acts on: the first footage or solid
+/// selected in the Project panel, else the selected layer's source.
+fn footage_to_replace(stage: &bae_model::Stage, session: &SharedSession) -> Option<PrimPath> {
+    let asset = |p: &PrimPath| {
+        stage
+            .prim(p)
+            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+    };
+    let s = session.lock();
+    if let Some(item) = s.selected_items.iter().find(|p| asset(p)) {
+        return Some(item.clone());
+    }
+    let layer = s.selected_layers.first()?;
+    let source = stage
+        .prim(layer)
+        .and_then(|v| v.value("source").and_then(|v| v.as_prim_ref()).cloned())?;
+    asset(&source).then_some(source)
+}
+
 /// File ▸ Add Footage to Comp: the selected Project items (not folders) as
 /// layers of the active comp, the first one on top (AE).
 fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -1511,6 +1547,13 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::TRACK_CAMERA {
+        let layers = session.lock().selected_layers.clone();
+        if !layers.is_empty() && layers.iter().all(|l| !query::is_locked(stage, l)) {
+            crate::effects::apply(cx, &layers, bae_motion::camera_track::MATCH_NAME);
+        }
+        return true;
+    }
     if id == ids::CACHE_WHEN_IDLE {
         if let Some(store) = cx.resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
             let mut prefs = (*store.current()).clone();
@@ -1574,6 +1617,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if let Some(camera) = camera_settings_target(stage, session) {
                 crate::dialogs::layer_settings(cx, session, &camera);
             }
+            return true;
+        }
+        ids::FIND_MISSING_EFFECTS | ids::FIND_MISSING_FONTS => {
+            let term = if id == ids::FIND_MISSING_EFFECTS {
+                crate::project::MISSING_EFFECTS
+            } else {
+                crate::project::MISSING_FONTS
+            };
+            session.lock().project_search = Some(bae_ui::tr(term).to_owned());
+            cx.open_panel("project");
             return true;
         }
         ids::FIND_MISSING_FOOTAGE => {
@@ -1756,6 +1809,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             let prefs = crate::prefs::current(cx.resources);
             let still = crate::import::ImportDefaults::of(&prefs).still_duration;
             crate::dialogs::comp_from_selection(cx, items, still);
+            return true;
+        }
+        ids::REPLACE_WITH_SOLID | ids::REPLACE_WITH_PLACEHOLDER => {
+            if let Some(item) = footage_to_replace(stage, session) {
+                crate::dialogs::replace_footage_with(
+                    cx,
+                    session,
+                    item,
+                    id == ids::REPLACE_WITH_SOLID,
+                );
+            }
             return true;
         }
         ids::IMPORT_SOLID => {
@@ -3242,6 +3306,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Open Layer Source", "打开图层源"),
     ("Add Footage to Comp", "将素材添加到合成"),
     ("Edit Original...", "编辑原稿..."),
+    ("Replace Footage: Solid...", "替换素材：纯色..."),
+    ("Replace Footage: Placeholder...", "替换素材：占位符..."),
     ("Reveal Layer Source in Project", "在项目中显示图层源"),
     ("Remember Interpretation", "记住解释"),
     ("Apply Interpretation", "应用解释"),
@@ -3261,6 +3327,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // File ▸ Dependencies (AE 2026 zh_CN: menu items and their alerts).
     ("Remove Unused Footage", "删除未用过的素材"),
     ("Find Missing Footage", "查找缺失的素材"),
+    ("Find Missing Effects", "查找缺失的效果"),
+    ("Find Missing Fonts", "查找缺失的字体"),
+    ("Missing Effects", "缺失效果"),
+    ("Missing Fonts", "缺失字体"),
     ("Missing Footage", "缺失素材"),
     ("System Compatibility Report...", "系统兼容性报告..."),
     ("System Compatibility Report", "系统兼容性报告"),

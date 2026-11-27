@@ -170,3 +170,64 @@ fn gpu_finds_translated_feature_in_all_channels() {
         }
     }
 }
+
+#[test]
+fn camera_features_follow_a_textured_plate_and_reject_a_blank_one() {
+    let Some(gpu) = shared_context() else {
+        return;
+    };
+    let tracker = super::features::Features::new(gpu.device());
+    let texture = |dx: u32, blank: bool| {
+        let mut pixels = Vec::new();
+        for y in 0..96u32 {
+            for x in 0..128u32 {
+                let x = x.wrapping_sub(dx);
+                let seed = x.wrapping_mul(747796405) ^ y.wrapping_mul(2891336453);
+                let gray = if blank {
+                    0
+                } else {
+                    ((seed ^ (seed >> 15)).wrapping_mul(2246822519) >> 24) as u8
+                };
+                pixels.extend_from_slice(&[gray, gray, gray, 255]);
+            }
+        }
+        create_texture_with_data(
+            &gpu,
+            &wgpu::TextureDescriptor {
+                label: Some("Camera plate"),
+                size: wgpu::Extent3d {
+                    width: 128,
+                    height: 96,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            &pixels,
+        )
+        .unwrap()
+    };
+    let (a, b, blank) = (texture(0, false), texture(3, false), texture(0, true));
+    let mut ids = vec![];
+    let seeds = tracker.measure(&gpu, &a, &a, 0, false, &mut ids).unwrap();
+    let moved = tracker.measure(&gpu, &a, &b, 1, false, &mut ids).unwrap();
+    let hits = moved
+        .iter()
+        .filter(|p| {
+            seeds.iter().find(|s| s.id == p.id).is_some_and(|s| {
+                (p.pixel[0] - s.pixel[0] - 3.).hypot(p.pixel[1] - s.pixel[1]) < 0.35
+            })
+        })
+        .count();
+    assert!(hits > 100, "{hits} of {} seeds", seeds.len());
+    assert!(
+        tracker
+            .measure(&gpu, &blank, &blank, 0, false, &mut ids)
+            .unwrap()
+            .is_empty()
+    );
+}

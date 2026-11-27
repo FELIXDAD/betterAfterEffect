@@ -312,6 +312,7 @@ pub(crate) struct CompiledComp {
     pub(crate) bg_color: [f64; 4],
     pub(crate) motion_blur: MotionBlur,
     pub(crate) frame_blending: bool,
+    pub(crate) advanced_3d: bool,
     pub(crate) layers: Vec<CompiledLayer>,
     /// Comp markers, by time (expressions' `thisComp.marker`).
     pub(crate) markers: Vec<CompiledMarker>,
@@ -682,6 +683,7 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         bg_color,
         motion_blur,
         frame_blending: setting_bool(&view, ct, c::FRAME_BLENDING),
+        advanced_3d: setting_str(&view, ct, "renderer").as_deref() == Some("advanced_3d"),
         markers: compile_markers(stage, path),
         layers,
         deps,
@@ -845,6 +847,17 @@ fn compile_layer(
     .into_iter()
     .map(|(a, d)| (a, p(a, d)))
     .collect();
+    if matches!(kind, LayerKind::Text | LayerKind::Shape) {
+        for (a, d) in [
+            ("geometry:bevel_style", Value::Int(1)),
+            ("geometry:bevel_direction", Value::Int(1)),
+            ("geometry:bevel_depth", Value::Float(2.0)),
+            ("geometry:hole_bevel_depth", Value::Float(100.0)),
+            ("geometry:extrusion_depth", Value::Float(0.0)),
+        ] {
+            options.push((a, p(a, d)));
+        }
+    }
     match kind {
         LayerKind::Camera => options.push((
             cam::DEPTH_OF_FIELD,
@@ -1275,6 +1288,7 @@ impl CompiledComp {
                     camera: None,
                     light: None,
                     material: None,
+                    geometry: None,
                     depends_on: Vec::new(),
                 }
             })
@@ -1350,6 +1364,20 @@ impl CompiledComp {
                     transparency_rolloff: percent("material:transparency_rolloff", 0.0),
                     index_of_refraction: percent("material:index_of_refraction", 1.0),
                 });
+                if matches!(layer.kind, LayerKind::Text | LayerKind::Shape) {
+                    let int = |attr: &str, default: u8| {
+                        opt(attr)
+                            .and_then(|v| v.as_f64())
+                            .map_or(default, |n| n.round().clamp(0.0, 255.0) as u8)
+                    };
+                    out[i].geometry = Some(crate::evaluated::GeometryState {
+                        bevel_style: int("geometry:bevel_style", 1),
+                        bevel_direction: int("geometry:bevel_direction", 1),
+                        bevel_depth: percent("geometry:bevel_depth", 2.0),
+                        hole_bevel_depth: percent("geometry:hole_bevel_depth", 100.0),
+                        extrusion_depth: percent("geometry:extrusion_depth", 0.0).max(0.0),
+                    });
+                }
             }
             if let Some(cm) = &layer.camera {
                 out[i].camera = Some(CameraState {
@@ -1410,6 +1438,7 @@ impl CompiledComp {
             bg_color: self.bg_color,
             motion_blur: self.motion_blur,
             frame_blending: self.frame_blending,
+            advanced_3d: self.advanced_3d,
             layers: out,
             camera,
             errors: Vec::new(),
