@@ -125,6 +125,7 @@ pub(crate) struct PlaybackStats {
     next_source: u64,
     sample: Option<Instant>,
     frames: u32,
+    slow: bool,
 }
 
 /// Preview panel ▸ Range (AE's choices for the Spacebar shortcut).
@@ -468,6 +469,7 @@ pub struct Session {
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
+    mute_slow_preview: bool,
     last_scrub: Option<Time>,
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
@@ -1303,6 +1305,7 @@ impl Session {
         if self.mix_has_audio
             && let Some(output) = &self.output
         {
+            output.set_muted(false);
             output.seek(at, range, repeat);
             return true;
         }
@@ -1310,6 +1313,8 @@ impl Session {
     }
 
     pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        self.mute_slow_preview =
+            crate::prefs::current(cx.resources).bool("previews.mute_audio_when_not_realtime");
         self.prepare_mix(cx, info);
         self.play(info);
         let options = self.preview_options().clone();
@@ -1354,6 +1359,7 @@ impl Session {
             && let Some(output) = &self.output
         {
             output.stop();
+            output.set_muted(false);
         }
         self.playback = None;
         self.last_scrub = None;
@@ -1364,6 +1370,14 @@ impl Session {
     /// a new mix restarts the device and the clock at the current frame: a late
     /// device or a live layer edit. The shell ticks the clock.
     pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        let mute =
+            crate::prefs::current(cx.resources).bool("previews.mute_audio_when_not_realtime");
+        if self.mute_slow_preview != mute
+            && let Some(output) = &self.output
+        {
+            output.set_muted(mute && self.audio_clock && self.playback_stats.slow);
+        }
+        self.mute_slow_preview = mute;
         if self.prepare_mix(cx, info)
             && let Some(pb) = &self.playback
             && pb.caching.is_none()
@@ -1522,6 +1536,7 @@ impl Session {
     /// Count only frames submitted to the native presentation surface.
     pub fn frame_presented(&mut self, now: Instant) {
         let Some(pb) = &self.playback else { return };
+        let skip = self.preview_options().skip;
         let stats = &mut self.playback_stats;
         if let Some(time) = stats.drawn.take() {
             let (first, last) = pb.frame_range();
@@ -1538,6 +1553,16 @@ impl Session {
         }
         let elapsed = now.duration_since(*stats.sample.get_or_insert(now));
         if elapsed >= Duration::from_millis(500) {
+            // Deliberately skipped frames still play in real time. Allow one
+            // presentation boundary per sample window before declaring a drop.
+            let requested = pb.fps / f64::from(skip.saturating_add(1));
+            stats.slow = f64::from(stats.frames + 1) < requested * elapsed.as_secs_f64();
+            if self.mute_slow_preview
+                && self.audio_clock
+                && let Some(output) = &self.output
+            {
+                output.set_muted(stats.slow);
+            }
             stats.fps = f64::from(stats.frames) / elapsed.as_secs_f64();
             stats.frames = 0;
             stats.sample = Some(now);
@@ -1605,6 +1630,26 @@ mod tests {
         assert_eq!(s.time(&i.path), FrameRate::FPS_30.frame_to_time(59));
         s.set_time(&i, Time(-5));
         assert_eq!(s.time(&i.path), Time::ZERO);
+    }
+
+    #[test]
+    fn preview_recovers_from_a_slow_presentation_window() {
+        let i = info();
+        let mut session = Session::default();
+        session.preview.selected = PreviewShortcut::ShiftNumpad;
+        session.play(&i);
+        // Editing another shortcut does not change the running preview's skip.
+        session.preview.selected = PreviewShortcut::Space;
+        let start = session.playback.as_ref().unwrap().started;
+        session.frame_presented(start + Duration::from_millis(500));
+        assert!(session.playback_stats.slow);
+        for n in (16..=30).step_by(2) {
+            let now = start + Duration::from_secs_f64(f64::from(n) / 30.0 + 0.001);
+            session.tick(now);
+            session.drew_preview(session.time(&i.path));
+            session.frame_presented(now);
+        }
+        assert!(!session.playback_stats.slow);
     }
 
     #[test]
