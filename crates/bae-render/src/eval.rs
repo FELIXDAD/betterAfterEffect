@@ -331,6 +331,8 @@ impl<'a> MockPass<'a> {
                 }),
                 None => BlendMode::Normal,
             };
+            out.quality =
+                bae_anim::LayerQuality::from_token(string(layer, "quality", local).as_deref());
             out.preserve_transparency =
                 boolean(layer, "preserve_transparency", local).unwrap_or(false);
             out.track_matte = string(layer, "track_matte", local)
@@ -478,7 +480,14 @@ impl<'a> MockPass<'a> {
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: local,
-                    sequence: None,
+                    sequence: (asset_kind == "sequence").then(|| match src.value("frame_rate") {
+                        Some(Value::FrameRate(rate)) => *rate,
+                        _ => FrameRate::FPS_30,
+                    }),
+                    alphabetical: src
+                        .value("sequence:pattern")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s.starts_with("*.")),
                     blend: None,
                 }))
             }

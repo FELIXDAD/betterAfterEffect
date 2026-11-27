@@ -2333,3 +2333,28 @@ fn exponential_scale_and_sequence_layers() {
     assert_eq!(span(&fx, &a), (7 * SEC, 10 * SEC));
     assert_eq!(fx.keys(&a, opacity), vec![2 * SEC, 3 * SEC]);
 }
+
+#[test]
+fn crop_comp_resizes_and_keeps_the_kept_part_in_place() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let world = fx.world_pos(&comp, &solid);
+    fx.run(
+        "comp.crop",
+        json!({"comp": comp, "rect": [100.4, 50.0, 740.0, 410.2]}),
+    );
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    // Rounded outward: 100..740 × 50..411.
+    assert_eq!((info.width, info.height), (640, 361));
+    let moved = fx.world_pos(&comp, &solid);
+    assert!((moved.x - (world.x - 100.0)).abs() < 1e-6, "{moved:?}");
+    assert!((moved.y - (world.y - 50.0)).abs() < 1e-6, "{moved:?}");
+    assert!(
+        fx.try_run(
+            "comp.crop",
+            json!({"comp": comp, "rect": [10.0, 0.0, 10.0, 10.0]})
+        )
+        .is_err()
+    );
+}

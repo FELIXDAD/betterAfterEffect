@@ -187,24 +187,30 @@ impl ProjectPanel {
             return;
         };
         let stage = cx.stage;
-        let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
-        if self.thumbnail_grid {
-            crate::viewer::checkerboard(p, thumb, cx.resources);
+        let x = if crate::prefs::current(cx.resources)
+            .bool("appearance.disable_thumbnails_in_project_panel")
+        {
+            rect.left() + 8.0
         } else {
-            p.rect_filled(thumb, 1.0, color::FIELD);
-        }
-        let icon = match item_kind(stage, path) {
-            Some(ItemKind::Comp) => Icon::Composition,
-            Some(ItemKind::Folder) => Icon::Folder,
-            _ => Icon::Footage,
+            let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
+            if self.thumbnail_grid {
+                crate::viewer::checkerboard(p, thumb, cx.resources);
+            } else {
+                p.rect_filled(thumb, 1.0, color::FIELD);
+            }
+            let icon = match item_kind(stage, path) {
+                Some(ItemKind::Comp) => Icon::Composition,
+                Some(ItemKind::Folder) => Icon::Folder,
+                _ => Icon::Footage,
+            };
+            icons::paint(
+                p,
+                Rect::from_center_size(thumb.center(), vec2(20.0, 20.0)),
+                icon,
+                color::ICON_DIM,
+            );
+            thumb.right() + 10.0
         };
-        icons::paint(
-            p,
-            Rect::from_center_size(thumb.center(), vec2(20.0, 20.0)),
-            icon,
-            color::ICON_DIM,
-        );
-        let x = thumb.right() + 10.0;
         let mut y = rect.top() + 12.0;
         let mut line = |text: String, c| {
             p.text(pos2(x, y), Align2::LEFT_CENTER, text, theme::small(), c);
@@ -372,8 +378,13 @@ impl Panel for ProjectPanel {
             cx.invoke(crate::actions::ids::PROJECT_SETTINGS);
             ui.close();
         }
+        let thumbnails = !crate::prefs::current(cx.resources)
+            .bool("appearance.disable_thumbnails_in_project_panel");
         if ui
-            .checkbox(&mut self.thumbnail_grid, tr("Thumbnail Transparency Grid"))
+            .add_enabled(
+                thumbnails,
+                egui::Checkbox::new(&mut self.thumbnail_grid, tr("Thumbnail Transparency Grid")),
+            )
             .changed()
         {
             ui.close();
@@ -567,8 +578,10 @@ impl Panel for ProjectPanel {
                     if resp.double_clicked() {
                         match row.kind {
                             ItemKind::Comp => open_comp = Some(row.path.clone()),
-                            // AE: footage opens in the Footage panel.
-                            ItemKind::Footage => open_footage = Some(row.path.clone()),
+                            // AE: footage and solids open in the Footage panel.
+                            ItemKind::Footage | ItemKind::Solid => {
+                                open_footage = Some(row.path.clone())
+                            }
                             ItemKind::Folder if !self.collapsed.remove(&row.path) => {
                                 self.collapsed.insert(row.path.clone());
                             }
@@ -727,7 +740,7 @@ impl Panel for ProjectPanel {
                     .find(|(r, _)| r.contains(p))
                     .map(|(_, f)| f.clone())
             });
-            crate::import::import_paths(cx, &dropped, folder);
+            crate::import::drop_paths(cx, &dropped, folder, None);
         }
         // Enter renames the selected item (AE) — unless a focused widget, e.g. a
         // button in another panel, took the Enter.
@@ -782,8 +795,14 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
                 (Some(w), Some(h)) => format!("{w} × {h}"),
                 _ => String::new(),
             };
+            let placeholder = v
+                .as_ref()
+                .and_then(|v| query::static_value(v, "kind"))
+                .is_some_and(|k| matches!(k, Value::Enum(k) if k == "placeholder"));
             let ty = if kind == ItemKind::Solid {
                 "Solid"
+            } else if placeholder {
+                "Placeholder"
             } else {
                 "Footage"
             };

@@ -794,3 +794,57 @@ fn timeline_right_click_menus() {
         "layer menu on #: {texts:?}"
     );
 }
+
+/// #750: in a small window (down to 640×360 points, a 1000×700 window at
+/// 150 % on Windows) the timeline's layer rows can be seen: directly, or by
+/// scrolling a panel too short for its header.
+#[test]
+fn small_windows_show_and_scroll_the_timeline_rows() {
+    for size in [
+        egui::vec2(1280.0, 800.0),
+        egui::vec2(1000.0, 700.0),
+        egui::vec2(853.0, 500.0),
+        egui::vec2(640.0, 360.0),
+    ] {
+        let mut h = gui_sized(Gui::new(), size);
+        comp_with(&mut h, &["motion.layer.new.null"; 6]);
+        settle(&mut h);
+        let tab = find_texts(&h, |t| t.starts_with("Timeline"))
+            .into_iter()
+            .next()
+            .expect("timeline tab");
+        let names = h.state().layer_names();
+        let in_timeline = |h: &Ui| {
+            names
+                .iter()
+                .filter(|n| {
+                    find_texts(h, |t| t == n.as_str())
+                        .iter()
+                        .any(|r| r.top() > tab.bottom())
+                })
+                .count()
+        };
+        // Wheel down over the panel (a short one scrolls as a whole).
+        let over = tab.center() + egui::vec2(0.0, 30.0);
+        send(&mut h, Event::PointerMoved(over));
+        for _ in 0..6 {
+            send(
+                &mut h,
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -40.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                },
+            );
+            settle(&mut h);
+        }
+        let shown = in_timeline(&h);
+        eprintln!("{size:?}: {shown} of {} rows", names.len());
+        assert!(
+            shown > 0,
+            "{size:?}: no layer row in {:?}",
+            painted_texts(&h)
+        );
+    }
+}

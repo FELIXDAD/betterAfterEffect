@@ -44,6 +44,9 @@ pub struct ImportFile {
 #[derive(Deserialize, JsonSchema)]
 pub struct ImportParams {
     pub files: Vec<ImportFile>,
+    /// Label of newly created folders in a directory import.
+    #[serde(default)]
+    pub folder_label: Option<i64>,
     /// Project folder to import into (default the assets folder).
     #[serde(default)]
     pub parent: Option<PrimPath>,
@@ -52,6 +55,12 @@ pub struct ImportParams {
     /// Timeline panel (AE), in the same undo step.
     #[serde(default)]
     pub comp: Option<PrimPath>,
+    /// Put multiple dropped footage layers into one nested composition.
+    #[serde(default)]
+    pub precompose: bool,
+    /// Create a composition matching the first imported source.
+    #[serde(default)]
+    pub create_comp: bool,
 }
 
 /// Output of `item.import`.
@@ -94,6 +103,7 @@ pub(crate) fn folder_path(
     tx: &mut Transaction<'_>,
     parent: &PrimPath,
     rel: &str,
+    label: Option<i64>,
 ) -> Result<PrimPath, CommandError> {
     let mut cur = parent.clone();
     for part in rel.split('/').map(str::trim).filter(|p| !p.is_empty()) {
@@ -105,12 +115,7 @@ pub(crate) fn folder_path(
         });
         cur = match existing {
             Some(c) => c,
-            None => {
-                let path = child(&cur, &query::unique_child_name(tx.stage(), &cur, part))?;
-                create(tx, &path, PrimType::FOLDER, None)?;
-                set(tx, &path, "name", Value::String(part.to_owned()))?;
-                path
-            }
+            None => crate::comp::create_project_folder(tx, &cur, part.to_owned(), label)?,
         };
     }
     Ok(cur)
@@ -128,6 +133,26 @@ impl Command for ImportItems {
         if p.files.is_empty() {
             return Err(fail("no files given"));
         }
+        let comp = if p.create_comp {
+            if p.comp.is_some() {
+                return Err(fail("choose a new or an existing composition"));
+            }
+            let first = &p.files[0];
+            let mut settings = serde_json::json!({"name": first.name, "parent": p.parent});
+            for key in ["width", "height", "duration", "pixel_aspect", "frame_rate"] {
+                match first.attrs.get(key) {
+                    Some(Value::Int(value)) => settings[key] = (*value).into(),
+                    Some(Value::Float(value)) => settings[key] = (*value).into(),
+                    Some(Value::Time(value)) => settings[key] = value.0.into(),
+                    Some(Value::FrameRate(rate)) => settings["fps"] = rate.as_f64().into(),
+                    _ => {}
+                }
+            }
+            let params = serde_json::from_value(settings).map_err(|e| fail(e.to_string()))?;
+            Some(crate::comp::CreateComp.run(tx, params)?.path)
+        } else {
+            p.comp
+        };
         let parent = match p.parent {
             Some(parent) => {
                 tx.stage().require_prim(&parent)?;
@@ -145,11 +170,15 @@ impl Command for ImportItems {
             let path = Path::new(&f.path);
             let file = AssetFile::from_path(path, None, false)
                 .map_err(|e| fail(format!("cannot import {}: {e}", f.path)))?;
-            if let Some(bad) = f.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
+            if let Some((bad, _)) = f.attrs.iter().find(|(k, v)| {
+                !(ATTRS.contains(&k.as_str())
+                    || (crate::project_settings::is_metadata_field(k)
+                        && matches!(v, Value::String(_))))
+            }) {
                 return Err(fail(format!("{bad} is not a footage attribute")));
             }
             let folder = match f.folder.as_deref() {
-                Some(rel) => folder_path(tx, &parent, rel)?,
+                Some(rel) => folder_path(tx, &parent, rel, p.folder_label)?,
                 None => parent.clone(),
             };
             let name = f
@@ -174,13 +203,13 @@ impl Command for ImportItems {
             for op in file.to_ops(&item) {
                 tx.apply(op)?;
             }
-            if f.folder.is_none() {
+            if f.folder.is_none() || p.create_comp {
                 add.push((item.clone(), audio_only));
             }
             items.push(item);
         }
         let mut layers = Vec::new();
-        if let Some(comp) = p.comp {
+        if let Some(comp) = comp {
             // Added bottom-up at the top of the stack: the first file ends on top.
             for (item, audio_only) in add.into_iter().rev() {
                 let kind = if audio_only {
@@ -190,8 +219,140 @@ impl Command for ImportItems {
                 };
                 layers.insert(0, add_imported_layer(tx, &comp, kind, &item)?);
             }
+            if p.precompose && layers.len() > 1 {
+                let result = crate::precompose::Precompose.run(
+                    tx,
+                    crate::precompose::PrecomposeParams {
+                        layers,
+                        name: None,
+                        mode: Default::default(),
+                        adjust_duration: false,
+                        time: None,
+                    },
+                )?;
+                layers = vec![result.layer];
+            }
         }
         Ok(ImportOutput { items, layers })
+    }
+}
+
+/// A new solid or placeholder item of the Project panel, no layer
+/// (File ▸ Import ▸ Solid… / Placeholder…).
+pub struct NewItem;
+
+/// What [`NewItem`] makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NewItemKind {
+    Solid,
+    Placeholder,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct NewItemParams {
+    pub kind: NewItemKind,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    #[serde(default)]
+    pub pixel_aspect: Option<f64>,
+    /// Solid color (solids).
+    #[serde(default)]
+    pub color: Option<[f64; 4]>,
+    /// Frames per second (placeholders).
+    #[serde(default)]
+    pub frame_rate: Option<f64>,
+    /// Length (placeholders).
+    #[serde(default)]
+    pub duration: Option<bae_model::Time>,
+    /// The folder to put it in (default: Solids for a solid, the items folder
+    /// for a placeholder).
+    #[serde(default)]
+    pub parent: Option<PrimPath>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct NewItemOutput {
+    pub item: PrimPath,
+}
+
+impl Command for NewItem {
+    type Params = NewItemParams;
+    type Output = NewItemOutput;
+    const ID: &'static str = "item.new";
+    const TITLE: &'static str = "New Item";
+    const DESCRIPTION: &'static str = "A solid (color, size, pixel aspect) or placeholder (size, frame rate, duration) item in the Project panel without a layer: AE File > Import > Solid... and Placeholder.... One undo step.";
+
+    fn run(
+        &self,
+        tx: &mut Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<NewItemOutput, CommandError> {
+        if !(1..=30000).contains(&p.width) || !(1..=30000).contains(&p.height) {
+            return Err(fail("size must be 1–30000 pixels"));
+        }
+        let name = p.name.trim().to_owned();
+        if name.is_empty() {
+            return Err(fail("the item needs a name"));
+        }
+        let parent = match p.parent {
+            Some(parent) => {
+                tx.stage().require_prim(&parent)?;
+                parent
+            }
+            None => {
+                let folder = match p.kind {
+                    NewItemKind::Solid => query::SOLIDS_FOLDER,
+                    NewItemKind::Placeholder => ASSETS_FOLDER,
+                };
+                let folder = PrimPath::new(folder).expect("valid");
+                ensure_folder(tx, &folder)?;
+                folder
+            }
+        };
+        let item = child(
+            &parent,
+            &query::unique_child_name(tx.stage(), &parent, &name),
+        )?;
+        create(tx, &item, PrimType::ASSET, None)?;
+        set(tx, &item, "name", Value::String(name))?;
+        set(tx, &item, "width", Value::Int(i64::from(p.width)))?;
+        set(tx, &item, "height", Value::Int(i64::from(p.height)))?;
+        if let Some(par) = p.pixel_aspect {
+            if !(par.is_finite() && (0.01..=100.0).contains(&par)) {
+                return Err(fail("pixel aspect ratio must be between 0.01 and 100"));
+            }
+            if par != 1.0 {
+                set(tx, &item, "pixel_aspect", Value::Float(par))?;
+            }
+        }
+        match p.kind {
+            NewItemKind::Solid => {
+                set(tx, &item, "kind", Value::Enum("solid".into()))?;
+                let color = p.color.unwrap_or([0.5, 0.5, 0.5, 1.0]);
+                set(tx, &item, "solid_color", Value::Color(color))?;
+            }
+            NewItemKind::Placeholder => {
+                set(tx, &item, "kind", Value::Enum("placeholder".into()))?;
+                let fps = p.frame_rate.unwrap_or(30.0);
+                if !(1.0..=999.0).contains(&fps) {
+                    return Err(fail("frame rate must be 1–999"));
+                }
+                set(
+                    tx,
+                    &item,
+                    "frame_rate",
+                    Value::FrameRate(bae_model::FrameRate::from_fps(fps)),
+                )?;
+                let duration = p.duration.unwrap_or(bae_model::Time::from_seconds(60.0));
+                if duration <= bae_model::Time::ZERO {
+                    return Err(fail("duration must be positive"));
+                }
+                set(tx, &item, "duration", Value::Time(duration))?;
+            }
+        }
+        Ok(NewItemOutput { item })
     }
 }
 
@@ -205,6 +366,45 @@ pub(crate) fn add_imported_layer(
     params.name = Some(query::display_name_of(tx.stage(), item));
     params.index = Some(0);
     Ok(CreateLayer.run(tx, params)?.path)
+}
+
+/// File ▸ Reload Footage, or files changed while the app was in the background:
+/// several items read their files again as one undo step.
+pub struct ReloadFiles;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReloadFilesParams {
+    pub items: Vec<ReloadItem>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ReloadItem {
+    pub item: PrimPath,
+    /// The file probed again (as for `item.replace_file`).
+    pub file: ImportFile,
+}
+
+impl Command for ReloadFiles {
+    type Params = ReloadFilesParams;
+    type Output = ();
+    const ID: &'static str = "item.reload_files";
+    const TITLE: &'static str = "Reload Footage";
+    const DESCRIPTION: &'static str = "Read footage items' files again (AE File > Reload Footage; also run when files changed while BAE was in the background): each item keeps its name and interpretation. One undo step for all items.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        for ReloadItem { item, file } in p.items {
+            ReplaceFile.run(
+                tx,
+                ReplaceFileParams {
+                    item,
+                    file,
+                    keep_name: true,
+                    keep_interpretation: true,
+                },
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// File ▸ Replace Footage ▸ File… (Cmd/Ctrl+H): a footage or placeholder item

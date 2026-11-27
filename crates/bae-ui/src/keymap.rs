@@ -159,6 +159,9 @@ impl Chord {
 
 fn is_navigation_key(key: Key) -> bool {
     use Key::*;
+    if cfg!(target_os = "macos") && matches!(key, F13 | F14 | F15 | F16 | F17 | F18 | F19 | F20) {
+        return true;
+    }
     matches!(
         key,
         Escape
@@ -184,7 +187,11 @@ fn is_navigation_key(key: Key) -> bool {
 /// AE's numpad keys (`PadMultiply`, `Pad0` …): egui has no numpad keys, so the
 /// shell turns numpad presses into these otherwise unused function keys. Name,
 /// key, label.
-pub const NUMPAD: [(&str, Key, &str); 15] = [
+pub const NUMPAD: &[(&str, Key, &str)] = &[
+    // Apple maps the extended keypad Clear to NumLock. Winit's macOS backend
+    // never emits BrowserBack, leaving all physical F1–F20 bindings distinct.
+    #[cfg(target_os = "macos")]
+    ("PadClear", Key::BrowserBack, "Num Clear"),
     ("PadMultiply", Key::F21, "Num *"),
     ("PadSlash", Key::F22, "Num /"),
     ("PadPlus", Key::F23, "Num +"),
@@ -566,7 +573,7 @@ mod tests {
         assert_eq!(c.to_string(), "Alt+PadMultiply");
         assert!(c.display().ends_with("Num *"));
         assert_eq!(Chord::parse("Pad0").unwrap().to_string(), "Pad0");
-        assert!(Chord::parse("PadClear").is_err());
+        assert_eq!(Chord::parse("PadClear").is_ok(), cfg!(target_os = "macos"));
     }
 
     #[test]

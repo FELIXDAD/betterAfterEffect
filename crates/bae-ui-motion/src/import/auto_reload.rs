@@ -5,7 +5,7 @@ use bae_model::{AssetFile, PrimPath};
 use bae_ui::PanelContext;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::SystemTime;
 
@@ -13,6 +13,7 @@ struct Source {
     item: PrimPath,
     file: AssetFile,
     sequence: bool,
+    mode: bae_media::SequenceMode,
 }
 
 struct Scan {
@@ -32,14 +33,14 @@ struct Updated {
 
 struct Worker {
     send: mpsc::Sender<Scan>,
-    results: Mutex<mpsc::Receiver<Updated>>,
+    /// The changed files of one scan (reloaded as one undo step).
+    results: Mutex<mpsc::Receiver<Vec<Updated>>>,
 }
 
 #[derive(Default)]
 pub(super) struct FocusReload {
     worker: OnceLock<Result<Worker, String>>,
     focused: AtomicBool,
-    generation: AtomicU64,
 }
 
 impl FocusReload {
@@ -83,7 +84,7 @@ impl SequenceStamp {
     }
 }
 
-fn run(scans: mpsc::Receiver<Scan>, complete: mpsc::Sender<Updated>) {
+fn run(scans: mpsc::Receiver<Scan>, complete: mpsc::Sender<Vec<Updated>>) {
     let mut sequences: HashMap<String, Arc<SequenceStamp>> = HashMap::new();
     for scan in scans {
         let assets = match &scan.project {
@@ -94,6 +95,7 @@ fn run(scans: mpsc::Receiver<Scan>, complete: mpsc::Sender<Updated>) {
             None => bae_render::AssetFiles::new(None),
         };
         let mut next = HashMap::new();
+        let mut updated = Vec::new();
         for source in scan.sources {
             let location = assets.locator().locate(&source.file);
             let linked = location.path().or_else(|| {
@@ -139,24 +141,24 @@ fn run(scans: mpsc::Receiver<Scan>, complete: mpsc::Sender<Updated>) {
             super::probe_file(
                 path,
                 None,
-                source.sequence,
+                source.mode,
                 &scan.defaults,
                 &mut HashSet::new(),
                 &mut probed,
             );
-            if complete
-                .send(Updated {
-                    source,
-                    revision: scan.revision,
-                    probed,
-                })
-                .is_err()
-            {
+            updated.push(Updated {
+                source,
+                revision: scan.revision,
+                probed,
+            });
+        }
+        sequences = next;
+        if !updated.is_empty() {
+            if complete.send(updated).is_err() {
                 return;
             }
             scan.ctx.request_repaint();
         }
-        sequences = next;
     }
 }
 
@@ -169,18 +171,11 @@ impl bae_gpu::WarmUp for FocusReload {
     }
 }
 
-pub(crate) fn generation(resources: &Resources) -> u64 {
-    resources
-        .get::<Arc<FocusReload>>()
-        .map_or(0, |w| w.generation.load(Ordering::Relaxed))
-}
-
+/// Drops the shared decoder's frames of `path`. Renderers reopen only that file:
+/// Reload Footage raises the item's file revision.
 pub(super) fn invalidate(resources: &Resources, path: &str) {
     if let Some(library) = resources.get::<Arc<bae_media::MediaLibrary>>() {
         library.invalidate(Path::new(path));
-    }
-    if let Some(w) = resources.get::<Arc<FocusReload>>() {
-        w.generation.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -210,6 +205,7 @@ pub(crate) fn on_focus(ctx: &egui::Context, cx: &mut PanelContext<'_>) {
                 }
                 Some(Source {
                     file: AssetFile::from_prim(&prim)?,
+                    mode: super::sequence_mode(&prim),
                     item,
                     sequence,
                 })
@@ -234,7 +230,9 @@ pub(crate) fn on_focus(ctx: &egui::Context, cx: &mut PanelContext<'_>) {
         }
     }
     if let Some(Ok(worker)) = w.worker.get() {
-        for mut result in worker.results.lock().unwrap().try_iter() {
+        let batches: Vec<_> = worker.results.lock().unwrap().try_iter().collect();
+        let mut reloads = Vec::new();
+        for mut result in batches.into_iter().flatten() {
             if mode == "off"
                 || result.source.sequence && !all
                 || cx.stage.changes_since(result.revision).is_none()
@@ -254,9 +252,13 @@ pub(crate) fn on_focus(ctx: &egui::Context, cx: &mut PanelContext<'_>) {
                 let defaults = ImportDefaults::of(&prefs);
                 super::queue_psd_replace(cx, &path, &result.source.item, &defaults, true);
             } else if let Some(file) = result.probed.files.pop() {
-                super::apply_reload(cx, result.source.item, file);
+                reloads.push(bae_motion::ReloadItem {
+                    item: result.source.item,
+                    file,
+                });
             }
             super::verify::report(cx, bae_ui::tr("Reload Footage"), result.probed);
         }
+        super::apply_reloads(cx, reloads);
     }
 }
