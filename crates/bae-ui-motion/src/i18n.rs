@@ -35,10 +35,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     (
         "Play/Stop (Shift + Numpad 0)",
-        "播放/停止（Shift + 小键盘 0）",
+        "播放/停止（Shift + 数字小键盘 0）",
     ),
     ("Cache Frames When Idle", "空闲时缓存帧"),
-    ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
+    ("Play/Stop (Numpad 0)", "播放/停止（数字小键盘 0）"),
     ("Set Frame", "设置帧"),
     ("Solve Camera", "解算摄像机"),
     ("Track Camera", "跟踪摄像机"),
