@@ -55,6 +55,18 @@
 - PR A 已合并（#14）。给 02 的请求见 02 任务书"请求"一节：导入性能（增量镜像或批量导入）、记录提交时间、`TreeID` → 路径。02 在 PR E（#17，已合并）里实现了，`Stage` 的 `DocSet::import_batch` 已改用 `Stage::import_updates_batch`（同一轮同一层只重建一次镜像）。
 - PR B（共享目录，#22）、PR C（版本，#27）已合并。PR D（在线状态，#34）、PR E（Hub WebSocket 客户端，#37）、PR F（回滚）已提交。还没做：两台机器经 NAS 实测（需要第二台机器）；清理离开的客户端的日志（心跳文件已有，规则见 spec 4.7，待实现）。
 
+### 2026-11-26
+
+- 10 的请求 1–4 已处理（见下面"请求"一节的说明）。
+- 评审时发现的老问题：`DirTransport` 某次写日志失败后，后面的追加照样成功，日志里就有了空洞，而目录的 `Hello` 声称没有（记录的版本覆盖它之前的一切），重新挂上的会话不会补写。现在写失败后这个文档不再追加，改为请求快照把日志整个重写（spec 4.3）。
+- `Transport::close()`：`ThreadedTransport` 的 `send` 只是排队，`close` 等后台线程交付完，返回还没报告的错误（spec 2.6）。
+- 评审后又改了几处：
+  - `HubLimits` 改为按有没有进展判断对方是否还在读（积压超过 `max_backlog` 并且 `stall_timeout` 内一个字节都没发出去才断开）。原来按积压总量（约 272 MiB）断开，读得慢的新客户端第一次同步大工程时会被断开，重连后再发同一批，永远同步不完（spec 3.1）。
+  - `pump` 开头的定期 `Hello` 发不出去时也先收、先导入；`HubTransport::recv` 写失败时先读完已经收到的消息再报错（spec 2.4、3.1）。
+  - 发送时某个文档出错，同一轮的其他文档照样发。原来排在后面的文档已经算作发出却没交给传输层：共享目录里它们的日志会留下空洞（spec 2.4、4.3）。
+  - `HubTransport::close` 等对方确认关闭；`ThreadedTransport::close` 会关闭内层传输（原来只等队列交出去，`HubTransport` 缓冲区里剩下的随丢弃一起丢掉，`close` 却返回成功）；`DirTransport::close` 在日志落后时报错（spec 2.6、3.1、4.3）。
+  - 快照请求的退避：每次翻倍（原来重写失败时又翻一倍，实际每轮 4 倍），起点不超过 60 秒，每次 `recv` 都检查（原来只在轮询目录时检查，轮询间隔 1 小时就要等 1 小时）。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 10 hub-nas（2026-11-20）
@@ -70,6 +82,8 @@ bae-hub 已经直接建立在 `Relay` + `HubTransport::accept` 上（PR #47）�
 - **超时**：Hub 60 秒没收到客户端任何消息就断开，所以客户端会话的 `hello_interval` 不要设成 `None`。
 
 请求（按重要程度）：
+
+> 2026-11-26 zjzcoder（C 多人协作）：1–3 已在 `collab/sync-hub-requests` 处理，Hub 的 `PeerLink` 绕行已去掉；4 已做：`Relay::connect_with` / `peer_config` 按连接设置会话，`Relay::flush` / `SyncSession::flush` 不管 `min_send_interval` 立即发出，`Relay::close_peer` 等传输交付完并报告错误；Hub 的存盘连接默认 300 ms 最多写一次、不发定期 `Hello`，最后一个客户端断开时、卸载 / 退出前都先 `flush`（spec 第 3 节）。
 
 1. **`SyncSession::pump_at` 在传输出错时丢掉本轮已收到的数据（会丢修改）。**
    - 现象：`transport.recv()?` 直接返回错误，本轮已经放进 `incoming` 的 `Updates` 没有导入。客户端发完最后几条修改马上断开时，Hub 收到了修改和关闭帧，但修改没有导入；而客户端的会话已经认为 Hub 有了这些修改。只有这个客户端以后重连，才会补发。

@@ -84,6 +84,19 @@ struct LogHeader {
     generation: String,
 }
 
+/// Snapshot requests for a document whose own log fell behind: the first goes
+/// out at once, later ones (the request was lost, or the rewrite failed too)
+/// back off, because the session exports a whole snapshot for each on the thread
+/// that owns the stage, and a folder that is down may stay down for a while.
+#[derive(Debug)]
+struct Behind {
+    next_request: Instant,
+    delay: Duration,
+}
+
+/// Longest wait between two snapshot requests for a log that fell behind.
+const BEHIND_MAX_DELAY: Duration = Duration::from_secs(60);
+
 #[derive(Debug)]
 struct OwnLog {
     path: PathBuf,
@@ -136,6 +149,10 @@ pub struct DirTransport {
     sources: BTreeMap<PathBuf, Source>,
     /// Union of the versions of everything read from or written to the folder.
     folder: BTreeMap<DocKey, VersionVector>,
+    /// Documents whose own log lacks ops the session counts as written, because
+    /// a write failed. Nothing is appended to them until the session's snapshot
+    /// rewrites the log (see [`DirTransport::fell_behind`]).
+    behind: BTreeMap<DocKey, Behind>,
     inbox: VecDeque<Message>,
     scanned: bool,
     poll_now: bool,
@@ -198,6 +215,7 @@ impl DirTransport {
             own: BTreeMap::new(),
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
+            behind: BTreeMap::new(),
             inbox: VecDeque::new(),
             scanned: false,
             poll_now: true,
@@ -644,6 +662,57 @@ impl DirTransport {
         Ok(())
     }
 
+    /// A write to our log for `doc` failed. The session already counts those ops
+    /// as written (it cannot tell), so its next update for `doc` starts after
+    /// them. Appending that would leave a gap the folder never admits to: a
+    /// record's version covers everything before it, and our `Hello` reports the
+    /// union, so no session would send the lost ops again. Instead nothing more
+    /// is written for `doc` until a snapshot replaces the whole log; ask the
+    /// session for one (again after every failure, a failed rewrite included).
+    /// If the session goes away before answering, the log still claims only what
+    /// it holds, and the next session on the folder writes what is missing.
+    fn fell_behind(&mut self, doc: &DocKey) {
+        let now = Instant::now();
+        let first = self
+            .config
+            .poll_interval
+            .clamp(Duration::from_millis(100), BEHIND_MAX_DELAY);
+        match self.behind.get_mut(doc) {
+            Some(b) => {
+                // The rewrite failed too: ask again once the current delay
+                // (doubled when the request went out) has passed since now.
+                b.next_request = b.next_request.max(now + b.delay);
+            }
+            None => {
+                self.behind.insert(
+                    doc.clone(),
+                    Behind {
+                        next_request: now + first,
+                        delay: first,
+                    },
+                );
+                self.inbox
+                    .push_back(Message::SnapshotRequest { doc: doc.clone() });
+            }
+        }
+    }
+
+    /// Ask again for the snapshots of logs that are still behind (the answer may
+    /// have been lost with a session that went away), with backoff. Checked on
+    /// every `recv`, not only when the folder is polled (which may be rare with
+    /// file events).
+    fn rerequest_behind(&mut self) {
+        let now = Instant::now();
+        for (doc, b) in &mut self.behind {
+            if now >= b.next_request {
+                b.next_request = now + b.delay;
+                b.delay = (b.delay * 2).min(BEHIND_MAX_DELAY);
+                self.inbox
+                    .push_back(Message::SnapshotRequest { doc: doc.clone() });
+            }
+        }
+    }
+
     fn request_snapshot(&mut self, doc: &DocKey) {
         if let Some(own) = self.own.get_mut(doc)
             && !own.snapshot_requested
@@ -717,10 +786,26 @@ impl Transport for DirTransport {
         match &msg {
             Message::Hello { versions, .. } => self.on_hello(versions.clone()),
             Message::Updates { doc, version, .. } => {
-                self.append(&doc.clone(), &version.clone(), &msg)
+                let doc = doc.clone();
+                if self.behind.contains_key(&doc) {
+                    // The snapshot we asked for covers this too.
+                    return Ok(());
+                }
+                let r = self.append(&doc, &version.clone(), &msg);
+                if r.is_err() {
+                    self.fell_behind(&doc);
+                }
+                r
             }
             Message::Snapshot { doc, version, .. } => {
-                self.compact(&doc.clone(), &version.clone(), &msg)
+                let doc = doc.clone();
+                let r = self.compact(&doc, &version.clone(), &msg);
+                if r.is_ok() {
+                    self.behind.remove(&doc);
+                } else {
+                    self.fell_behind(&doc);
+                }
+                r
             }
             Message::SnapshotRequest { .. } => Ok(()),
             Message::Presence { .. } => self.write_presence(&msg),
@@ -739,8 +824,22 @@ impl Transport for DirTransport {
                 self.last_poll = Some(now);
                 self.poll();
             }
+            self.rerequest_behind();
         }
         Ok(self.inbox.pop_front())
+    }
+
+    /// Writes happen in `send`; what can still be missing is a log that fell
+    /// behind (a write failed) and was not rewritten yet: the edits since are
+    /// in no file. The next session on the folder writes them if the documents
+    /// still hold them (see [`DirTransport::fell_behind`]).
+    fn close(&mut self) -> Result<(), SyncError> {
+        match self.behind.keys().next() {
+            Some(doc) => Err(SyncError::io(&self.log_path(doc))(io::Error::other(
+                "a write failed and the log was not rewritten yet; the edits since are not in it",
+            ))),
+            None => Ok(()),
+        }
     }
 }
 
@@ -768,7 +867,15 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
         if !same {
             return Ok(false);
         }
-        f.set_len(own.len).map_err(SyncError::io(&path))?;
+        // Cut through a handle of its own: on Windows an append handle lacks
+        // FILE_WRITE_DATA, which setting the end of the file needs, so
+        // `f.set_len` fails there with access denied. `f` then appends at the new
+        // end of the file.
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .and_then(|w| w.set_len(own.len))
+            .map_err(SyncError::io(&path))?;
     }
     // No fsync per append: closing the file hands the data to the SMB server, a
     // torn tail after a crash is cut off on the next start, and the edits are

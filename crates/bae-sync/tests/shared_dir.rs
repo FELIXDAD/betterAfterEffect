@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use bae_model::project::Project;
-use bae_model::{AuthorId, Op, Stage, SublayerId, Value};
+use bae_model::{AuthorId, Op, PrimType, Specifier, Stage, SublayerId, Value};
 use bae_sync::{
-    ClientId, DirConfig, DirTransport, DocKey, MemoryTransport, SessionConfig, SyncError,
+    ClientId, DirConfig, DirTransport, DocKey, DocSet, MemoryTransport, SessionConfig, SyncError,
     SyncSession, ThreadedTransport, Transport,
 };
 use common::*;
@@ -180,6 +180,198 @@ fn restart_recovers_unsaved_edits_and_repairs_a_torn_log() {
     let b = Client::open(&dir, "bob", fast(), 3);
     let mut clients = vec![a, b];
     settle(&mut clients);
+}
+
+/// Our log grew while we are running, under our own header (another writer with
+/// our ID, on a share that does not pass the lock on): the extra bytes are cut
+/// off before the next append, which is not a failed write. The cut needs its
+/// own handle on Windows, where an append handle may not change the file's
+/// length.
+#[test]
+fn a_log_that_grew_under_our_header_is_cut_back_before_the_next_append() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let mut bytes = fs::read(&log).unwrap();
+    bytes.extend_from_slice(&[200, 0, 0, 0, 1, 2, 3]);
+    fs::write(&log, &bytes).unwrap();
+
+    set_opacity(&mut a, 2.0);
+    a.pump();
+    assert_eq!((a.dir.stats().repairs, a.dir.stats().compactions), (0, 0));
+    // Others read the new record (it is not stuck behind the cut-off bytes).
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
+/// One small edit: `opacity` of the title layer in the root sublayer.
+fn set_opacity(c: &mut Client, value: f64) {
+    c.stage.set_edit_target(&SublayerId::root()).unwrap();
+    c.stage
+        .transact(&c.who, "edit", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: "opacity".into(),
+                value: Some(Value::Float(value)),
+            })
+        })
+        .unwrap();
+}
+
+/// One small edit in `layer`: a new layer `name`.
+fn create_layer(c: &mut Client, layer: &SublayerId, name: &str) {
+    c.stage.set_edit_target(layer).unwrap();
+    c.stage
+        .transact(&c.who, "edit", |tx| {
+            tx.apply(Op::CreatePrim {
+                path: p(&format!("{LAYERS}/{name}")),
+                specifier: Specifier::Def,
+                prim_type: Some(PrimType::new("Layer")),
+                index: None,
+            })
+        })
+        .unwrap();
+}
+
+/// The share stalls: writes to `log` fail (it is a directory for now) until
+/// [`unstall`] puts the file back as it was.
+fn stall(log: &Path) -> PathBuf {
+    let aside = log.with_extension("aside");
+    fs::rename(log, &aside).unwrap();
+    fs::create_dir(log).unwrap();
+    fs::write(log.join("x"), b"x").unwrap();
+    aside
+}
+
+fn unstall(log: &Path, aside: &Path) {
+    fs::remove_dir_all(log).unwrap();
+    fs::rename(aside, log).unwrap();
+}
+
+/// A write to our own log fails, later ones would work again. Nothing may be
+/// appended after the gap: a record's version covers everything before it, so
+/// the folder's `Hello` would claim the lost edit and no session would ever send
+/// it again (spec 4.3). The transport asks for a snapshot instead; if the session
+/// goes away before answering (the hub dropping its store after the error), the
+/// log claims only what it holds, and the next session on the folder writes the
+/// rest.
+#[test]
+fn a_failed_append_leaves_no_gap_for_the_next_session() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let aside = stall(&log);
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    unstall(&log, &aside);
+    // The next update was already on its way (`ThreadedTransport` queues it
+    // before the session sees the error, or a final flush sends it).
+    set_opacity(&mut a, 3.0);
+    a.session.flush(&a.stage, &mut a.dir).unwrap();
+    // Reattach: a new transport and session for the same documents.
+    let Client {
+        stage,
+        session: old_session,
+        dir: old_dir,
+        who,
+        rng,
+        n,
+        tag,
+    } = a;
+    // Closing tells that the log still lacks edits.
+    let mut old_dir = old_dir;
+    assert!(old_dir.close().is_err());
+    drop((old_session, old_dir));
+    let mut a = Client {
+        stage,
+        session: session("alice"),
+        dir: DirTransport::open(&dir, ClientId::new("alice").unwrap(), fast()).unwrap(),
+        who,
+        rng,
+        n,
+        tag,
+    };
+    a.pump();
+    a.pump();
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
+/// As above, but the session stays: it answers the snapshot request and the log
+/// is rewritten whole. A failed rewrite asks again.
+#[test]
+fn a_failed_append_is_repaired_with_a_snapshot() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let aside = stall(&log);
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    // Still stalled: the snapshot cannot be written either.
+    set_opacity(&mut a, 3.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    unstall(&log, &aside);
+    set_opacity(&mut a, 4.0);
+    // The snapshot is asked for again (with backoff), then the log is rewritten.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while a.dir.stats().compactions == 0 {
+        assert!(Instant::now() < deadline, "the log was never rewritten");
+        std::thread::sleep(Duration::from_millis(10));
+        a.pump();
+    }
+    assert_eq!(a.dir.stats().compactions, 1);
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+    // Appending works again afterwards.
+    set_opacity(&mut a, 5.0);
+    a.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+    assert!(a.dir.close().is_ok());
+}
+
+/// A failed write to one document's log does not keep the session from
+/// sending the others in the same pump: it already counts them as sent, so a
+/// skipped one would leave a gap in its log that nothing repairs.
+#[test]
+fn a_failed_append_does_not_hold_back_other_documents() {
+    let (_tmp, dir) = project_dir();
+    let anim = sl("anim/a");
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    create_layer(&mut a, &anim, "a1");
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    // `anim/a` is sent first.
+    assert_eq!(a.stage.doc_keys()[0], DocKey::sublayer(&anim));
+    let log = a.dir.log_path(&DocKey::sublayer(&anim));
+    let aside = stall(&log);
+    create_layer(&mut a, &anim, "a2");
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    unstall(&log, &aside);
+    set_opacity(&mut a, 3.0);
+    a.pump();
+    a.pump();
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
 }
 
 #[test]
@@ -607,4 +799,51 @@ fn file_events_wake_the_poll() {
         assert!(Instant::now() < deadline, "no wake-up from file events");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// While the folder keeps failing, the session is not asked for a snapshot on
+/// every pump: it exports a whole snapshot for each request, on the thread that
+/// owns the stage.
+#[test]
+fn a_stalled_log_is_not_snapshotted_on_every_pump() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let aside = stall(&log);
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    // No edits from here on: everything the session tries to send is a snapshot
+    // answer (failed sends are not counted as messages, but their bytes are).
+    let root = DocKey::sublayer(&SublayerId::root());
+    let snapshot_len = DocSet::export_snapshot(&a.stage, &root).unwrap().len() as u64;
+    let before = a.session.stats().bytes_sent;
+    let mut pumps = 0;
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(800) {
+        let _ = a.session.pump(&mut a.stage, &mut a.dir);
+        pumps += 1;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // At once, then after 100, 200 and 400 ms (the poll interval is zero here,
+    // so the backoff starts at 100 ms and doubles).
+    let snapshots = (a.session.stats().bytes_sent - before) / snapshot_len;
+    assert!(pumps > 80, "only {pumps} pumps");
+    assert!(
+        (3..=5).contains(&snapshots),
+        "{snapshots} snapshots in {pumps} pumps over 0.8 s"
+    );
+    unstall(&log, &aside);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while a.dir.stats().compactions == 0 {
+        assert!(Instant::now() < deadline, "the log was never rewritten");
+        std::thread::sleep(Duration::from_millis(10));
+        let _ = a.session.pump(&mut a.stage, &mut a.dir);
+    }
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
 }
