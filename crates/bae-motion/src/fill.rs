@@ -39,6 +39,8 @@ impl Command for AddFillLayer {
             tx,
             ImportParams {
                 files: vec![p.file],
+                folder_label: None,
+                create_comp: false,
                 parent: None,
                 comp: None,
             },

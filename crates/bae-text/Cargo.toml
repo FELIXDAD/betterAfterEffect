@@ -19,6 +19,8 @@ bae-model.workspace = true
 bae-anim.workspace = true
 bae-vector.workspace = true
 fontique.workspace = true
+icu_properties = { version = "2.3", default-features = false, features = ["compiled_data"] }
+icu_segmenter = { version = "2.3", default-features = false, features = ["compiled_data"] }
 kurbo.workspace = true
 parley.workspace = true
 rustc-hash.workspace = true

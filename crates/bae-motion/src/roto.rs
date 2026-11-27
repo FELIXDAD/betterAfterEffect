@@ -131,8 +131,10 @@ impl Command for Freeze {
                 tx,
                 crate::import::ImportParams {
                     files: vec![file],
+                    folder_label: None,
                     parent: None,
                     comp: Some(comp),
+                    create_comp: false,
                 },
             )?;
             let footage = result

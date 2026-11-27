@@ -3,6 +3,15 @@ use crate::{PrimView, Value};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportKind {
+    #[default]
+    Footage,
+    Composition,
+    RetainSize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Deserialize, Serialize, JsonSchema)]
 pub enum LayerKey {
     Id(u32),

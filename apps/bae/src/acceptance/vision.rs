@@ -165,13 +165,24 @@ fn content_aware_fill_generates_a_masked_sequence_and_undo_removes_it() {
         json!({"id":"content_aware_fill"}),
     ));
     settle(&mut h);
-    let number=h.query_all_by_label("Alpha Expansion").map(|node|node.rect()).max_by(|a,b|a.right().total_cmp(&b.right())).expect("alpha expansion control").center();
-    drag(&mut h,number,number+egui::vec2(9.,0.),Modifiers::NONE);
-    let expansion=|h:&Ui|h.state().stage().prim(&layer).and_then(|p|p.value("vision:fill_expansion").and_then(Value::as_f64)).unwrap_or(0.);
-    assert!(expansion(&h)>0.);
-    let (modifiers,z)=cmd(Key::Z);
-    key(&mut h,modifiers,z);
-    assert_eq!(expansion(&h),0.);
+    let number = h
+        .query_all_by_label("Alpha Expansion")
+        .map(|node| node.rect())
+        .max_by(|a, b| a.right().total_cmp(&b.right()))
+        .expect("alpha expansion control")
+        .center();
+    drag(&mut h, number, number + egui::vec2(9., 0.), Modifiers::NONE);
+    let expansion = |h: &Ui| {
+        h.state()
+            .stage()
+            .prim(&layer)
+            .and_then(|p| p.value("vision:fill_expansion").and_then(Value::as_f64))
+            .unwrap_or(0.)
+    };
+    assert!(expansion(&h) > 0.);
+    let (modifiers, z) = cmd(Key::Z);
+    key(&mut h, modifiers, z);
+    assert_eq!(expansion(&h), 0.);
     h.get_by_label("Generate Fill Layer").click();
     let until = std::time::Instant::now() + std::time::Duration::from_secs(40);
     loop {

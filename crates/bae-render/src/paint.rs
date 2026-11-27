@@ -4,13 +4,27 @@
 //! them in the effect's parameters, so the frame cache sees every change.
 
 use bae_anim::EvaluatedPrim;
-use bae_model::{Time, Value};
+use bae_model::{PrimPath, Time, Value};
 use glam::DVec2;
 
 /// The Paint effect's matchName.
 pub const PAINT_EFFECT: &str = "ADBE Paint";
 /// The effect parameter holding the packed strokes (AE parameters start at 1).
 pub const STROKES_PARAM: u32 = 0;
+/// Clone Stamp source layers: source `k` (1-based) is parameter
+/// `SOURCE_PARAM + k`, a `PrimRef`.
+pub const SOURCE_PARAM: u32 = 1_000;
+
+/// When a Clone Stamp stroke reads its source.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum CloneTime {
+    /// The current time shifted (Source Time Shift; zero: the same frame).
+    #[default]
+    Now,
+    Shift(Time),
+    /// Lock Source Time: always this time.
+    Locked(Time),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
@@ -50,6 +64,19 @@ pub struct Stroke {
     pub channels: u8,
     /// Clone Stamp: source point minus painted point.
     pub clone_offset: DVec2,
+    /// Clone Stamp: the layer to read (`None`: the layer painted on).
+    pub clone_source: Option<PrimPath>,
+    /// Clone Stamp: when to read it.
+    pub clone_time: CloneTime,
+}
+
+impl Stroke {
+    /// Whether the Clone Stamp reads another layer or another time (not the
+    /// image being painted).
+    pub fn clones_elsewhere(&self) -> bool {
+        self.tool == Tool::Clone
+            && (self.clone_source.is_some() || self.clone_time != CloneTime::Now)
+    }
 }
 
 fn token(p: &EvaluatedPrim, attr: &str) -> String {
@@ -100,6 +127,17 @@ pub fn strokes(children: &[EvaluatedPrim], t: Time) -> Vec<Stroke> {
                 _ => [1.0; 4],
             };
             let clone = v2("clone:position", [0.0; 2]) - all.first().copied().unwrap_or_default();
+            let clone_source = match p.get("clone:source") {
+                Some(Value::PrimRef(r)) => Some(r.clone()),
+                _ => None,
+            };
+            let clone_time = match (p.get("clone:lock_time"), time("clone:time")) {
+                (Some(Value::Bool(true)), Some(t)) => CloneTime::Locked(t),
+                _ => match time("clone:time_shift") {
+                    Some(t) if t != Time::ZERO => CloneTime::Shift(t),
+                    _ => CloneTime::Now,
+                },
+            };
             Some(Stroke {
                 tool: match token(p, "tool").as_str() {
                     "clone" => Tool::Clone,
@@ -126,6 +164,8 @@ pub fn strokes(children: &[EvaluatedPrim], t: Time) -> Vec<Stroke> {
                     _ => 0,
                 },
                 clone_offset: clone,
+                clone_source,
+                clone_time,
             })
         })
         .collect()
@@ -159,12 +199,49 @@ fn section(points: &[DVec2], a: f64, b: f64) -> Vec<DVec2> {
     out
 }
 
-const HEADER: usize = 18;
+const HEADER: usize = 20;
+/// [`unpack`]'s stand-in for Clone Stamp source `k`, until [`strokes_of`]
+/// resolves it.
+const PLACEHOLDER: &str = "/clone_source_";
+
+/// The distinct Clone Stamp source layers of `strokes`, in first-use order.
+fn sources(strokes: &[Stroke]) -> Vec<&PrimPath> {
+    let mut out: Vec<&PrimPath> = Vec::new();
+    for s in strokes {
+        if let Some(src) = &s.clone_source
+            && !out.contains(&src)
+        {
+            out.push(src);
+        }
+    }
+    out
+}
+
+/// The parameters naming the strokes' Clone Stamp source layers
+/// ([`SOURCE_PARAM`] + k).
+pub fn source_params(strokes: &[Stroke]) -> Vec<(u32, Value)> {
+    sources(strokes)
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| (SOURCE_PARAM + i as u32 + 1, Value::PrimRef(p.clone())))
+        .collect()
+}
 
 /// The strokes as one parameter value.
 pub fn pack(strokes: &[Stroke]) -> Value {
+    let list = sources(strokes);
     let mut v = Vec::new();
     for s in strokes {
+        let source = s
+            .clone_source
+            .as_ref()
+            .and_then(|p| list.iter().position(|q| *q == p))
+            .map_or(0.0, |i| (i + 1) as f64);
+        let (mode, at) = match s.clone_time {
+            CloneTime::Now => (0.0, 0.0),
+            CloneTime::Shift(t) => (1.0, t.as_seconds()),
+            CloneTime::Locked(t) => (2.0, t.as_seconds()),
+        };
         v.extend([
             s.tool as u8 as f64,
             s.erase as u8 as f64,
@@ -183,7 +260,9 @@ pub fn pack(strokes: &[Stroke]) -> Value {
             f64::from(s.channels),
             s.clone_offset.x,
             s.clone_offset.y,
-            0.0,
+            source,
+            mode,
+            at,
         ]);
         for p in &s.points {
             v.extend([p.x, p.y]);
@@ -192,7 +271,26 @@ pub fn pack(strokes: &[Stroke]) -> Value {
     Value::FloatList(v)
 }
 
-/// The strokes [`pack`] packed.
+/// The strokes a render effect carries, their Clone Stamp sources resolved
+/// from its [`SOURCE_PARAM`] parameters.
+pub fn strokes_of(effect: &crate::RenderEffect) -> Vec<Stroke> {
+    let mut strokes = effect.param(STROKES_PARAM).map(unpack).unwrap_or_default();
+    for s in &mut strokes {
+        if let Some(k) = s
+            .clone_source
+            .take()
+            .and_then(|p| p.as_str().strip_prefix(PLACEHOLDER).map(str::to_owned))
+            && let Ok(k) = k.parse::<u32>()
+            && let Some(Value::PrimRef(p)) = effect.param(SOURCE_PARAM + k)
+        {
+            s.clone_source = Some(p.clone());
+        }
+    }
+    strokes
+}
+
+/// The strokes [`pack`] packed (Clone Stamp sources as placeholders; see
+/// [`strokes_of`]).
 pub fn unpack(value: &Value) -> Vec<Stroke> {
     let Value::FloatList(v) = value else {
         return Vec::new();
@@ -233,6 +331,15 @@ pub fn unpack(value: &Value) -> Vec<Stroke> {
             flow: h[13] as f32,
             channels: h[14] as u8,
             clone_offset: DVec2::new(h[15], h[16]),
+            // Source k, resolved by `strokes_of`.
+            clone_source: (h[17] >= 1.0)
+                .then(|| PrimPath::new(&format!("{PLACEHOLDER}{}", h[17] as u32)).ok())
+                .flatten(),
+            clone_time: match h[18] as u8 {
+                1 => CloneTime::Shift(Time::from_seconds(h[19])),
+                2 => CloneTime::Locked(Time::from_seconds(h[19])),
+                _ => CloneTime::Now,
+            },
         });
         i = end;
     }
@@ -262,7 +369,32 @@ mod tests {
             flow: 1.0,
             channels: 1,
             clone_offset: DVec2::new(3.0, 4.0),
+            clone_source: None,
+            clone_time: Default::default(),
         };
-        assert_eq!(unpack(&pack(&[s.clone(), s.clone()])), vec![s.clone(), s]);
+        assert_eq!(
+            unpack(&pack(&[s.clone(), s.clone()])),
+            vec![s.clone(), s.clone()]
+        );
+        // A Clone Stamp from another layer, shifted in time: the source goes
+        // in its own parameter, `strokes_of` brings it back.
+        let source = PrimPath::new("/comps/main/layers/red").unwrap();
+        let clone = Stroke {
+            tool: Tool::Clone,
+            clone_source: Some(source.clone()),
+            clone_time: CloneTime::Shift(Time::from_seconds(0.5)),
+            ..s
+        };
+        let strokes = [clone.clone()];
+        let mut params = vec![(STROKES_PARAM, pack(&strokes))];
+        params.extend(source_params(&strokes));
+        assert_eq!(params[1], (SOURCE_PARAM + 1, Value::PrimRef(source)));
+        let effect = crate::RenderEffect {
+            path: PrimPath::new("/comps/main/layers/white/effects/Paint").unwrap(),
+            effect: PAINT_EFFECT.into(),
+            enabled: true,
+            params,
+        };
+        assert_eq!(strokes_of(&effect), vec![clone]);
     }
 }

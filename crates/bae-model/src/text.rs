@@ -12,6 +12,25 @@ pub enum BaselineOption {
     Subscript,
 }
 
+/// Composition axes of a text layer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LineOrientation {
+    #[default]
+    Horizontal,
+    Vertical,
+}
+
+/// Per-character treatment of half-width text in a vertical layer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BaselineDirection {
+    #[default]
+    Default,
+    UprightRoman,
+    TateChuYoko,
+}
+
 /// Start of a new style in Unicode scalar indices. Its end is the next start.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StyleRun<T> {
@@ -49,6 +68,8 @@ pub struct TextStyle {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub small_caps: bool,
     #[serde(default)]
+    pub baseline_direction: BaselineDirection,
+    #[serde(default)]
     pub baseline_option: BaselineOption,
 }
 
@@ -81,6 +102,8 @@ impl Default for ParagraphStyle {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TextDocument {
     pub text: String,
+    #[serde(default)]
+    pub line_orientation: LineOrientation,
     #[serde(flatten)]
     pub style: TextStyle,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -163,6 +186,7 @@ impl TextDocument {
     pub fn new(text: impl Into<String>, font: impl Into<String>, font_size: f64) -> Self {
         Self {
             text: text.into(),
+            line_orientation: LineOrientation::Horizontal,
             style: TextStyle {
                 font: font.into(),
                 font_size,
@@ -177,6 +201,7 @@ impl TextDocument {
                 faux_italic: false,
                 all_caps: false,
                 small_caps: false,
+                baseline_direction: BaselineDirection::Default,
                 baseline_option: BaselineOption::Normal,
             },
             runs: vec![],

@@ -488,6 +488,7 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
             file_revision: 0,
             file: Some(path),
             size: None,
+            alphabetical: false,
             source_time: Time::ZERO,
             sequence: None,
             blend: None,
@@ -528,6 +529,7 @@ fn photoshop_masks_reach_the_frame_cache_and_gpu() {
             size: Some([3, 2]),
             source_time: Time::ZERO,
             sequence: None,
+            alphabetical: false,
             file_revision: 0,
             psd_layer: Some(LayerImage {
                 key: LayerKey::Id(id),
@@ -611,6 +613,7 @@ fn frame_mix_blends_neighbouring_sequence_frames() {
             file_revision: 0,
             file: Some(dir.path().join("seq_0000.png")),
             size: None,
+            alphabetical: false,
             source_time: fps.frame_to_time(1),
             sequence: Some(fps),
             blend,

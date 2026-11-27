@@ -153,33 +153,63 @@ impl Panel for FillPanel {
             (query::owning_comp(cx.stage, &layer) == Some(comp.path.clone()))
                 .then_some((layer, comp))
         });
-        const EXPANSION:&str="vision:fill_expansion";
-        let mut expansion=source.as_ref().and_then(|(layer,comp)|{
-            let s=session.lock();
-            let time=s.time(&comp.path);
-            if let Some(scrub)=&s.scrub && scrub.path==*layer && scrub.attr==EXPANSION {
-                return scrub.value.as_f64();
-            }
-            drop(s);
-            common::current_value(self.eval.get(cx.stage),cx.stage,layer,EXPANSION,query::to_key_time(cx.stage,layer,time)).and_then(|v|v.as_f64())
-        }).unwrap_or(0.);
+        const EXPANSION: &str = "vision:fill_expansion";
+        let mut expansion = source
+            .as_ref()
+            .and_then(|(layer, comp)| {
+                let s = session.lock();
+                let time = s.time(&comp.path);
+                if let Some(scrub) = &s.scrub
+                    && scrub.path == *layer
+                    && scrub.attr == EXPANSION
+                {
+                    return scrub.value.as_f64();
+                }
+                drop(s);
+                common::current_value(
+                    self.eval.get(cx.stage),
+                    cx.stage,
+                    layer,
+                    EXPANSION,
+                    query::to_key_time(cx.stage, layer, time),
+                )
+                .and_then(|v| v.as_f64())
+            })
+            .unwrap_or(0.);
         ui.label(tr("Fill Target"));
         if let Some((layer, comp)) = &source {
-            self.preview(ui, cx, layer, comp,expansion as u32);
+            self.preview(ui, cx, layer, comp, expansion as u32);
         } else {
             ui.label(tr("Select a layer to fill."));
         }
         ui.add_enabled_ui(self.job.is_none(), |ui| {
             ui.horizontal(|ui| {
                 ui.label(tr("Alpha Expansion"));
-                let response=ui.add_enabled(source.is_some(),bae_ui::widgets::HotNumber::new(&mut expansion)
-                    .range(0.0..=64.0).decimals(0).speed(1.0).suffix(" px").label(tr("Alpha Expansion")));
-                if let Some((layer,comp))=&source {
-                    let time=session.lock().time(&comp.path);
-                    let v=Value::Int(expansion.round() as i64);
-                    let edit=if response.drag_stopped(){common::Edit::Commit(v)}else if response.dragged(){common::Edit::Live(v)}else if response.changed(){common::Edit::Commit(v)}else{common::Edit::None};
-                    common::apply_edit(cx,&session,layer,EXPANSION,time,edit);
-                    if response.dragged() {ui.ctx().request_repaint();}
+                let response = ui.add_enabled(
+                    source.is_some(),
+                    bae_ui::widgets::HotNumber::new(&mut expansion)
+                        .range(0.0..=64.0)
+                        .decimals(0)
+                        .speed(1.0)
+                        .suffix(" px")
+                        .label(tr("Alpha Expansion")),
+                );
+                if let Some((layer, comp)) = &source {
+                    let time = session.lock().time(&comp.path);
+                    let v = Value::Int(expansion.round() as i64);
+                    let edit = if response.drag_stopped() {
+                        common::Edit::Commit(v)
+                    } else if response.dragged() {
+                        common::Edit::Live(v)
+                    } else if response.changed() {
+                        common::Edit::Commit(v)
+                    } else {
+                        common::Edit::None
+                    };
+                    common::apply_edit(cx, &session, layer, EXPANSION, time, edit);
+                    if response.dragged() {
+                        ui.ctx().request_repaint();
+                    }
                 }
             });
             choice(

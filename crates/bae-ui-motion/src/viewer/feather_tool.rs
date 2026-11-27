@@ -29,6 +29,7 @@ struct Drag {
     path: BezierPath,
     to_comp: DMat4,
     index: usize,
+    adding: bool,
 }
 
 impl FeatherState {
@@ -118,13 +119,21 @@ pub(super) fn frame(
             if alt {
                 let mut path = p.path.clone();
                 path.feather.remove(index);
-                super::path_edit::set_vertices(cx, session, info, &p.prim, &path);
+                super::path_edit::set_vertices_with_edit(
+                    cx,
+                    session,
+                    info,
+                    &p.prim,
+                    &path,
+                    Some(bae_motion::path::MaskTopologyEdit::RemoveFeather(index)),
+                );
             } else {
                 state.drag = Some(Drag {
                     mask: p.prim.clone(),
                     path: p.path.clone(),
                     to_comp: p.to_comp,
                     index,
+                    adding: false,
                 });
             }
         } else if let Some(PathHit::Segment { path, segment, t }) = overlay::hit(&paths, view, pos)
@@ -140,6 +149,7 @@ pub(super) fn frame(
                 mask: p.prim.clone(),
                 to_comp: p.to_comp,
                 index: shape.feather.len() - 1,
+                adding: true,
                 path: shape,
             });
         }
@@ -166,6 +176,9 @@ pub(super) fn frame(
         }
     }
     if released && let Some(d) = state.drag.take() {
-        super::path_edit::set_vertices(cx, session, info, &d.mask, &d.path);
+        let edit = d
+            .adding
+            .then(|| bae_motion::path::MaskTopologyEdit::AddFeather(d.path.feather[d.index]));
+        super::path_edit::set_vertices_with_edit(cx, session, info, &d.mask, &d.path, edit);
     }
 }

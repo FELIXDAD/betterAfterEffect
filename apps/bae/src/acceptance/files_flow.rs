@@ -347,6 +347,18 @@ fn finder_open_goes_through_the_open_flow() {
     let opened_export = export_file(&folder);
     assert!(open_files_invocation(&[]).is_none());
 
+    // Finder delivers OpenFiles after startup may already have drawn Home.
+    let mut home = gui();
+    home.state_mut().workspace.start_without_project(false);
+    settle(&mut home);
+    assert!(find_text(&home, "Welcome to BAE").is_some());
+    home.state_mut()
+        .invoke(open_files_invocation(std::slice::from_ref(&folder)).unwrap());
+    settle(&mut home);
+    assert_eq!(home.state().doc.location(), Some(folder.as_path()));
+    assert!(home.state().active_comp().is_some());
+    assert!(find_text(&home, "Welcome to BAE").is_none());
+
     for (i, (target, choice)) in [
         (&folder, UnsavedChoice::Cancel),
         (&folder, UnsavedChoice::DontSave),

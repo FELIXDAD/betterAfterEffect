@@ -353,3 +353,39 @@ fn colour_guidance_preserves_an_equal_luminance_edge() {
     assert!(result.get(29, 10)[3] < 0.22 && result.get(30, 10)[3] > 0.78);
     assert_close(&render(rect), &result, tile, 0.0001, "tiled RGB guidance");
 }
+
+#[test]
+fn wire_displace_horizontal_clears_a_thick_slanted_wire() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(40, 40);
+    // A white wire 10 px thick along the diagonal over blue.
+    let input = Pixels::new(rect, |x, y| {
+        let d = (x as f32 - y as f32).abs() / std::f32::consts::SQRT_2;
+        if d < 5. {
+            [1., 1., 1., 1.]
+        } else {
+            [0., 0., 1., 1.]
+        }
+    });
+    let out = run(
+        &gpu,
+        Rgba16Float,
+        builtin("CC Simple Wire Removal"),
+        vec![
+            (1, Value::Vec2([4.5, 4.5])),
+            (2, Value::Vec2([35.5, 35.5])),
+            (3, Value::Int(4)),
+            (4, Value::Float(10.)),
+            (6, Value::Float(0.)),
+        ],
+        &input,
+        rect,
+        1.,
+    );
+    let [r, g, b, _] = out.get(20, 20);
+    assert!(
+        r < 0.05 && g < 0.05 && b > 0.95,
+        "wire centre: {:?}",
+        out.get(20, 20)
+    );
+}

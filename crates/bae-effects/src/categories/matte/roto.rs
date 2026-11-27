@@ -184,16 +184,17 @@ impl TargetEffect for Roto {
                 })?,
                 None => input.clone(),
             };
-            let field = if dep.is_some() {
-                let pyramid = flow::pyramid(
-                    target,
-                    input,
-                    &base,
+            let field = if let Some(dep) = dep {
+                let pair = flow::Pair {
+                    images: [input, &base],
+                    times: [p.comp_time, dep.time],
+                    layer: &dep.layer,
                     roi,
                     grid,
-                    if v.popup(2) == 2 { 50. } else { 25. },
-                )?;
-                Some(flow::flow(target, &pyramid, false)?.grid_image(grid))
+                    detail: if v.popup(2) == 2 { 50. } else { 25. },
+                    analysis: Default::default(),
+                };
+                Some(pair.forward(target)?.grid_image(grid))
             } else {
                 None
             };
