@@ -363,6 +363,12 @@ const LAYER: &[AttrDef] = &[
     boolean("light:casts_shadows", false).kinds(&["light"]),
     float("light:shadow_darkness", 100.0).kinds(&["light"]),
     float("light:shadow_diffusion", 0.0).kinds(&["light"]),
+    prim_ref("light:source")
+        .kinds(&["light"])
+        .doc("Environment light: the layer whose image (an HDRI, equirectangular) lights the scene."),
+    boolean("light:background_visible", false).kinds(&["light"]),
+    float("light:background_opacity", 100.0).kinds(&["light"]),
+    float("light:background_blur", 0.0).kinds(&["light"]),
     int("material:casts_shadows", 0)
         .kinds(VISUAL)
         .doc("AE's Casts Shadows: 0 Off, 1 On, 2 Only (casts, not drawn)."),
@@ -377,6 +383,17 @@ const LAYER: &[AttrDef] = &[
     float("material:specular_shininess", 5.0).kinds(VISUAL),
     float("material:metal", 100.0).kinds(VISUAL),
     float("material:light_transmission", 0.0).kinds(VISUAL),
+    // Advanced 3D's extra Material Options (AE shows them with that renderer).
+    color("material:shadow_color", [0.0, 0.0, 0.0, 1.0]).kinds(VISUAL),
+    int("material:appears_in_reflections", 1)
+        .kinds(VISUAL)
+        .doc("AE's Appears in Reflections: 0 Off, 1 On, 2 Only."),
+    float("material:reflection_intensity", 0.0).kinds(VISUAL),
+    float("material:reflection_sharpness", 100.0).kinds(VISUAL),
+    float("material:reflection_rolloff", 0.0).kinds(VISUAL),
+    float("material:transparency", 0.0).kinds(VISUAL),
+    float("material:transparency_rolloff", 0.0).kinds(VISUAL),
+    float("material:index_of_refraction", 1.0).kinds(VISUAL),
 ];
 
 const SHAPE_TRANSFORM: &[AttrDef] = &[
@@ -475,7 +492,13 @@ pub static SCHEMAS: &[PrimSchema] = &[
     PrimSchema {
         prim_type: PrimType::PATH,
         doc: "Free-form shape path.",
-        attrs: &[bezier("path"), choice("direction", "normal", DIRECTION)],
+        attrs: &[
+            bezier("path"),
+            choice("direction", "normal", DIRECTION),
+            boolean("roto_bezier", false)
+                .fixed()
+                .doc("RotoBezier: the tangents follow the vertices."),
+        ],
     },
     PrimSchema {
         prim_type: PrimType::RECT,
@@ -664,6 +687,9 @@ pub static SCHEMAS: &[PrimSchema] = &[
             float("expansion", 0.0),
             color("color", [1.0, 1.0, 0.0, 1.0]).fixed(),
             boolean("locked", false),
+            boolean("roto_bezier", false)
+                .fixed()
+                .doc("RotoBezier: the tangents follow the vertices."),
         ],
     },
     PrimSchema {
@@ -763,6 +789,30 @@ pub static SCHEMAS: &[PrimSchema] = &[
         ],
     },
     PrimSchema {
+        prim_type: PrimType::PUPPET_PIN,
+        doc: "A pin under a Puppet effect (AE's Puppet Position / Starch / Overlap \
+              pins), in layer space: where it was placed on the mesh (`rest`) and \
+              where it pulls that point (`position`).",
+        attrs: &[
+            string("name"),
+            choice(
+                "pin_type",
+                "position",
+                &["position", "starch", "bend", "advanced", "overlap"],
+            )
+            .fixed(),
+            vec2("rest", [0.0, 0.0])
+                .fixed()
+                .doc("Where the pin was placed (layer pixels)."),
+            vec2("position", [0.0, 0.0]).doc("Where the pin pulls its point (layer pixels)."),
+            float("scale", 100.0),
+            float("rotation", 0.0),
+            float("amount", 0.3).doc("Starch: how stiff the mesh is around the pin."),
+            float("extent", 15.0).doc("Starch and Overlap: reach in pixels."),
+            float("in_front", 0.0).doc("Overlap: higher draws in front."),
+        ],
+    },
+    PrimSchema {
         prim_type: PrimType::MARKER,
         doc: "Comp or layer marker (layer markers use layer time).",
         attrs: &[
@@ -850,7 +900,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
             choice(
                 "kind",
                 "footage",
-                &["footage", "solid", "placeholder", "sequence"],
+                &["footage", "solid", "placeholder", "sequence", "model"],
             ),
             string("file:relative"),
             string("file:original"),

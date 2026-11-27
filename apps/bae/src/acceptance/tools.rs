@@ -353,7 +353,6 @@ fn tools_without_viewer_actions_do_nothing_there() {
     let c = canvas(&h).center();
     for (m, k) in [
         (Modifiers::COMMAND, Key::B),
-        (Modifiers::COMMAND, Key::P),
         (Modifiers::ALT, Key::W),
         (Modifiers::NONE, Key::C),
         (Modifiers::SHIFT, Key::D),

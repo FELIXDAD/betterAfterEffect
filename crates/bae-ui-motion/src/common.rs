@@ -140,9 +140,9 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 /// Integer properties AE shows as a dropdown: their values and names.
 pub(crate) fn int_choices(attr: &str) -> Option<&'static [(i64, &'static str)]> {
     match attr {
-        "material:casts_shadows" | "material:accepts_shadows" => {
-            Some(&[(0, "Off"), (1, "On"), (2, "Only")])
-        }
+        "material:casts_shadows"
+        | "material:accepts_shadows"
+        | "material:appears_in_reflections" => Some(&[(0, "Off"), (1, "On"), (2, "Only")]),
         "camera:iris_shape" => Some(&[
             (1, "Fast Rectangle"),
             (3, "Triangle"),
@@ -256,9 +256,21 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "light:casts_shadows" | "material:casts_shadows" => "Casts Shadows",
         "light:shadow_darkness" => "Shadow Darkness",
         "light:shadow_diffusion" => "Shadow Diffusion",
+        "light:source" => "Source",
+        "light:background_visible" => "Background Visible",
+        "light:background_opacity" => "Background Opacity",
+        "light:background_blur" => "Background Blur",
         "material:light_transmission" => "Light Transmission",
         "material:accepts_shadows" => "Accepts Shadows",
         "material:accepts_lights" => "Accepts Lights",
+        "material:shadow_color" => "Shadow Color",
+        "material:appears_in_reflections" => "Appears in Reflections",
+        "material:reflection_intensity" => "Reflection Intensity",
+        "material:reflection_sharpness" => "Reflection Sharpness",
+        "material:reflection_rolloff" => "Reflection Rolloff",
+        "material:transparency" => "Transparency",
+        "material:transparency_rolloff" => "Transparency Rolloff",
+        "material:index_of_refraction" => "Index of Refraction",
         // AE's Chinese UI calls the material's Ambient 周围 (the light type is 环境).
         "material:ambient" => {
             return match bae_ui::i18n::lang() {
@@ -799,6 +811,62 @@ pub(crate) fn text_path_picker(
     }
 }
 
+/// Light Options > Source of an environment light (AE's 源): a popup of the
+/// comp's 2D layers whose picture lights the scene, or None.
+pub(crate) fn light_source_picker(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    light: &PrimPath,
+    id: egui::Id,
+) {
+    let stage = cx.stage;
+    let current = stage
+        .prim(light)
+        .and_then(|v| query::static_value(&v, "light:source"))
+        .and_then(|v| v.as_prim_ref().cloned());
+    // AE takes 2D video, still and pre-comp layers of the same comp.
+    let layers: Vec<PrimPath> = query::owning_comp(stage, light)
+        .map(|comp| query::comp_layers(stage, &comp))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| {
+            l != light
+                && !is_3d(stage, l)
+                && !matches!(
+                    query::layer_kind(stage, l).as_deref(),
+                    Some("camera" | "light" | "null" | "adjustment" | "audio")
+                )
+        })
+        .collect();
+    let name = |l: &PrimPath| query::display_name_of(stage, l);
+    let shown = current.as_ref().map_or_else(|| tr("None").to_owned(), name);
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .width(140.0)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), tr("None")).clicked() {
+                chosen = Some(None);
+            }
+            for l in &layers {
+                if ui
+                    .selectable_label(current.as_ref() == Some(l), name(l))
+                    .clicked()
+                {
+                    chosen = Some(Some(l.clone()));
+                }
+            }
+        });
+    match chosen.filter(|l| *l != current) {
+        Some(Some(layer)) => cx.invoke_with(
+            "attr.set",
+            json!({"path": light, "attr": "light:source", "value": bae_model::Value::PrimRef(layer)}),
+        ),
+        Some(None) => cx.invoke_with("attr.clear", json!({"path": light, "attr": "light:source"})),
+        None => {}
+    }
+}
+
 /// The current value of an attribute at comp time `t` (keyframes and expressions
 /// applied), or its static value / default.
 pub(crate) fn current_value(
@@ -928,12 +996,13 @@ pub(crate) fn related_tab(
     name: &str,
 ) -> bae_ui::TabInfo {
     let tab = bae_ui::TabInfo::new(format!("{} {name}", tr(panel)));
-    if !crate::prefs::current(cx.resources).bool("appearance.use_label_color_for_related_tabs") {
+    let prefs = crate::prefs::current(cx.resources);
+    if !prefs.bool("appearance.use_label_color_for_related_tabs") {
         return tab;
     }
     let label = crate::actions::label_of(cx.stage, path);
     if (1..=16).contains(&label) {
-        tab.label(theme::label_color(label as usize))
+        tab.label(bae_ui::settings::label_color(&prefs, label as usize))
     } else {
         tab
     }

@@ -87,6 +87,8 @@ pub struct ProjectPanel {
     /// Edit ▸ Find: focus the search field next frame.
     focus_search: bool,
     rename: Option<(PrimPath, String)>,
+    /// Layer ▸ Reveal … in Project: the row to scroll to.
+    scroll_to: Option<PrimPath>,
 }
 
 struct Row {
@@ -94,6 +96,10 @@ struct Row {
     depth: usize,
     kind: ItemKind,
 }
+
+/// File ▸ Dependencies ▸ Find Missing Footage: the Project panel search that
+/// lists the footage whose file is not found (AE).
+pub(crate) const MISSING_FOOTAGE: &str = "Missing Footage";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ItemKind {
@@ -137,15 +143,37 @@ pub(crate) fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
 const ROW_H: f32 = 20.0;
 
 impl ProjectPanel {
-    fn rows(&self, stage: &Stage) -> Vec<Row> {
+    /// The rows shown; `base`: the folder relative footage paths start from
+    /// (the search "Missing Footage" lists footage whose file is not found).
+    fn rows(&self, stage: &Stage, base: Option<std::path::PathBuf>) -> Vec<Row> {
         let mut out = Vec::new();
         let needle = self.search.trim().to_lowercase();
+        let missing_only = needle == tr(MISSING_FOOTAGE).to_lowercase()
+            || needle == MISSING_FOOTAGE.to_lowercase();
+        let resolver = bae_model::asset::AssetResolver::new(base, Vec::new());
+        let matches = |c: &PrimPath, name: &str| {
+            if missing_only {
+                item_kind(stage, c) == Some(ItemKind::Footage)
+                    && stage
+                        .prim(c)
+                        .and_then(|v| bae_model::asset::AssetFile::from_prim(&v))
+                        .is_some_and(|f| resolver.resolve(&f).is_missing())
+            } else {
+                needle.is_empty() || name.contains(&needle)
+            }
+        };
+        let needle = if missing_only {
+            "\u{0}".to_owned()
+        } else {
+            needle.clone()
+        };
         fn walk(
             p: &ProjectPanel,
             stage: &Stage,
             parent: &PrimPath,
             depth: usize,
             needle: &str,
+            matches: &dyn Fn(&PrimPath, &str) -> bool,
             out: &mut Vec<Row>,
         ) {
             for c in stage.children(parent) {
@@ -161,13 +189,13 @@ impl ProjectPanel {
                         kind,
                     });
                     if !p.collapsed.contains(&c) || !needle.is_empty() {
-                        walk(p, stage, &c, depth + 1, needle, out);
+                        walk(p, stage, &c, depth + 1, needle, matches, out);
                     }
                     // Hide folders without matches while searching.
                     if !needle.is_empty() && out.len() == start + 1 && !name.contains(needle) {
                         out.pop();
                     }
-                } else if needle.is_empty() || name.contains(needle) {
+                } else if matches(&c, &name) {
                     out.push(Row {
                         path: c,
                         depth,
@@ -176,7 +204,15 @@ impl ProjectPanel {
                 }
             }
         }
-        walk(self, stage, &PrimPath::root(), 0, &needle, &mut out);
+        walk(
+            self,
+            stage,
+            &PrimPath::root(),
+            0,
+            &needle,
+            &matches,
+            &mut out,
+        );
         out
     }
 
@@ -366,6 +402,11 @@ impl ProjectPanel {
         self.rename.is_some()
     }
 
+    /// The items the list shows (search applied; absolute footage paths).
+    pub(crate) fn shown_items(&self, stage: &Stage) -> Vec<PrimPath> {
+        self.rows(stage, None).into_iter().map(|r| r.path).collect()
+    }
+
     pub(crate) fn start_rename(&mut self, item: PrimPath, text: &str) {
         self.rename = Some((item, text.to_owned()));
     }
@@ -400,13 +441,29 @@ impl Panel for ProjectPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
-        let selected_first = session.lock().selected_items.first().cloned();
         // Another panel asked to rename an item here (the Timeline's Rename).
         if let Some(p) = session.lock().rename_item.take()
             && stage.has_prim(&p)
         {
             self.rename = Some((p.clone(), query::display_name_of(stage, &p)));
         }
+        // Layer ▸ Reveal … in Project: open the folders above the item, select
+        // it and bring it into view (AE).
+        if let Some(text) = session.lock().project_search.take() {
+            self.search = text;
+        }
+        let reveal = session.lock().reveal_in_project.take();
+        if let Some(item) = reveal
+            && stage.has_prim(&item)
+        {
+            for folder in item.ancestors() {
+                self.collapsed.remove(&folder);
+            }
+            self.search.clear();
+            session.lock().selected_items = vec![item.clone()];
+            self.scroll_to = Some(item);
+        }
+        let selected_first = session.lock().selected_items.first().cloned();
         self.info_area(ui, cx, selected_first.as_ref());
 
         ui.horizontal(|ui| {
@@ -423,7 +480,21 @@ impl Panel for ProjectPanel {
         ui.add_space(4.0);
 
         let width = ui.available_width();
-        let rows = self.rows(stage);
+        let base = cx
+            .resources
+            .get::<bae_ui::files::ProjectFile>()
+            .and_then(|f| f.get())
+            .map(|loc| {
+                // Relative paths start at the `.bae` folder, or next to a `.baez`.
+                let packaged = loc
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("baez"));
+                match loc.parent() {
+                    Some(dir) if packaged => dir.to_owned(),
+                    _ => loc,
+                }
+            });
+        let rows = self.rows(stage, base);
         let footer_h = 28.0;
         let list_h = (ui.available_height()
             - footer_h
@@ -476,6 +547,10 @@ impl Panel for ProjectPanel {
             .show(ui, |ui| {
                 for (i, row) in rows.iter().enumerate() {
                     let (id, rect) = ui.allocate_space(vec2(width, ROW_H));
+                    if self.scroll_to.as_ref() == Some(&row.path) {
+                        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                        self.scroll_to = None;
+                    }
                     let visible = rect.intersect(ui.clip_rect()).intersect(panel_rect);
                     if !visible.is_positive() {
                         continue;
@@ -740,7 +815,7 @@ impl Panel for ProjectPanel {
                     .find(|(r, _)| r.contains(p))
                     .map(|(_, f)| f.clone())
             });
-            crate::import::import_paths(cx, &dropped, folder);
+            crate::import::drop_paths(cx, &dropped, folder, None);
         }
         // Enter renames the selected item (AE) — unless a focused widget, e.g. a
         // button in another panel, took the Enter.
@@ -795,8 +870,14 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
                 (Some(w), Some(h)) => format!("{w} × {h}"),
                 _ => String::new(),
             };
+            let placeholder = v
+                .as_ref()
+                .and_then(|v| query::static_value(v, "kind"))
+                .is_some_and(|k| matches!(k, Value::Enum(k) if k == "placeholder"));
             let ty = if kind == ItemKind::Solid {
                 "Solid"
+            } else if placeholder {
+                "Placeholder"
             } else {
                 "Footage"
             };

@@ -160,6 +160,11 @@ impl RenderComp {
                     }));
             any_blur |= !layer.motion_samples.is_empty();
         }
+        // An environment light's image can show behind every layer.
+        scene_used |= self
+            .lights
+            .iter()
+            .any(|l| l.environment.is_some_and(|e| e.background.is_some()));
         if scene_used {
             hash_camera(&self.camera, h);
             self.lights.len().hash(h);
@@ -216,6 +221,10 @@ impl RenderComp {
                 LayerContent::Footage(f) => out.push(Dependency {
                     path: f.asset.clone(),
                     time: f.source_time,
+                }),
+                LayerContent::Model(m) => out.push(Dependency {
+                    path: m.asset.clone(),
+                    time: Time::ZERO,
                 }),
                 LayerContent::Custom(c) if c.prim != layer.path => out.push(Dependency {
                     path: c.prim.clone(),
@@ -522,8 +531,14 @@ impl RenderLayer {
                     mat.specular_intensity,
                     mat.specular_shininess,
                     mat.metal,
+                    mat.transparency,
+                    mat.transparency_rolloff,
+                    mat.reflection_intensity,
+                    mat.reflection_sharpness,
+                    mat.reflection_rolloff,
                 ]
                 .map(f32::to_bits),
+                mat.shadow_color.map(f32::to_bits),
             )
                 .hash(h);
         }
@@ -547,6 +562,10 @@ fn hash_mat4(m: &DMat4, h: &mut impl Hasher) {
 
 pub(crate) fn hash_light(l: &Light, h: &mut impl Hasher) {
     (l.kind, l.falloff, l.casts_shadows, l.scope_below).hash(h);
+    if let Some(e) = &l.environment {
+        e.layer.hash(h);
+        e.background.map(|b| b.map(f32::to_bits)).hash(h);
+    }
     hash_mat4(&l.world, h);
     l.point_of_interest.to_array().map(f64::to_bits).hash(h);
     l.color.map(f32::to_bits).hash(h);
@@ -625,6 +644,18 @@ pub enum LayerContent {
     /// Content drawn by a registered [`crate::source::SourceProvider`] (shapes and
     /// text from 05, plugin generators …).
     Custom(CustomContent),
+    /// A 3D model (glTF / GLB / OBJ, [`crate::model`]), drawn through the
+    /// camera with a depth buffer.
+    Model(ModelRef),
+}
+
+/// A 3D model layer's source.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ModelRef {
+    /// The `Asset` prim.
+    pub asset: PrimPath,
+    /// The resolved file (`None` when missing; renders nothing and warns).
+    pub file: Option<PathBuf>,
 }
 
 impl LayerContent {
@@ -636,6 +667,7 @@ impl LayerContent {
             LayerContent::Footage(f) => f.size,
             LayerContent::Comp(c) => Some([c.width, c.height]),
             LayerContent::Custom(c) => c.size,
+            LayerContent::Model(_) => None,
         }
     }
 
@@ -667,6 +699,7 @@ impl LayerContent {
                 c.prim.hash(h);
                 c.hash.hash(h);
             }
+            LayerContent::Model(m) => m.hash(h),
         }
     }
 }
