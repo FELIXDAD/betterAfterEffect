@@ -421,8 +421,11 @@ fn sync(
         Err(e) => return Err((stream, e.into())),
     };
     // Authentication is done above (several tokens, per project), so the
-    // handshake itself checks nothing more.
-    let transport = match HubTransport::accept(stream, None) {
+    // handshake itself checks nothing more. Read-only connections get a small
+    // incoming limit: a larger message fails as soon as its frame header
+    // arrives, before the hub buffers it.
+    let limits = shared.config.client_limits(access);
+    let transport = match HubTransport::accept_with(stream, None, limits) {
         Ok(t) => t,
         Err(e) => {
             tracing::debug!(%addr, error = %e, "WebSocket handshake failed");

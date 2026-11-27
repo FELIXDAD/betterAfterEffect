@@ -1499,10 +1499,10 @@ impl Panel for CompositionViewer {
         } else {
             if completed.is_some()
                 && let Some(g) = self.gpu.as_mut()
-                && let Some((texture, rect)) = g.playback.shown_texture()
+                && let Some(frame) = g.playback.shown_texture()
             {
                 session.lock().channel_frame = g.playback.shown_channels();
-                g.show_cached(texture, rect);
+                g.show_cached(frame);
             }
             completed
         };
