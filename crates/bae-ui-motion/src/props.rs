@@ -333,7 +333,7 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
         _ if three_d => Some((
             "material_options",
             "Material Options",
-            MATERIAL_OPTIONS.to_vec(),
+            material_options(stage, layer),
         )),
         _ => None,
     };
@@ -379,6 +379,40 @@ const MATERIAL_OPTIONS: [&str; 9] = [
     "material:specular_shininess",
     "material:metal",
 ];
+
+/// The Advanced 3D renderer's Material Options, in AE's order (its comp
+/// renderer decides which a layer shows).
+const ADVANCED_3D_MATERIAL_OPTIONS: [&str; 17] = [
+    "material:casts_shadows",
+    "material:light_transmission",
+    "material:accepts_shadows",
+    "material:accepts_lights",
+    "material:shadow_color",
+    "material:appears_in_reflections",
+    "material:ambient",
+    "material:diffuse",
+    "material:specular_intensity",
+    "material:specular_shininess",
+    "material:metal",
+    "material:reflection_intensity",
+    "material:reflection_sharpness",
+    "material:reflection_rolloff",
+    "material:transparency",
+    "material:transparency_rolloff",
+    "material:index_of_refraction",
+];
+
+fn material_options(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
+    let advanced = query::owning_comp(stage, layer)
+        .and_then(|c| stage.prim(&c))
+        .and_then(|v| query::static_value(&v, "renderer"))
+        .is_some_and(|v| v.as_str() == Some("advanced_3d"));
+    if advanced {
+        ADVANCED_3D_MATERIAL_OPTIONS.to_vec()
+    } else {
+        MATERIAL_OPTIONS.to_vec()
+    }
+}
 
 /// A light's Light Options for its type, in AE's order: ambient lights have
 /// only intensity and colour, parallel lights no falloff, spots a cone.

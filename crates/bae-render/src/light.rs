@@ -692,6 +692,12 @@ pub struct Material {
     pub specular_shininess: f32,
     /// Metal in percent (AE default 100).
     pub metal: f32,
+    /// Advanced 3D: Transparency in percent (default 0): the layer lets what
+    /// is behind it through.
+    pub transparency: f32,
+    /// Advanced 3D: Transparency Rolloff in percent (default 0): less
+    /// transparency where the layer is seen at a glancing angle.
+    pub transparency_rolloff: f32,
 }
 
 impl Default for Material {
@@ -706,6 +712,8 @@ impl Default for Material {
             specular_intensity: 50.0,
             specular_shininess: 5.0,
             metal: 100.0,
+            transparency: 0.0,
+            transparency_rolloff: 0.0,
         }
     }
 }

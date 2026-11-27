@@ -383,6 +383,17 @@ const LAYER: &[AttrDef] = &[
     float("material:specular_shininess", 5.0).kinds(VISUAL),
     float("material:metal", 100.0).kinds(VISUAL),
     float("material:light_transmission", 0.0).kinds(VISUAL),
+    // Advanced 3D's extra Material Options (AE shows them with that renderer).
+    color("material:shadow_color", [0.0, 0.0, 0.0, 1.0]).kinds(VISUAL),
+    int("material:appears_in_reflections", 1)
+        .kinds(VISUAL)
+        .doc("AE's Appears in Reflections: 0 Off, 1 On, 2 Only."),
+    float("material:reflection_intensity", 0.0).kinds(VISUAL),
+    float("material:reflection_sharpness", 100.0).kinds(VISUAL),
+    float("material:reflection_rolloff", 0.0).kinds(VISUAL),
+    float("material:transparency", 0.0).kinds(VISUAL),
+    float("material:transparency_rolloff", 0.0).kinds(VISUAL),
+    float("material:index_of_refraction", 1.0).kinds(VISUAL),
 ];
 
 const SHAPE_TRANSFORM: &[AttrDef] = &[
