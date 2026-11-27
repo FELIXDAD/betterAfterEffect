@@ -27,7 +27,9 @@ mod convert;
 mod engine;
 mod host;
 mod interactive;
+mod panel_program;
 pub use interactive::{ScriptWindow, ScriptWindows};
+pub use panel_program::PanelProgram;
 
 pub use engine::{CompiledModule, prepare_module, prewarm};
 
@@ -135,6 +137,17 @@ pub trait ScriptView: std::fmt::Debug + Send + Sync {
     fn set_time(&self, comp: &bae_motion::query::CompInfo, time: Time);
 }
 
+/// Desktop services available to user-run JSX files, including the live queue
+/// and the directory the user selected for script file I/O.
+pub trait ScriptApplication: Send + Sync {
+    fn call(
+        &self,
+        stage: &Stage,
+        operation: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, String>;
+}
+
 /// An exported function of an installed ES module.
 pub struct ModuleEntry<'a> {
     pub module: &'a CompiledModule,
@@ -179,6 +192,7 @@ fn new_state<'a, 'e, 't>(
         tx,
         env,
         access,
+        application: None,
         selected: env.selected_layers.clone(),
         generation: 0,
         playheads: Default::default(),
@@ -290,6 +304,7 @@ pub struct RunScriptParams {
 /// error and its line, the completion value) is the command's output; a script
 /// error does not fail the command, so changes made before it are kept.
 pub struct RunScript {
+    application: Option<Arc<dyn ScriptApplication>>,
     windows: Option<ScriptWindows>,
     commands: ScriptRegistry,
     defs: Arc<Registry<EffectDef>>,
@@ -306,6 +321,7 @@ impl RunScript {
     /// `script.run` with the standard commands only ([`standard_commands`]).
     pub fn standalone(defs: Arc<Registry<EffectDef>>) -> Self {
         RunScript {
+            application: None,
             windows: None,
             commands: ScriptRegistry::Standalone(standard_commands(defs.clone())),
             defs,
@@ -373,25 +389,26 @@ impl bae_model::Command for RunScript {
             time_limit: None,
         };
         let name = p.name.unwrap_or_else(|| "script".to_owned());
-        let report = if let Some(windows) = self
+        let mut state = new_state(tx, &env, &name, ProjectAccess::Write);
+        state.application = self.application.as_deref();
+        let result = if let Some(windows) = self
             .windows
             .as_ref()
             .filter(|_| p.interactive || p.window.is_some())
         {
-            let mut state = new_state(tx, &env, &name, ProjectAccess::Write);
-            let result = if let Some(id) = p.window {
+            if let Some(id) = p.window {
                 windows.resume(&mut state, id, p.event.unwrap_or_default())
             } else {
                 windows.start(&mut state, p.source, p.panel)
-            };
-            match result {
-                Ok(v) => state.report.result = v,
-                Err(e) => state.report.error = Some(e),
             }
-            state.report
         } else {
-            run_in(tx, &env, &name, &p.source)
+            engine::execute(&mut state, engine::Program::File(&p.source))
         };
+        match result {
+            Ok(v) => state.report.result = v,
+            Err(e) => state.report.error = Some(e),
+        }
+        let report = state.report;
         self.console.put(report.clone());
         Ok(report)
     }
@@ -426,6 +443,7 @@ impl AppModule for ScriptModule {
         // its parameter schema (the MCP tool definition).
         let mut r = CommandRegistry::with_builtins();
         let run = RunScript {
+            application: app.resource::<Arc<dyn ScriptApplication>>().cloned(),
             windows: app.resource::<ScriptWindows>().cloned(),
             commands: ScriptRegistry::Application(Arc::downgrade(&commands)),
             defs,

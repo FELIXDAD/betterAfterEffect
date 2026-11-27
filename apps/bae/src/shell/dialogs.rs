@@ -249,6 +249,13 @@ impl bae_ui::files::FilePicker for NativePicker {
     }
 
     #[cfg(any(target_os = "macos", windows))]
+    fn pick_folder(&self, title: &str) -> Option<PathBuf> {
+        Native::new(self.parent.clone())
+            .files()
+            .set_title(title)
+            .pick_folder()
+    }
+    #[cfg(any(target_os = "macos", windows))]
     fn open(&self, request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
         let mut dialog = Native::new(self.parent.clone())
             .files()

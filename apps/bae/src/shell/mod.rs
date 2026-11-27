@@ -369,9 +369,10 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             &prefs,
         ));
     }
-    let project_file = bae_ui::files::ProjectFile::default();
+    let project_file = app
+        .resource::<bae_ui::files::ProjectFile>()
+        .expect("script project location");
     project_file.set(document.location().map(std::path::Path::to_owned));
-    app.insert_resource(project_file);
     crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());

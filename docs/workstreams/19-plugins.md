@@ -56,6 +56,7 @@
 - betterAfterEffects 原生渲染直接读写共享内存，复用上传缓冲。宿主按行转换像素，并复用输入范围一致的预渲染查询。声明可并发的效果可在两个 runner 中同时处理帧。
 - betterAfterEffects 脚本插件安装时编译，调用时使用应用命令注册表并检查文件权限。脚本支持读写合成播放头、读取表达式结果和使用属性类型与混合模式枚举。SDK 示例包含只读合成摘要和选中图层淡入。
 - JSX 的 ScriptUI 对话框可以等待用户输入并继续执行，停靠面板能保留回调的局部变量。「窗口」列出 Scripts/ScriptUI Panels 目录下的面板；两个应用验收覆盖弹窗按钮和面板连续点击。
+- 桌面 JSX 可在用户选定的目录内读写文件、导入素材和保存工程。应用验收重新打开脚本保存的工程、跨会话读取设置、用 AE 菜单编号 2161 将合成入队，并验证两个输出模块都写出 PNG 后脚本才继续。已安装的停靠面板在启动时后台编译，打开和点击时复用编译结果。
 - [x] 设计规格 `docs/spec/plugin-architecture.md`（v0.1，已对齐合并后的 `bae_render::Effect` 和 `bae_model::EffectDef`）
 - [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
 - [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）

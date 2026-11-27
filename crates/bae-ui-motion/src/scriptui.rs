@@ -24,6 +24,8 @@ pub(crate) fn install(app: &mut AppBuilder, scripts_dir: Option<&Path>) {
             );
             let panel = key.clone();
             let windows = windows.clone();
+            let program = Arc::new(bae_script::PanelProgram::new(path));
+            windows.register_panel(key.clone(), program.clone());
             let item =
                 bae_ui::MenuItemSpec::new(&["Window"], &name, bae_ui::action::ids::OPEN_PANEL)
                     .params(json!({"id": key}))
@@ -35,7 +37,7 @@ pub(crate) fn install(app: &mut AppBuilder, scripts_dir: Option<&Path>) {
                     Box::new(Dock {
                         windows: windows.clone(),
                         panel: panel.clone(),
-                        path: path.clone(),
+                        program: program.clone(),
                         started: false,
                     })
                 }),
@@ -68,6 +70,15 @@ impl bae_ui::DialogHost for Host {
             let title = label(root);
             let id = egui::Id::new(("scriptui", window.id));
             match root["type"].as_str() {
+                Some("application") => {
+                    if let Some(requests) = cx
+                        .resources
+                        .get::<super::script_services::Requests>()
+                        .cloned()
+                    {
+                        requests.draw(cx, &window);
+                    }
+                }
                 Some("dialog") => {
                     let result =
                         bae_ui::dialog::window(ctx, id, title, |ui| draw(ui, cx, &window, root));
@@ -94,22 +105,23 @@ impl bae_ui::DialogHost for Host {
 struct Dock {
     windows: ScriptWindows,
     panel: String,
-    path: std::path::PathBuf,
+    program: Arc<bae_script::PanelProgram>,
     started: bool,
 }
 
 impl Panel for Dock {
     fn ui(&mut self, ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
         if !self.started {
-            self.started = true;
-            match std::fs::read_to_string(&self.path) {
-                Ok(source) => {
-                    cx.invoke_with(RUN_SCRIPT, json!({"source":source, "interactive":true,
-                        "name":self.path.file_name().unwrap_or_default().to_string_lossy(), "panel":self.panel}));
-                    cx.invoke(super::scripts::REPORT);
-                }
-                Err(e) => super::dialogs::alert(cx, cx.kind_title, e.to_string()),
+            if !self.program.ready() {
+                ui.spinner();
+                return;
             }
+            self.started = true;
+            cx.invoke_with(
+                RUN_SCRIPT,
+                json!({"interactive":true, "name":cx.kind_title, "panel":self.panel}),
+            );
+            cx.invoke(super::scripts::REPORT);
         }
         for w in self.windows.windows() {
             if w.panel.as_ref() == Some(&self.panel) && w.tree["type"] == "panel" {

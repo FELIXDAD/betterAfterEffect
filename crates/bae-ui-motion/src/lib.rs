@@ -64,6 +64,7 @@ mod props;
 mod render;
 pub mod render_queue;
 pub mod scopes;
+pub mod script_services;
 pub mod scripts;
 mod scriptui;
 pub mod session;
@@ -243,6 +244,7 @@ impl AppModule for MotionUiModule {
             .resource::<bae_platform::AppDirs>()
             .map(|d| d.data.join("Scripts"));
         scriptui::install(app, scripts_dir.as_deref());
+        script_services::install(app);
         let menu = app.registry::<MenuItemSpec>();
         if let Some(dir) = &scripts_dir {
             scripts::register_menu(&menu, &owner, dir);

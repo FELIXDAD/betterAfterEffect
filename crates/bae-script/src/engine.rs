@@ -15,17 +15,19 @@ use crate::host::{self, RunState};
 const PRELUDE: &str = concat!(
     include_str!("prelude.js"),
     "\n",
-    include_str!("scriptui.js")
+    include_str!("scriptui.js"),
+    "\n",
+    include_str!("project_services.js")
 );
 
 /// File name of the user's script in QuickJS stack traces (to find the line).
 const SCRIPT_FILE: &str = "script";
 
 /// QuickJS heap per run.
-const MEMORY_LIMIT: usize = 128 << 20;
+pub(crate) const MEMORY_LIMIT: usize = 128 << 20;
 /// Native stack QuickJS may use: deep recursion is a RangeError, never a crash,
 /// also on the 1 MiB main thread of Windows.
-const JS_STACK: usize = 384 << 10;
+pub(crate) const JS_STACK: usize = 384 << 10;
 
 thread_local! {
     /// The run in progress on this thread (type-erased `*mut RunState`).
@@ -258,9 +260,15 @@ impl Program<'_> {
     }
 }
 
+pub(crate) fn panel_source(source: &str) -> String {
+    format!(
+        "var __dock = new Panel(); (function(){{{}\n}}).call(__dock);",
+        strip_directives(source)
+    )
+}
+
 pub(crate) fn interactive_file(
-    source: String,
-    dock: bool,
+    source: crate::panel_program::InteractiveSource,
     endpoint: crate::interactive::Endpoint,
     limit: Duration,
 ) -> Result<Json, String> {
@@ -307,10 +315,13 @@ pub(crate) fn interactive_file(
             // `alert` keeps the prelude's report entry: it returns nothing, so it never suspends
             // the run and splits its undo step.
             ctx.eval::<(), _>("globalThis.confirm = (m,d,t) => __scriptQuestion('confirm',m,d,t); globalThis.prompt = (m,d,t) => __scriptQuestion('prompt',m,d,t);")?;
-            let program = if dock {
-                format!("var __dock = new Panel(); (function(){{{}\n}}).call(__dock);", strip_directives(&source))
-            } else {source};
-            let result = Program::File(&program).eval(&ctx, host)?;
+            let dock = matches!(&source, crate::panel_program::InteractiveSource::Panel(_));
+            let result = match source {
+                crate::panel_program::InteractiveSource::Panel(program) => program.eval(&ctx)?,
+                crate::panel_program::InteractiveSource::Text(source) => {
+                    Program::File(&source).eval(&ctx, host)?
+                }
+            };
             ctx.eval::<(), _>(if dock { "__finishUI(__dock)" } else { "__finishUI(null)" })?;
             if result.is_object() { return Ok(Json::Null); }
             let text = ctx.json_stringify(result)?.map(|s| s.to_string()).transpose()?;

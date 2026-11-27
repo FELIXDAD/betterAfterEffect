@@ -46,6 +46,10 @@ pub struct ImportSelection {
 
 /// A native open panel.
 pub trait FilePicker: Send + Sync {
+    /// A directory explicitly chosen by the user for a scoped operation.
+    fn pick_folder(&self, _title: &str) -> Option<PathBuf> {
+        None
+    }
     /// The chosen files (and folders, when allowed); empty when cancelled.
     fn open(&self, request: &OpenRequest) -> Vec<PathBuf>;
 

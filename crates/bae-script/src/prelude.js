@@ -238,7 +238,7 @@
   function FootageItem(path) { AVItem.call(this, path); }
   FootageItem.prototype = Object.create(AVItem.prototype, {
     constructor: { value: FootageItem },
-    file: { get: function () { var f = this._i().file; return f ? { fsName: f, name: f.split(/[\\/]/).pop() } : null; } },
+    file: { get: function () { var f = this._i().file; return f ? new g.File(f) : null; } },
     mainSource: {
       get: function () {
         var i = this._i();

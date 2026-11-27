@@ -991,7 +991,12 @@ fn menu_bar_follows_the_ae_catalog() {
         expect.insert(0, "App");
     }
     assert_eq!(tops, expect);
-    let built = menu_lines(&tree);
+    let mut built = menu_lines(&tree);
+    let grant = built
+        .iter()
+        .position(|line| line == "File > Scripts > Choose Script Folder...")
+        .unwrap();
+    built.remove(grant);
     let mut wanted = catalog_lines();
     let install = wanted
         .iter()

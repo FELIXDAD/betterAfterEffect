@@ -58,7 +58,7 @@ fn main() -> ExitCode {
 
 /// The AE scripting prelude's bytecode, otherwise compiled by the first script
 /// or plugin run. `bae-script` stays free of GPU types, so the task lives here.
-struct ScriptPrelude;
+struct ScriptPrelude(bae_script::ScriptWindows);
 
 impl bae_gpu::WarmUp for ScriptPrelude {
     fn name(&self) -> &str {
@@ -66,7 +66,9 @@ impl bae_gpu::WarmUp for ScriptPrelude {
     }
 
     fn run(&self, _gpu: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
-        bae_script::prewarm()
+        bae_script::prewarm()?;
+        self.0.prewarm_panels();
+        Ok(())
     }
 }
 
@@ -128,7 +130,15 @@ fn assemble_modules(mut builder: AppBuilder) -> AppBuilder {
             "bae.anim.expressions",
             std::sync::Arc::new(ExpressionWarmUp),
         ),
-        ("bae.script.prelude", std::sync::Arc::new(ScriptPrelude)),
+        (
+            "bae.script.prelude",
+            std::sync::Arc::new(ScriptPrelude(
+                builder
+                    .resource::<bae_script::ScriptWindows>()
+                    .expect("script windows")
+                    .clone(),
+            )),
+        ),
     ] {
         if let Err(error) = builder.register_arc::<dyn bae_gpu::WarmUp>(id, task) {
             tracing::warn!("warm-up task {id} not registered: {error}");
