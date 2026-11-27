@@ -346,8 +346,11 @@ pub struct ConnectionStatus {
     /// yet (offline, read-only, held back by `min_send_interval`), not
     /// confirmed since the last reconnect, handed to a link that failed
     /// before the remote confirmed them, waiting on a link whose I/O is
-    /// stuck ([`ConnectionConfig::io_stall`]), or taken by a link that does
-    /// not write them ([`Connection::link_notes`]).
+    /// stuck ([`ConnectionConfig::io_stall`]), taken by a link that does
+    /// not write them ([`Connection::link_notes`]), or not sent because a
+    /// document's changes do not fit in one message on the link
+    /// ([`SyncSession::too_large`] via [`Connection::session`]; reported once
+    /// in [`ConnectionOutcome::errors`]).
     pub unsynced: bool,
     /// Others online (0 unless online).
     pub peers: usize,
@@ -373,7 +376,16 @@ pub struct ConnectionOutcome {
     pub presence_changed: bool,
     /// [`ConnectionStatus`] changed (its `generation` increased).
     pub status_changed: bool,
-    /// Messages that were skipped (corrupt payloads, unknown types).
+    /// Problems with single messages or documents; the link is still
+    /// usable (the session's [`PumpOutcome::errors`](crate::PumpOutcome::errors)):
+    /// received data that could not be imported (corrupt payload, unknown
+    /// type, model error), a document that could not be exported, or one
+    /// whose changes do not fit in one message on this link
+    /// ([`SyncError::MessageTooLarge`]). That one is reported once per
+    /// document and link, then not sent: it stays unsynced
+    /// ([`ConnectionStatus::unsynced`], [`Closing::unsynced`]) and
+    /// `session().too_large(docs)` lists it ([`SyncSession::too_large`]).
+    /// Show it, e.g. "this layer is too large to sync through the hub".
     pub errors: Vec<SyncError>,
 }
 
@@ -1775,7 +1787,9 @@ impl Closing {
     /// `Hello`s and what it reads of others, not our writes, so after a lost
     /// folder link this is every document edited on it (spec 7.4). And
     /// documents the link took edits of but does not write
-    /// ([`LinkNotes::not_written`]). Known at once. Warn before quitting when
+    /// ([`LinkNotes::not_written`]), and documents whose changes do not fit
+    /// in one message on the link ([`SyncSession::too_large`]: the session
+    /// skips them, also when flushing). Known at once. Warn before quitting when
     /// this is not empty or the link reports an error.
     pub fn unsynced(&self) -> &[DocKey] {
         &self.unsynced
