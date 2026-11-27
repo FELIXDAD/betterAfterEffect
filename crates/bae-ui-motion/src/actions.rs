@@ -87,6 +87,8 @@ pub mod ids {
     /// items' or comps' proxy.
     pub const SET_PROXY_FILE: &str = "motion.file.set_proxy_file";
     pub const SET_PROXY_NONE: &str = "motion.file.set_proxy_none";
+    pub const CREATE_PROXY_STILL: &str = "motion.file.create_proxy_still";
+    pub const CREATE_PROXY_MOVIE: &str = "motion.file.create_proxy_movie";
     /// File > New Comp from Selection... (Alt+\).
     pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
@@ -447,6 +449,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ),
     (ids::SET_PROXY_FILE, "Set Proxy: File..."),
     (ids::SET_PROXY_NONE, "Set Proxy: None"),
+    (ids::CREATE_PROXY_STILL, "Create Proxy: Still..."),
+    (ids::CREATE_PROXY_MOVIE, "Create Proxy: Movie..."),
     (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
@@ -1910,6 +1914,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::SET_PROXY_FILE => {
             crate::import::set_proxy_file(cx, session);
+            return true;
+        }
+        ids::CREATE_PROXY_STILL | ids::CREATE_PROXY_MOVIE => {
+            crate::render_queue::create_proxy(cx, session, inv.id == ids::CREATE_PROXY_STILL);
             return true;
         }
         ids::SET_PROXY_NONE => {
@@ -3450,6 +3458,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Replace Footage: Placeholder...", "替换素材：占位符..."),
     ("Set Proxy: File...", "设置代理：文件..."),
     ("Set Proxy: None", "设置代理：无"),
+    ("Create Proxy: Still...", "创建代理：静止图像..."),
+    ("Create Proxy: Movie...", "创建代理：影片..."),
     ("Set Proxy File", "设置代理文件"),
     (
         "The proxy file is missing; the original is used.",

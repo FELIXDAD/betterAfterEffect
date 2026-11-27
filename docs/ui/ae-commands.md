@@ -101,8 +101,8 @@
 | Scripts ▸ (installed script) | 917519 | `motion.file.run_script` |  |  |  | B | ⋯ |
 | Scripts ▸ (installed script) | 917520 | `motion.file.run_script` |  |  |  | B | ⋯ |
 | Scripts ▸ (installed script) | 917521 | `motion.file.run_script` |  |  |  | B | ⋯ |
-| Create Proxy ▸ Still... | 10813441 | `motion.file.create_proxy_still` |  |  |  | E | ⏸ |
-| Create Proxy ▸ Movie... | 10813442 | `motion.file.create_proxy_movie` |  |  |  | E | ⏸ |
+| Create Proxy ▸ Still... | 10813441 | `motion.file.create_proxy_still` |  |  |  | E | ✅ |
+| Create Proxy ▸ Movie... | 10813442 | `motion.file.create_proxy_movie` |  |  |  | E | ✅ |
 | Set Proxy ▸ File... | 9830401 | `motion.file.set_proxy_file` |  | Ctrl+Alt+P | Cmd+Opt+P | E | ✅ |
 | Set Proxy ▸ None | 9830403 | `motion.file.set_proxy_none` |  |  |  | E | ✅ |
 | Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ✅ |

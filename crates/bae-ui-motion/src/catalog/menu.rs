@@ -286,8 +286,8 @@ const FILE: &[Node] = &[
     sub(
         "Create Proxy",
         &[
-            it(10813441, "Still...", "motion.file.create_proxy_still", "", E, Later),
-            it(10813442, "Movie...", "motion.file.create_proxy_movie", "", E, Later),
+            it(10813441, "Still...", "motion.file.create_proxy_still", "", E, Done),
+            it(10813442, "Movie...", "motion.file.create_proxy_movie", "", E, Done),
         ],
     ),
     sub(
