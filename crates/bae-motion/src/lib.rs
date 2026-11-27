@@ -71,6 +71,7 @@
 pub mod camera;
 pub mod camera_track;
 pub mod comp;
+pub mod comp_from_items;
 pub mod content;
 pub mod dimensions;
 pub mod effect;
@@ -144,7 +145,9 @@ pub use time::{
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
+        r.register(paint::ExtendStroke),
         r.register(tracker::CreateTracker),
         r.register(camera_track::Record),
         r.register(tracker::AddPoint),

@@ -104,6 +104,8 @@ const MODE_SILHOUETTE_LUMA: u32 = 35u;
 const MODE_ALPHA_ADD: u32 = 36u;
 const MODE_LUMINESCENT_PREMUL: u32 = 37u;
 
+const FLAG_DRAFT: u32 = 4096u;
+const FLAG_WIREFRAME: u32 = 8192u;
 const FLAG_TEXTURE: u32 = 1u;
 const FLAG_STRAIGHT: u32 = 2u;
 const FLAG_MATTE: u32 = 4u;
@@ -418,7 +420,12 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
 
     var src: vec4<f32>;
     var light: vec3<f32>;
-    if (flags & FLAG_TEXTURE) != 0u {
+    if (flags & FLAG_WIREFRAME) != 0u {
+        let edge = min((u - d.rect.xy) * kxy, (d.rect.zw - u) * kxy);
+        k *= clamp(1.5 - min(edge.x, edge.y), 0.0, 1.0);
+        src = vec4<f32>(1.0);
+        light = src.rgb;
+    } else if (flags & FLAG_TEXTURE) != 0u {
         // Minified layers average a grid of bilinear samples over the pixel's
         // footprint in the source (a box prefilter, like AE's downsampling);
         // others take one sample.
@@ -428,7 +435,9 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
         let lo = d.rect.xy + 0.5;
         let hi = max(d.rect.zw - 0.5, lo);
         let n = u32(clamp(ceil(max(length(du_dx), length(du_dy))), 1.0, 4.0));
-        if n == 1u {
+        if (flags & FLAG_DRAFT) != 0u {
+            src = textureLoad(t_src, vec2<i32>(floor(clamp(u, lo, hi))), 0);
+        } else if n == 1u {
             src = textureSampleLevel(t_src, s_linear, clamp(u, lo, hi) * d.src.xy, 0.0);
         } else {
             var acc = vec4<f32>(0.0);

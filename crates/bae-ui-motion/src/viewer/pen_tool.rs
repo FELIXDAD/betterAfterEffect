@@ -12,6 +12,7 @@
 //! segment Add Vertex, over a vertex Delete Vertex, Alt/Option over a vertex
 //! Convert Vertex. Cmd/Ctrl makes it the Selection tool (handled by the viewer).
 
+use super::path_edit::set_vertices;
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_model::{BezierPath, PrimPath, PrimType, Value};
@@ -207,7 +208,11 @@ pub(super) fn frame(
     }
     let options = tools.lock().options.clone();
     let prefs = super::prefs::ViewerPrefs::current(cx.resources);
-    let paths = overlay::editable_paths(stage, comp, &selected, Some(prefs));
+    let paths = if session.lock().view_options.paths {
+        overlay::editable_paths(stage, comp, &selected, Some(prefs))
+    } else {
+        Vec::new()
+    };
     let (alt, shift, space, primary_down, pressed) = ui.input(|i| {
         (
             i.modifiers.alt,
@@ -251,17 +256,39 @@ pub(super) fn frame(
                 start_vertex(state, cx, session, info, comp, view, pos, shift);
             }
             (Tool::AddVertex, Some(PathHit::Segment { path, segment, t })) => {
-                cx.invoke_with(
-                    "path.insert_vertex",
-                    json!({"path": paths[path].prim, "segment": segment, "t": t}),
-                );
+                let p = &paths[path];
+                if super::path_edit::edit_only_current_mask(cx, &p.prim) {
+                    set_vertices(
+                        cx,
+                        session,
+                        info,
+                        &p.prim,
+                        &bae_motion::path::split(&p.path, segment, t),
+                    );
+                } else {
+                    cx.invoke_with(
+                        "path.insert_vertex",
+                        json!({"path": p.prim, "segment": segment, "t": t}),
+                    );
+                }
             }
             (Tool::DeleteVertex, Some(PathHit::Vertex { path, index })) => {
-                if paths[path].path.vertices.len() > 1 {
-                    cx.invoke_with(
-                        "path.delete_vertex",
-                        json!({"path": paths[path].prim, "index": index}),
-                    );
+                let p = &paths[path];
+                if p.path.vertices.len() > 1 {
+                    if super::path_edit::edit_only_current_mask(cx, &p.prim) {
+                        set_vertices(
+                            cx,
+                            session,
+                            info,
+                            &p.prim,
+                            &bae_motion::path::remove(&p.path, index),
+                        );
+                    } else {
+                        cx.invoke_with(
+                            "path.delete_vertex",
+                            json!({"path": p.prim, "index": index}),
+                        );
+                    }
                 }
             }
             (Tool::ConvertVertex, Some(PathHit::Vertex { path, index })) => {
@@ -507,20 +534,6 @@ fn start_vertex(
     state.drawing = Some(d);
 }
 
-fn set_vertices(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    info: &CompInfo,
-    prim: &PrimPath,
-    path: &BezierPath,
-) {
-    let time = session.lock().time(&info.path);
-    let mut params = serde_json::to_value(path).unwrap_or_default();
-    params["path"] = json!(prim);
-    params["time"] = json!(query::to_key_time(cx.stage, prim, time));
-    cx.invoke_with("path.set_vertices", params);
-}
-
 /// Write the open path to the model: the first vertex creates the shape or mask,
 /// later ones edit its path.
 fn commit(
@@ -544,11 +557,29 @@ fn commit(
             let [x, y] = bae_motion::path::drawing_center(&path);
             let position = d.to_comp.transform_point3(DVec3::new(x, y, 0.0));
             let time = query::to_key_time(cx.stage, prim, session.lock().time(&info.path));
-            cx.invoke_with("attr.set_many", json!({"edits": [
-                {"path": prim, "attr": bae_motion::path::PATH_ATTR, "time": time, "value": Value::Bezier(path)},
-                {"path": layer, "attr": "transform:anchor_point", "time": time, "value": Value::Vec3([x, y, 0.0])},
-                {"path": layer, "attr": "transform:position", "time": time, "value": Value::Vec3(position.to_array())}
-            ]}));
+            let mut edits = vec![
+                json!({"path": prim, "attr": bae_motion::path::PATH_ATTR, "time": time, "value": Value::Bezier(path)}),
+                json!({"path": layer, "attr": "transform:anchor_point", "time": time, "value": Value::Vec3([x, y, 0.0])}),
+            ];
+            // Separate Dimensions: the layer evaluates X / Y (/ Z) Position,
+            // so those move (the combined value would leave the shape jumping).
+            if bae_motion::dimensions::is_separated(cx.stage, &layer) {
+                let axes = if crate::common::is_3d(cx.stage, &layer) {
+                    3
+                } else {
+                    2
+                };
+                for (attr, v) in bae_motion::dimensions::COMPONENTS
+                    .iter()
+                    .zip(position.to_array())
+                    .take(axes)
+                {
+                    edits.push(json!({"path": layer, "attr": attr, "time": time, "value": Value::Float(v)}));
+                }
+            } else {
+                edits.push(json!({"path": layer, "attr": "transform:position", "time": time, "value": Value::Vec3(position.to_array())}));
+            }
+            cx.invoke_with("attr.set_many", json!({ "edits": edits }));
             return;
         }
         set_vertices(cx, session, info, prim, &path);

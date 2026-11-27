@@ -207,12 +207,15 @@ impl Command for TimeReverse {
         ensure_unlocked(tx.stage(), &p.layers)?;
         for l in &p.layers {
             let t = query::layer_timing(tx.stage(), l);
+            // Frame for frame (AE): the first frame shows what the last one did,
+            // not a time one frame past the source's end (#764).
+            let frame = comp_frame(tx, l);
             set(tx, l, "stretch", Value::Float(-t.stretch))?;
             set(
                 tx,
                 l,
                 "start_time",
-                Value::Time(t.in_point + t.out_point - t.start_time),
+                Value::Time(t.in_point + t.out_point - t.start_time - frame),
             )?;
         }
         Ok(())
@@ -250,11 +253,13 @@ impl Command for FreezeFrame {
                 .and_then(|v| v.value(ENABLED))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            // The remapped time from the keyframes at the layer time; the layer
+            // time itself when that cannot be read, never 0 (#769).
             let shown = if enabled {
-                match bae_anim::evaluate_attribute(tx.stage(), l, REMAP, p.time) {
-                    Ok(Value::Time(s)) => s,
-                    Ok(other) => Time::from_seconds(other.as_f64().unwrap_or(0.0)),
-                    Err(_) => at,
+                match query::sample_attr(tx.stage(), l, REMAP, at) {
+                    Some(Value::Time(s)) => s,
+                    Some(other) => other.as_f64().map_or(at, Time::from_seconds),
+                    None => at,
                 }
             } else {
                 at
