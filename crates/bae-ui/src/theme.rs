@@ -183,6 +183,30 @@ impl Appearance {
     }
 }
 
+static GRADIENTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub(crate) fn set_gradients(enabled: bool) {
+    GRADIENTS.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Surface of a panel header or title bar. Uses the ordinary egui vertex-color pipeline.
+pub(crate) fn bar_fill(painter: &egui::Painter, rect: egui::Rect, base: Color32) {
+    if !GRADIENTS.load(std::sync::atomic::Ordering::Relaxed) {
+        painter.rect_filled(rect, 0.0, base);
+        return;
+    }
+    let top = brighten(base, 3);
+    let bottom = brighten(base, -3);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), top);
+    mesh.colored_vertex(rect.right_top(), top);
+    mesh.colored_vertex(rect.left_bottom(), bottom);
+    mesh.colored_vertex(rect.right_bottom(), bottom);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(2, 1, 3);
+    painter.add(mesh);
+}
+
 static APPEARANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 static ACCESSIBLE_CONTRAST: std::sync::atomic::AtomicBool =

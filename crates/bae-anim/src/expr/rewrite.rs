@@ -131,7 +131,104 @@ const KEYWORDS_BEFORE_EXPR: &[&str] = &[
     "else",
 ];
 
+/// Categories shown by the expression editor. Offsets returned by
+/// [`expression_tokens`] are UTF-8 byte ranges in the original source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpressionToken {
+    Keyword,
+    Identifier,
+    Number,
+    String,
+    Operator,
+    Comment,
+}
+
+impl ExpressionToken {
+    fn classify(tok: Option<&Tok>) -> Self {
+        match tok {
+            None => Self::Comment,
+            Some(Tok::Ident(s))
+                if matches!(
+                    s.as_str(),
+                    "as" | "async"
+                        | "await"
+                        | "break"
+                        | "case"
+                        | "catch"
+                        | "class"
+                        | "const"
+                        | "continue"
+                        | "debugger"
+                        | "default"
+                        | "delete"
+                        | "do"
+                        | "else"
+                        | "export"
+                        | "extends"
+                        | "false"
+                        | "finally"
+                        | "for"
+                        | "from"
+                        | "function"
+                        | "get"
+                        | "if"
+                        | "import"
+                        | "in"
+                        | "instanceof"
+                        | "let"
+                        | "new"
+                        | "null"
+                        | "of"
+                        | "return"
+                        | "set"
+                        | "static"
+                        | "super"
+                        | "switch"
+                        | "this"
+                        | "throw"
+                        | "true"
+                        | "try"
+                        | "typeof"
+                        | "var"
+                        | "void"
+                        | "while"
+                        | "with"
+                        | "yield"
+                ) =>
+            {
+                Self::Keyword
+            }
+            Some(Tok::Ident(_)) => Self::Identifier,
+            Some(Tok::Num(_)) => Self::Number,
+            Some(Tok::Str(_) | Tok::Template(_) | Tok::Regex(_)) => Self::String,
+            Some(Tok::Punct(_) | Tok::Eof) => Self::Operator,
+        }
+    }
+}
+
+/// Scan the editable source with the evaluator's lexer, including comments and
+/// literals that the user has not finished typing.
+pub fn expression_tokens(src: &str) -> Vec<(std::ops::Range<usize>, ExpressionToken)> {
+    let offsets: Vec<_> = src
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain([src.len()])
+        .collect();
+    let mut spans = Vec::new();
+    let _ = scan::<true>(src, |start, end, tok| {
+        spans.push((offsets[start]..offsets[end], ExpressionToken::classify(tok)));
+    });
+    spans
+}
+
 fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
+    scan::<false>(src, |_, _, _| {})
+}
+
+fn scan<const EDITING: bool>(
+    src: &str,
+    mut visit: impl FnMut(usize, usize, Option<&Tok>),
+) -> Result<Vec<Token>, SyntaxError> {
     let chars: Vec<char> = src.chars().collect();
     let mut out: Vec<Token> = Vec::new();
     let mut i = 0;
@@ -158,11 +255,13 @@ fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
             i += 1;
             continue;
         }
+        let start = i;
         // Comments.
         if c == '/' && chars.get(i + 1) == Some(&'/') {
             while i < chars.len() && chars[i] != '\n' && chars[i] != '\r' {
                 i += 1;
             }
+            visit(start, i, None);
             continue;
         }
         if c == '/' && chars.get(i + 1) == Some(&'*') {
@@ -174,13 +273,13 @@ fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
                 }
                 i += 1;
             }
-            if i >= chars.len() {
+            if i >= chars.len() && !EDITING {
                 return Err(err(line, "unterminated comment"));
             }
-            i += 2;
+            i = (i + 2).min(chars.len());
+            visit(start, i, None);
             continue;
         }
-        let start = i;
         let tok = if c.is_alphabetic() || c == '_' || c == '$' || c == '\\' {
             while i < chars.len()
                 && (chars[i].is_alphanumeric()
@@ -230,14 +329,20 @@ fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
                     i += 1;
                 }
                 if i < chars.len() && (chars[i] == '\n') {
+                    if EDITING {
+                        break;
+                    }
                     return Err(err(line, "unterminated string"));
                 }
                 i += 1;
             }
-            if i >= chars.len() {
+            if chars.get(i) == Some(&c) {
+                i += 1;
+            } else if EDITING {
+                i = i.min(chars.len());
+            } else {
                 return Err(err(line, "unterminated string"));
             }
-            i += 1;
             Tok::Str(chars[start..i].iter().collect())
         } else if c == '`' {
             i += 1;
@@ -256,10 +361,10 @@ fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
                 }
                 i += 1;
             }
-            if i >= chars.len() {
+            if i >= chars.len() && !EDITING {
                 return Err(err(line, "unterminated template literal"));
             }
-            i += 1;
+            i = (i + 1).min(chars.len());
             Tok::Template(chars[start..i].iter().collect())
         } else if c == '/' && regex_allowed(out.last()) {
             i += 1;
@@ -270,15 +375,19 @@ fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
                     '[' => class = true,
                     ']' => class = false,
                     '/' if !class => break,
+                    '\n' if EDITING => break,
                     '\n' => return Err(err(line, "unterminated regular expression")),
                     _ => {}
                 }
                 i += 1;
             }
-            if i >= chars.len() {
+            if chars.get(i) == Some(&'/') {
+                i += 1;
+            } else if EDITING {
+                i = i.min(chars.len());
+            } else {
                 return Err(err(line, "unterminated regular expression"));
             }
-            i += 1;
             while i < chars.len() && chars[i].is_alphanumeric() {
                 i += 1;
             }
@@ -290,9 +399,14 @@ fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
                     i += p.chars().count();
                     Tok::Punct(p)
                 }
+                None if EDITING => {
+                    i += 1;
+                    continue;
+                }
                 None => return Err(err(line, &format!("unexpected character '{c}'"))),
             }
         };
+        visit(start, i, Some(&tok));
         out.push(Token { tok, nl, line });
         nl = false;
     }
@@ -302,6 +416,28 @@ fn lex(src: &str) -> Result<Vec<Token>, SyntaxError> {
         line,
     });
     Ok(out)
+}
+
+#[cfg(test)]
+#[test]
+fn editor_spans_preserve_partial_literals_and_unicode_offsets() {
+    use ExpressionToken::{Comment, Identifier, Number, String as Literal};
+    let src = "値 / 2; /[)]/; 'unfinished\n next; /* [";
+    let tokens: Vec<_> = expression_tokens(src)
+        .into_iter()
+        .map(|(r, k)| (&src[r], k))
+        .collect();
+    for expected in [
+        ("値", Identifier),
+        ("2", Number),
+        ("/[)]/", Literal),
+        ("'unfinished", Literal),
+        ("next", Identifier),
+        ("/* [", Comment),
+    ] {
+        assert!(tokens.contains(&expected), "{tokens:?}");
+    }
+    assert!(lex(src).is_err());
 }
 
 fn regex_allowed(prev: Option<&Token>) -> bool {

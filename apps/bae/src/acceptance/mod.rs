@@ -21,6 +21,7 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_colors;
 mod appearance_preferences;
 mod audio_preferences;
 #[cfg(target_os = "windows")]
@@ -46,6 +47,7 @@ mod layers;
 mod layout;
 mod liquify;
 mod marker_label_preferences;
+mod media_panels;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
@@ -67,10 +69,12 @@ mod shortcuts_dialog;
 mod startup;
 #[cfg(target_os = "macos")]
 mod stress;
+mod text_orientation;
 #[cfg(target_os = "macos")]
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod type_preferences;
 mod window_workspaces;
 
 use std::collections::VecDeque;
@@ -467,6 +471,18 @@ pub(crate) struct MenuItemView {
 }
 
 pub(crate) type Ui = Harness<'static, Gui>;
+
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
 
 /// A harness around a fresh [`Gui`].
 pub(crate) fn gui() -> Ui {

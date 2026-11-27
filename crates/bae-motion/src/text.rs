@@ -44,7 +44,7 @@ pub struct CreateTextParams {
     #[serde(default)]
     pub line_orientation: bae_model::LineOrientation,
     #[serde(default)]
-    pub baseline_direction: bae_model::BaselineDirection,
+    pub baseline_direction: Option<bae_model::BaselineDirection>,
     #[serde(default)]
     pub font: Option<String>,
     #[serde(default)]
@@ -61,6 +61,13 @@ pub struct CreateTextParams {
     /// Position in the layer stack, 0 = top (default 0).
     #[serde(default)]
     pub index: Option<usize>,
+    /// The Character panel's settings for new text (AE); `font`, `font_size`
+    /// and `fill_color` override them.
+    #[serde(default)]
+    pub style: Option<bae_model::TextStyle>,
+    /// The Paragraph panel's settings for new text; `justification` overrides.
+    #[serde(default)]
+    pub paragraph: Option<bae_model::ParagraphStyle>,
 }
 
 impl Command for CreateText {
@@ -71,7 +78,10 @@ impl Command for CreateText {
     const DESCRIPTION: &'static str = "Create a point or paragraph text layer with its text, like typing with the Type tool in the Composition panel: point text starts its first baseline at `position`; paragraph text fills a box whose top-left corner is `position`.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayerOutput, CommandError> {
-        let size = p.font_size.unwrap_or(DEFAULT_SIZE);
+        let size = p
+            .font_size
+            .or(p.style.as_ref().map(|s| s.font_size))
+            .unwrap_or(DEFAULT_SIZE);
         if size.is_nan() || size <= 0.0 {
             return Err(fail("font_size must be positive"));
         }
@@ -108,10 +118,21 @@ impl Command for CreateText {
                 point_of_interest: None,
             },
         )?;
-        let mut doc =
-            TextDocument::new(p.text, p.font.unwrap_or_else(|| DEFAULT_FONT.into()), size);
+        let mut doc = TextDocument::new(p.text, DEFAULT_FONT, size);
+        if let Some(style) = p.style {
+            doc.style = style;
+            doc.style.font_size = size;
+        }
+        if let Some(paragraph) = p.paragraph {
+            doc.paragraph = paragraph;
+        }
+        if let Some(font) = p.font {
+            doc.style.font = font;
+        }
         doc.line_orientation = p.line_orientation;
-        doc.style.baseline_direction = p.baseline_direction;
+        if let Some(direction) = p.baseline_direction {
+            doc.style.baseline_direction = direction;
+        }
         if let Some(c) = p.fill_color {
             doc.style.fill_color = c;
         }
@@ -142,6 +163,51 @@ impl Command for CreateText {
         )?;
         p.defaults.split_position(tx, &out.path)?;
         Ok(out)
+    }
+}
+
+pub struct ConvertTextOrientation;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ConvertTextOrientationParams {
+    pub layers: Vec<PrimPath>,
+    pub orientation: bae_model::LineOrientation,
+}
+
+impl Command for ConvertTextOrientation {
+    type Params = ConvertTextOrientationParams;
+    type Output = ();
+    const ID: &'static str = "text.convert_orientation";
+    const TITLE: &'static str = "Text Orientation";
+    const DESCRIPTION: &'static str = "Change the writing direction of the selected text layers, including every Source Text keyframe.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), p.layers.iter())?;
+        for layer in p.layers {
+            if query::layer_kind(tx.stage(), &layer).as_deref() != Some("text") {
+                return Err(fail(format!("{layer} is not a text layer")));
+            }
+            let Some(mut spec) = query::attr_spec(tx.stage(), &layer, SOURCE).cloned() else {
+                continue;
+            };
+            let mut changed = false;
+            for value in spec
+                .value
+                .iter_mut()
+                .chain(spec.keyframes.values_mut().map(|key| &mut key.value))
+            {
+                if let Value::TextDocument(doc) = value
+                    && doc.line_orientation != p.orientation
+                {
+                    doc.line_orientation = p.orientation;
+                    changed = true;
+                }
+            }
+            if changed {
+                crate::util::write_attr(tx, &layer, SOURCE, spec)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -264,7 +330,22 @@ pub struct TextStyleChange {
     pub faux_italic: Option<bool>,
     pub all_caps: Option<bool>,
     pub small_caps: Option<bool>,
+    pub baseline_direction: Option<bae_model::BaselineDirection>,
     pub baseline_option: Option<bae_model::BaselineOption>,
+    pub ligatures: Option<bool>,
+    pub hindi_digits: Option<bool>,
+    pub no_break: Option<bool>,
+    pub line_join: Option<bae_model::TextJoin>,
+    /// Character panel menu ▸ Reset Character: the selected characters take
+    /// the default character settings (first, before the other fields).
+    #[serde(default)]
+    pub reset_character: bool,
+    /// Paragraph panel menu ▸ Reset Paragraph.
+    #[serde(default)]
+    pub reset_paragraph: bool,
+    pub hanging_punctuation: Option<bool>,
+    pub top_leading: Option<bool>,
+    pub every_line: Option<bool>,
     pub left_indent: Option<f64>,
     pub right_indent: Option<f64>,
     pub first_line_indent: Option<f64>,
@@ -277,7 +358,14 @@ pub struct TextStyleChange {
 impl TextStyleChange {
     /// `doc` with the change applied.
     pub fn apply(&self, doc: &mut TextDocument, range: std::ops::Range<usize>) {
+        let defaults = TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE);
         doc.edit_styles(range.clone(), |doc| {
+            if self.reset_character {
+                doc.clone_from(&defaults.style);
+            }
+            if let Some(direction) = self.baseline_direction {
+                doc.baseline_direction = direction;
+            }
             if let Some(f) = &self.font {
                 doc.font = f.clone();
             }
@@ -317,17 +405,44 @@ impl TextStyleChange {
             if let Some(v) = self.faux_italic {
                 doc.faux_italic = v;
             }
+            // All Caps and Small Caps exclude each other (AE).
             if let Some(v) = self.all_caps {
                 doc.all_caps = v;
+                doc.small_caps &= !v;
             }
             if let Some(v) = self.small_caps {
                 doc.small_caps = v;
+                doc.all_caps &= !v;
             }
             if let Some(value) = self.baseline_option {
                 doc.baseline_option = value;
             }
+            if let Some(v) = self.ligatures {
+                doc.ligatures = v;
+            }
+            if let Some(v) = self.hindi_digits {
+                doc.hindi_digits = v;
+            }
+            if let Some(v) = self.no_break {
+                doc.no_break = v;
+            }
+            if let Some(v) = self.line_join {
+                doc.line_join = v;
+            }
         });
         doc.edit_paragraphs(range, |p| {
+            if self.reset_paragraph {
+                *p = bae_model::ParagraphStyle::default();
+            }
+            if let Some(v) = self.hanging_punctuation {
+                p.hanging_punctuation = v;
+            }
+            if let Some(v) = self.top_leading {
+                p.top_leading = v;
+            }
+            if let Some(v) = self.every_line {
+                p.every_line = v;
+            }
             if let Some(v) = &self.justification {
                 p.justification.clone_from(v);
             }

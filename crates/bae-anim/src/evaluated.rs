@@ -34,6 +34,8 @@ pub struct EvaluatedComp {
     pub motion_blur: MotionBlur,
     /// The comp's Enable Frame Blending switch.
     pub frame_blending: bool,
+    /// The comp renders 3D with Advanced 3D (models, extrusion …).
+    pub advanced_3d: bool,
     /// Layers in AE stacking order: `layers[0]` is the top layer (AE index 1). The
     /// renderer composites from the last to the first. Every layer is listed, including
     /// invisible ones (track mattes, parents, cameras), so indices are stable.
@@ -114,6 +116,8 @@ pub struct EvaluatedLayer {
     pub light: Option<LightState>,
     /// 3D layers' Material Options.
     pub material: Option<MaterialState>,
+    /// Text and shape layers' Geometry Options (Advanced 3D).
+    pub geometry: Option<GeometryState>,
     /// Other layers this layer's expressions read at this time (`thisComp.layer(…)`,
     /// `parent`, `comp(…)`), so caches can invalidate it when they change.
     pub depends_on: Vec<PrimPath>,
@@ -335,6 +339,34 @@ pub struct MaterialState {
     pub specular_shininess: f64,
     /// Percent.
     pub metal: f64,
+    /// Advanced 3D: the colour of the shadows it casts.
+    pub shadow_color: [f64; 4],
+    /// Advanced 3D: 0 Off, 1 On, 2 Only.
+    pub appears_in_reflections: u8,
+    /// Percent.
+    pub reflection_intensity: f64,
+    /// Percent.
+    pub reflection_sharpness: f64,
+    /// Percent.
+    pub reflection_rolloff: f64,
+    /// Percent.
+    pub transparency: f64,
+    /// Percent.
+    pub transparency_rolloff: f64,
+    pub index_of_refraction: f64,
+}
+
+/// Geometry Options of a text or shape layer (Advanced 3D).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct GeometryState {
+    /// 1 None, 2 Angular, 3 Concave, 4 Convex.
+    pub bevel_style: u8,
+    pub bevel_direction: u8,
+    pub bevel_depth: f64,
+    /// Percent.
+    pub hole_bevel_depth: f64,
+    /// Pixels.
+    pub extrusion_depth: f64,
 }
 
 /// Camera layer state (AE-ANI-009/022).
@@ -412,6 +444,15 @@ pub struct LightState {
     pub point_of_interest: DVec3,
     /// Light space → comp space; spot/parallel lights shine along local +z.
     pub world_matrix: DMat4,
+    /// Environment lights: the layer (index in the comp) whose image lights
+    /// the scene (AE's Source).
+    pub source: Option<usize>,
+    /// Environment lights: the image shows behind the layers.
+    pub background_visible: bool,
+    /// Percent.
+    pub background_opacity: f64,
+    /// Percent.
+    pub background_blur: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
