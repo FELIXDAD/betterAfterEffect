@@ -134,7 +134,7 @@ pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
 pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
-pub use text::{CreateText, SetText, SetTextStyle, TextStyleChange};
+pub use text::{ConvertTextOrientation, CreateText, SetText, SetTextStyle, TextStyleChange};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
 pub use text_path::SetTextPath;
 pub use time::{
@@ -208,6 +208,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(ConvertTextOrientation),
         r.register(InterpretFootage),
         r.register(AutoOrient),
         r.register(SetProjectSettings),

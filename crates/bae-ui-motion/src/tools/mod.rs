@@ -283,8 +283,7 @@ impl Tool {
         ) || self.is_shape()
             || self.is_pen()
             || self.is_camera()
-            // Vertical type needs a text direction in the model (not yet).
-            || self == Tool::TypeHorizontal
+            || self.is_type()
     }
 }
 
