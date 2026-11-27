@@ -11,6 +11,10 @@ pub const FROZEN: u32 = 50_002;
 pub const BAKE: u32 = 50_003;
 /// Comp start, layer start (flicks) and stretch (%) at bake time.
 pub const FROZEN_TIMING: u32 = 50_004;
+/// [`FROZEN_RGB`] when the frozen matte stores the [`BAKE`] channels; absent
+/// for mattes frozen before, which store the confidence in alpha.
+pub const FROZEN_FORMAT: u32 = 50_006;
+pub const FROZEN_RGB: i64 = 2;
 pub const SEGMENT_SHADER: &str = include_str!("segment.wgsl");
 
 /// Consecutive segments preserve pen order and the source time of each seed.

@@ -244,6 +244,91 @@ fn tiles_retry_a_full_surface_effect_after_warm_up() {
     assert_eq!(&image.data[..4], &[255; 4]);
 }
 
+/// A feedback effect: its input, or its own output at the previous frame.
+struct Echo(EffectDef);
+
+impl Effect for Echo {
+    fn def(&self) -> &EffectDef {
+        &self.0
+    }
+
+    fn full_surface(&self) -> bool {
+        true
+    }
+
+    fn feedback_source(&self, params: &EffectParams<'_>, _: &[RenderEffect]) -> Option<PrimPath> {
+        Some(params.effect.path.clone())
+    }
+
+    fn render(
+        &self,
+        _ctx: &mut EncodeContext<'_>,
+        params: &EffectParams<'_>,
+        input: &GpuImage,
+        _roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        Ok(params.previous_frame.unwrap_or(input).clone())
+    }
+}
+
+/// [`White`] counting its renders.
+struct Counted(White, Arc<std::sync::atomic::AtomicUsize>);
+
+impl Effect for Counted {
+    fn def(&self) -> &EffectDef {
+        self.0.def()
+    }
+
+    fn full_surface(&self) -> bool {
+        true
+    }
+
+    fn render(
+        &self,
+        ctx: &mut EncodeContext<'_>,
+        params: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.0.render(ctx, params, input, roi)
+    }
+}
+
+/// Only what reads a feedback effect skips shared surfaces: another layer's
+/// full-surface effect is still rendered once for all tiles.
+#[test]
+fn a_feedback_layer_leaves_other_layers_surfaces_shared() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = renderer(gpu);
+    let renders = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    r.effects_mut().register(Arc::new(Counted(
+        White(def("test.counted")),
+        renders.clone(),
+    )));
+    r.effects_mut().register(Arc::new(Echo(def("test.echo"))));
+    let effect = |layer: &str, id: &str| RenderEffect {
+        path: p(&format!("/comps/main/layers/{layer}/effects/fx")),
+        effect: id.into(),
+        enabled: true,
+        params: Vec::new(),
+    };
+    let mut comp = RenderComp::new(p("/comps/main"), 64, 32);
+    let mut a = solid("a", RED);
+    a.effects = vec![effect("a", "test.counted")];
+    let mut b = solid("b", RED);
+    b.effects = vec![effect("b", "test.echo")];
+    comp.layers = vec![b, a];
+    for tile in [IRect::new(0, 0, 32, 32), IRect::new(32, 0, 64, 32)] {
+        let request = RenderRequest {
+            roi: Some(tile),
+            ..RenderRequest::default()
+        };
+        r.render_frame(&comp, &request).unwrap();
+    }
+    assert_eq!(renders.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
 #[test]
 fn stages_follow_ae_layer_popup() {
     let Some(gpu) = gpu() else { return };

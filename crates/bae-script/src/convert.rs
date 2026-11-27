@@ -164,10 +164,22 @@ pub fn from_js(template: Option<&Value>, js: &Json) -> Result<Value, String> {
                     .collect()
             };
             let vertices = pts("vertices")?;
-            let zeros = || vec![[0.0; 2]; vertices.len()];
+            let tangents = |name| -> Result<Vec<[f64; 2]>, String> {
+                if js
+                    .get(name)
+                    .is_none_or(|v| v.is_null() || v.as_array().is_some_and(Vec::is_empty))
+                {
+                    return Ok(vec![[0.0; 2]; vertices.len()]);
+                }
+                let values = pts(name)?;
+                if values.len() != vertices.len() {
+                    return Err(format!("{name} needs one tangent per vertex"));
+                }
+                Ok(values)
+            };
             Value::Bezier(BezierPath {
-                in_tangents: pts("inTangents").unwrap_or_else(|_| zeros()),
-                out_tangents: pts("outTangents").unwrap_or_else(|_| zeros()),
+                in_tangents: tangents("inTangents")?,
+                out_tangents: tangents("outTangents")?,
                 closed: js.get("closed").and_then(Json::as_bool).unwrap_or(true),
                 vertices,
                 feather: Vec::new(),

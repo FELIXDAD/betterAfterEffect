@@ -36,6 +36,13 @@ pub(crate) struct ViewOptions {
     /// View ▸ Show Layer Controls (Cmd/Ctrl+Shift+H): off hides every layer
     /// control View Options shows (handles, masks, motion paths …).
     pub layer_controls: bool,
+    /// The bar's Toggle Mask and Shape Path Visibility: mask and shape paths
+    /// are drawn (and their vertices can be picked).
+    pub paths: bool,
+    /// Choose grid and guide options ▸ 3D Reference Axes: the world axes'
+    /// directions in the viewer's lower-left corner when the comp has 3D
+    /// layers.
+    pub axes: bool,
 }
 
 impl Default for ViewOptions {
@@ -50,6 +57,8 @@ impl Default for ViewOptions {
             proportional: false,
             safe: false,
             layer_controls: true,
+            paths: true,
+            axes: true,
         }
     }
 }
@@ -66,7 +75,86 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     ("motion.view.proportional_grid", "Proportional Grid"),
     ("motion.view.title_action_safe", "Title/Action Safe"),
     ("motion.view.show_layer_controls", "Show Layer Controls"),
+    ("motion.view.import_guides", "Import Guides..."),
+    ("motion.view.export_guides", "Export Guides..."),
 ];
+
+/// The guides as AE's guide files write them: `{"guides": [{"orientationType":
+/// 0 horizontal / 1 vertical, "positionType": 0 pixels, "position": …}]}`.
+pub(crate) fn guides_json(guides: &[Guide]) -> serde_json::Value {
+    json!({"guides": guides
+        .iter()
+        .map(|g| json!({"orientationType": u8::from(g.vertical), "positionType": 0, "position": g.at}))
+        .collect::<Vec<_>>()})
+}
+
+/// Guides read from an AE guide file; `positionType` 1 is a percentage of the
+/// comp's width (vertical guides) or height.
+pub(crate) fn parse_guides(text: &str, info: &CompInfo) -> Option<Vec<Guide>> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let list = v.get("guides").unwrap_or(&v).as_array()?;
+    Some(
+        list.iter()
+            .filter_map(|g| {
+                let vertical = g.get("orientationType")?.as_i64()? == 1;
+                let mut at = g.get("position")?.as_f64()?;
+                if g.get("positionType").and_then(|t| t.as_i64()) == Some(1) {
+                    let size = if vertical { info.width } else { info.height };
+                    at *= f64::from(size) / 100.0;
+                }
+                at.is_finite().then_some(Guide { vertical, at })
+            })
+            .collect(),
+    )
+}
+
+/// View ▸ Export Guides…: the active comp's guides to a JSON file.
+fn export_guides(cx: &PanelContext<'_>, info: &CompInfo) {
+    let request = bae_ui::files::SaveRequest {
+        title: bae_ui::tr("Export Guides").to_owned(),
+        filters: vec![("JSON".to_owned(), vec!["json".to_owned()])],
+        directory: None,
+        file_name: format!("{}.json", info.name),
+    };
+    let Some(path) = bae_ui::files::SharedFilePicker::save(cx.resources, &request) else {
+        return;
+    };
+    let text = serde_json::to_string_pretty(&guides_json(&guides_of(cx.stage, &info.path)))
+        .unwrap_or_default();
+    if let Err(error) = std::fs::write(&path, text) {
+        tracing::warn!("could not write {}: {error}", path.display());
+    }
+}
+
+/// View ▸ Import Guides…: guides from a JSON file are added to the active comp's.
+fn import_guides(cx: &mut PanelContext<'_>, info: &CompInfo) {
+    let request = bae_ui::files::OpenRequest {
+        title: bae_ui::tr("Import Guides").to_owned(),
+        filters: vec![("JSON".to_owned(), vec!["json".to_owned()])],
+        multiple: false,
+        folders: false,
+    };
+    let Some(path) = bae_ui::files::SharedFilePicker::open(cx.resources, &request)
+        .into_iter()
+        .next()
+    else {
+        return;
+    };
+    let Some(read) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| parse_guides(&t, info))
+    else {
+        tracing::warn!("{} is not a guide file", path.display());
+        return;
+    };
+    let mut guides = guides_of(cx.stage, &info.path);
+    for g in read {
+        if !guides.contains(&g) {
+            guides.push(g);
+        }
+    }
+    set_guides(cx, &info.path, &guides);
+}
 
 /// Toggles the option of `id`; `None` for an action that is not a toggle.
 fn option<'a>(o: &'a mut ViewOptions, id: &str) -> Option<&'a mut bool> {
@@ -96,6 +184,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         return false;
     }
     let session = common::session(cx.resources);
+    if inv.id == "motion.view.import_guides" || inv.id == "motion.view.export_guides" {
+        if let Some(info) = common::active_comp(cx.stage, &session) {
+            if inv.id == "motion.view.export_guides" {
+                export_guides(cx, &info);
+            } else {
+                import_guides(cx, &info);
+            }
+        }
+        return true;
+    }
     if inv.id == "motion.view.clear_guides" {
         if let Some(info) = common::active_comp(cx.stage, &session) {
             set_guides(cx, &info.path, &[]);

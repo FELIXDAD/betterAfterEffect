@@ -30,6 +30,17 @@ pub(crate) struct RunState<'a, 'e, 't> {
 
 type R = Result<Json, String>;
 
+const MARKER_FIELDS: [(&str, &str); 8] = [
+    ("comment", "comment"),
+    ("chapter", "chapter"),
+    ("url", "url"),
+    ("frameTarget", "frame_target"),
+    ("cuePointName", "cue_point_name"),
+    ("duration", "duration"),
+    ("label", "label"),
+    ("protectedRegion", "protected_region"),
+];
+
 fn arg<'j>(args: &'j Json, key: &str) -> Result<&'j Json, String> {
     args.get(key)
         .filter(|v| !v.is_null())
@@ -375,6 +386,9 @@ impl RunState<'_, '_, '_> {
                         json!({
                             "time": secs(query::to_comp_time(stage, path, *t)),
                             "value": to_js(&k.value),
+                            "interp_in": k.interp_in, "interp_out": k.interp_out,
+                            "ease_in": k.ease_in, "ease_out": k.ease_out,
+                            "dimensions": query::ease_dimensions(attr, s, &k.value),
                         })
                     })
                     .collect()
@@ -732,6 +746,46 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
         "effect" => s.effect(&path(args, "path")?),
         "set" => s.set(args),
         "addKey" => s.add_key(args),
+        "editKey" => {
+            let (p, attr, time) = s.key_at(args)?;
+            let mut edit = arg(args, "fields")?.clone();
+            edit["key"] = json!({"path": p, "attr": attr, "time": time});
+            s.invoke("key.edit", json!({"edits": [edit]}))
+        }
+        "markers" => {
+            let owner = path(args, "path")?;
+            let rows = bae_motion::markers::markers_of(s.stage(), &owner).into_iter().map(|(p,t)| {
+                let v = view(s.stage(), &p)?;
+                let mut value = json!({});
+                for (js, attr) in MARKER_FIELDS {
+                    if let Some(field) = query::static_value(&v, attr) {
+                        value[js] = to_js(&field);
+                    }
+                }
+                Ok(json!({"path": p, "time": secs(query::to_comp_time(s.stage(), &owner, t)), "value": value}))
+            }).collect::<Result<Vec<_>, String>>()?;
+            Ok(json!(rows))
+        }
+        "setMarker" => {
+            let owner = path(args, "path")?;
+            let t = s.key_time(&owner, seconds(args, "time").ok_or("expected marker time")?);
+            let value = arg(args, "value")?;
+            let mut params = json!({"time": t});
+            for (js, attr) in MARKER_FIELDS {
+                if let Some(field) = value.get(js) {
+                    params[attr] = if attr == "duration" {
+                        json!(flicks(field.as_f64().ok_or("expected marker duration")?))
+                    } else { field.clone() };
+                }
+            }
+            if let Some((p, _)) = bae_motion::markers::markers_of(s.stage(), &owner).into_iter().find(|(_, time)| *time == t) {
+                params["path"] = json!(p);
+                s.invoke("marker.edit", params)
+            } else {
+                params["owner"] = json!(owner);
+                s.invoke("marker.add", params)
+            }
+        }
         "removeKey" => {
             let (p, attr, t) = s.key_at(args)?;
             s.invoke(

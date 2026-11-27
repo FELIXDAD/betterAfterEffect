@@ -113,8 +113,6 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
         ],
     ),
     ("libraries", "Libraries", &[Search("Search"), Area("")]),
-    // Review with Frame.io needs an Adobe account: its outline, greyed.
-    ("frame_io", "Review with Frame.io", &[Area("")]),
     (
         "wiggler",
         "Wiggler",
@@ -194,6 +192,11 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
 /// Registers the outline of every panel no module registered (call last in
 /// `build`, after the real panels).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    crate::register_panel(
+        app,
+        "frame_io",
+        PanelKind::new("Review with Frame.io", |_| Box::new(FrameIo)),
+    );
     let owner = app.current_owner();
     let kinds = app.registry::<PanelKind>();
     kinds.batch(|tx| {
@@ -209,6 +212,23 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 
 struct Shell {
     rows: &'static [Row],
+}
+
+/// The signed-out review panel. Signing in requires the online service.
+struct FrameIo;
+
+impl Panel for FrameIo {
+    fn ui(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(((ui.available_height() - 96.0) * 0.5).max(4.0));
+            ui.heading("Frame.io");
+            ui.label(tr(
+                "Sign in with your Adobe ID to review and share your work.",
+            ));
+            ui.add_space(8.0);
+            ui.add_enabled(false, egui::Button::new(tr("Sign In")));
+        });
+    }
 }
 
 impl Panel for Shell {
@@ -334,6 +354,11 @@ impl Panel for ToolsPanel {
 
 /// Chinese for the outlines (AE 26's zh_CN dictionary).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    (
+        "Sign in with your Adobe ID to review and share your work.",
+        "使用 Adobe ID 登录，即可审核和共享作品。",
+    ),
+    ("Sign In", "登录"),
     ("Presets", "预设"),
     ("8 Bit", "8 位"),
     ("File Properties", "文件属性"),

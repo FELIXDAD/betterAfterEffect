@@ -206,10 +206,15 @@ impl Brush {
                 .max_rect(rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
+        // Nothing to freeze before the first stroke.
+        let strokes = !bae_vision::segments(fx.param(bae_vision::STROKES)).is_empty();
         if let Some(job) = &self.job {
             child.label(format!("{} / {}", job.done, job.frames));
         } else if child
-            .button(tr(if frozen { "Unfreeze" } else { "Freeze" }))
+            .add_enabled(
+                frozen || strokes,
+                egui::Button::new(tr(if frozen { "Unfreeze" } else { "Freeze" })),
+            )
             .clicked()
         {
             self.message.clear();

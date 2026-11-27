@@ -59,6 +59,8 @@ fn accumulate(@builtin(global_invocation_id) id: vec3u) {
 fn matte_at(p: vec2f) -> vec3f {
     if u.flags.y != 0u {
         let c = fx_bilinear(scores,u.base,p,true);
+        // 2: frozen before the RGB channels, the confidence is in alpha.
+        if u.flags.y == 2u { return vec3f(c.a-0.5,0.0,c.a); }
         return vec3f(c.r-0.5,c.g,c.b);
     }
     let coord=clamp(vec2i(floor(p))-u.roi.xy,vec2i(0),u.roi.zw-u.roi.xy-1);

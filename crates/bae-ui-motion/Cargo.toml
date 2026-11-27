@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 bae-vision.workspace = true
 png.workspace = true
-tempfile.workspace = true
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 bae-interop-psd.workspace = true
 bae-effects.workspace = true
 bae-app.workspace = true
@@ -34,12 +34,15 @@ bae-render = { workspace = true, default-features = false }
 # Probing files for File > Import (the app links bae-media through bae-render's
 # `media` feature already).
 bae-media.workspace = true
+# Same XML parser as bae-effects, for XMP sidecar fields on import.
+roxmltree = "0.21.2"
 # The installed font list of the Character panel (the app links bae-text already).
-bae-text.workspace = true
+bae-text = { workspace = true, features = ["render"] }
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tempfile.workspace = true
 
 [build-dependencies]
 # build.rs deflates the catalog tables into $OUT_DIR/catalog.bin.

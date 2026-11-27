@@ -78,3 +78,57 @@ fn refine_edge_brush_recovers_partial_coverage_on_a_colour_ramp() {
     }));
     assert_eq!(&raw[..16], &refined[..16]);
 }
+
+/// A seed frame that does not render (the layer is trimmed away there) leaves
+/// the layer as it is instead of failing the whole frame.
+#[test]
+fn roto_without_its_seed_frame_still_renders() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let seed = Time::from_seconds(1.);
+    let stamp = seed.0 as f64;
+    let scene = |t: Time| {
+        let mut comp = RenderComp::new(path("/comps/main"), 64, 8);
+        comp.time = t;
+        if t == seed {
+            return comp;
+        }
+        let mut layer = solid(CLIP, 64, [1.; 4]);
+        layer.time = t;
+        layer.effects.push(effect(
+            "roto",
+            bae_vision::ROTO,
+            vec![(0, Value::FloatList(vec![stamp, 2., 3., 4., 6., 4.]))],
+        ));
+        comp.layers.push(layer);
+        comp
+    };
+    let frame = pixels(&mut renderer, scene, 1.04);
+    assert_eq!(frame[(4 * 64 + 45) * 4 + 3], 255);
+}
+
+/// Freezing before any stroke stores "nothing masked out", not the layer's
+/// own pixels as a matte.
+#[test]
+fn roto_bake_without_strokes_keeps_the_whole_layer() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let scene = |t: Time| {
+        let mut comp = RenderComp::new(path("/comps/main"), 64, 8);
+        comp.time = t;
+        let mut layer = solid(CLIP, 64, [0.2, 0.9, 0.1, 1.]);
+        layer.time = t;
+        layer.effects.push(effect(
+            "roto",
+            bae_vision::ROTO,
+            vec![(bae_vision::BAKE, Value::Bool(true))],
+        ));
+        comp.layers.push(layer);
+        comp
+    };
+    let frame = pixels(&mut renderer, scene, 1.);
+    let at = (4 * 64 + 45) * 4;
+    assert_eq!(&frame[at..at + 4], &[255, 0, 255, 255]);
+}

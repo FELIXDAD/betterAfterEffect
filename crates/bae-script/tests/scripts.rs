@@ -10,6 +10,19 @@ use serde_json::{Value as Json, json};
 
 const SEC: i64 = Time::FLICKS_PER_SECOND;
 
+#[test]
+fn original_compatibility_scripts_run_as_files() {
+    for (name, source) in [
+        ("precompose", include_str!("compat/precompose.jsx")),
+        ("ease", include_str!("compat/ease.jsx")),
+        ("markers", include_str!("compat/markers.jsx")),
+        ("mask-shape", include_str!("compat/mask-shape.jsx")),
+    ] {
+        let report = Fx::new().script(source, json!({}));
+        assert_eq!(report.error, None, "{name}");
+    }
+}
+
 struct Fx {
     stage: Stage,
     reg: CommandRegistry,

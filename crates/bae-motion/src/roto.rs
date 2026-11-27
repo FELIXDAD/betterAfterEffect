@@ -137,8 +137,11 @@ impl Command for Freeze {
                 tx,
                 crate::import::ImportParams {
                     files: vec![file],
+                    folder_label: None,
                     parent: None,
                     comp: Some(comp),
+                    create_comp: false,
+                    precompose: false,
                 },
             )?;
             let footage = result
@@ -165,6 +168,12 @@ impl Command for Freeze {
                     timing.layer_time(p.start).0 as f64,
                     timing.stretch_percent(),
                 ]),
+            )?;
+            set(
+                tx,
+                &p.effect,
+                &param_attr(bae_vision::FROZEN_FORMAT),
+                Value::Int(bae_vision::FROZEN_RGB),
             )?;
             set(tx, &p.effect, &attr, Value::PrimRef(footage.clone()))?;
         } else if let Some(old) = old {
