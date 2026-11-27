@@ -9,8 +9,11 @@ use crate::error::SyncError;
 ///
 /// Two sessions that run at the same time must use different IDs. The app should
 /// keep one ID per installation (so a client keeps appending to the same log across
-/// launches) and agents should use their own. 1-64 ASCII letters, digits, `_`, `-`;
-/// that keeps it a safe file name on every file system and SMB share.
+/// launches) and agents should use their own. 1-64 ASCII letters, digits, `_`, `-`,
+/// used as a file name as it is. Not checked yet: IDs that differ only in case
+/// name the same file on case-insensitive file systems (macOS, Windows, most SMB
+/// shares), and Windows device names (`nul`, `con`, ...) are no regular files
+/// there; [`ClientId::random`] has neither problem.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ClientId(Arc<str>);
 

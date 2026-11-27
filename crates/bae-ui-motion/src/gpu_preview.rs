@@ -224,7 +224,8 @@ pub(crate) struct GpuPreview {
     /// pixel read: (texel, value).
     target: Option<OutputTarget>,
     direct_source: Option<bae_render::GpuImage>,
-    sampled: Option<((u32, u32, u64), [u8; 4])>,
+    sampled: Option<(PixelKey, [u8; 4])>,
+    pending_pixel: Option<(PixelKey, bae_gpu::transfer::PendingReadback)>,
     /// How the viewer shows the frame (Show Channel, Exposure).
     pub display: bae_render::Display,
     /// Region of interest (comp pixels): only it is rendered.
@@ -257,6 +258,8 @@ pub(crate) struct GpuPreview {
     /// The last frame held the previous image back for missing samples.
     waiting: bool,
 }
+
+type PixelKey = (u32, u32, u64);
 
 type LiveKey = ((u64, Time, u32), (bae_render::Display, Option<IRect>));
 
@@ -296,6 +299,7 @@ impl GpuPreview {
             target: None,
             direct_source: None,
             sampled: None,
+            pending_pixel: None,
             display: bae_render::Display::default(),
             roi: None,
             last_view: None,
@@ -389,6 +393,7 @@ impl GpuPreview {
     ) -> Option<PreviewImage> {
         if self.cached.take().is_some() {
             self.sampled = None;
+            self.pending_pixel = None;
         }
         self.sync_sources(resources);
         self.sync_effects(resources);
@@ -528,6 +533,7 @@ impl GpuPreview {
             self.target_shown = true;
             self.live_texture = None;
             self.sampled = None;
+            self.pending_pixel = None;
         }
         self.image()
     }
@@ -595,6 +601,7 @@ impl GpuPreview {
             self.direct_source = None;
             self.cached = Some((texture, rect));
             self.sampled = None;
+            self.pending_pixel = None;
         }
     }
 
@@ -738,6 +745,7 @@ impl GpuPreview {
                 self.direct_source = Some(source);
                 self.live_generation = self.live_generation.wrapping_add(1);
                 self.sampled = None;
+                self.pending_pixel = None;
             }
             if measure_layer_times
                 && let Some((comp, times)) = frame.layer_times
@@ -768,10 +776,10 @@ impl GpuPreview {
     }
 
     /// Straight (unpremultiplied) 8-bit RGBA of the published frame at comp
-    /// point `p`, as shown (display-encoded); `None` outside the frame. Reads
-    /// one texel back from the GPU (blocking, only when the pointer moved to
-    /// another texel or the frame changed).
-    pub fn pixel(&mut self, p: [f64; 2]) -> Option<[u8; 4]> {
+    /// point `p`, transparent outside the image. Starts at most one readback
+    /// at a time and requests a redraw when the requested texel is pending;
+    /// until it arrives, the previous reading.
+    pub fn pixel(&mut self, p: [f64; 2], repaint: &egui::Context) -> Option<[u8; 4]> {
         let (texture, rect) = match &self.cached {
             Some((texture, rect)) => (texture, *rect),
             None => (self.target.as_ref()?.view().texture(), self.rect?),
@@ -784,17 +792,42 @@ impl GpuPreview {
         let u = (p[0] - f64::from(rect.x0)) / rw;
         let v = (p[1] - f64::from(rect.y0)) / rh;
         if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
-            return None;
+            return Some([0; 4]);
         }
         let texel = (
             ((u * f64::from(w)) as u32).min(w - 1),
             ((v * f64::from(h)) as u32).min(h - 1),
             self.last.map_or(0, |k| k.0 ^ u64::from(k.2)),
         );
+        if let Some((key, pending)) = &self.pending_pixel {
+            self.gpu.poll();
+            if let Some(result) = pending.try_finish() {
+                if let Ok(image) = result {
+                    let px = image.pixel(0, 0);
+                    let a = px[3];
+                    let straight = |c: u8| {
+                        (u32::from(c) * 255 + u32::from(a) / 2)
+                            .checked_div(u32::from(a))
+                            .unwrap_or(0)
+                            .min(255) as u8
+                    };
+                    self.sampled =
+                        Some((*key, [straight(px[0]), straight(px[1]), straight(px[2]), a]));
+                }
+                self.pending_pixel = None;
+            }
+        }
         if let Some((t, c)) = self.sampled
             && t == texel
         {
             return Some(c);
+        }
+        repaint.request_repaint_after(std::time::Duration::from_millis(8));
+        // While the new texel is read back, the last reading stands in (the
+        // Info panel and the pen's mask colour follow the moving pointer).
+        let last = self.sampled.map(|(_, c)| c);
+        if self.pending_pixel.is_some() {
+            return last;
         }
         let region = bae_gpu::transfer::TextureRegion {
             mip_level: 0,
@@ -819,19 +852,8 @@ impl GpuPreview {
             bae_gpu::transfer::TextureReadback::record(&self.gpu, &mut encoder, texture, region)
                 .ok()?;
         self.gpu.queue().submit([encoder.finish()]);
-        let image = readback.map().wait(&self.gpu).ok()?;
-        let px = image.pixel(0, 0);
-        let a = px[3];
-        let straight = |c: u8| {
-            if a == 0 {
-                0
-            } else {
-                ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
-            }
-        };
-        let c = [straight(px[0]), straight(px[1]), straight(px[2]), a];
-        self.sampled = Some((texel, c));
-        Some(c)
+        self.pending_pixel = Some((texel, readback.map()));
+        last
     }
 
     #[cfg(test)]

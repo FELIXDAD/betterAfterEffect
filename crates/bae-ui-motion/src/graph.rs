@@ -1599,9 +1599,7 @@ impl GraphEditor {
         // Keys of locked layers cannot be selected or edited (AE).
         let editable = |p: &Prop| query::locked_layer_of(stage, &p.path).is_none();
         if self.settings.show_expression_editor {
-            let strip = Rect::from_min_max(pos2(area.left(), area.bottom() - 22.0), area.max);
-            area.max.y = strip.top();
-            self.expression_editor(ui, cx, session, &props, strip);
+            area.max.y = self.expression_editor(ui, cx, session, &props, area);
         }
         ui.painter().rect_filled(area, 0.0, color::TIMELINE_BG);
         let selected = session.lock().selected_keys.clone();
@@ -3035,8 +3033,9 @@ impl GraphEditor {
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         props: &[Prop],
-        strip: Rect,
-    ) {
+        area: Rect,
+    ) -> f32 {
+        let strip = Rect::from_min_max(pos2(area.left(), area.bottom() - 22.0), area.max);
         ui.painter().rect_filled(strip, 0.0, color::PANEL);
         let stage = cx.stage;
         let sel = session.lock().selected_props.clone();
@@ -3054,11 +3053,11 @@ impl GraphEditor {
                 theme::small(),
                 color::TEXT_DIM,
             );
-            return;
+            return strip.top();
         };
         let Some(expr) = query::attr_spec(stage, &path, &attr).and_then(|s| s.expression.clone())
         else {
-            return;
+            return strip.top();
         };
         let editing = self
             .expr_buf
@@ -3072,11 +3071,25 @@ impl GraphEditor {
         } else {
             expr.source.clone()
         };
+        let error = expr
+            .enabled
+            .then(|| {
+                crate::expr_menu::inline_error(ui, cx.resources, &path, &attr, &buf, &expr.source)
+            })
+            .flatten();
+        let field = if let Some(error) = error {
+            crate::expr_menu::error_line(ui, strip, &error);
+            let editor = strip.translate(vec2(0.0, -strip.height()));
+            ui.painter().rect_filled(editor, 0.0, color::PANEL);
+            editor
+        } else {
+            strip
+        };
         let field_id = ui.make_persistent_id(("graph expression", &path, &attr));
         let shown = crate::expr_menu::assist::show(
             ui,
             cx.resources,
-            strip.shrink2(vec2(4.0, 1.0)),
+            field.shrink2(vec2(4.0, 1.0)),
             field_id,
             &mut buf,
             None,
@@ -3097,6 +3110,7 @@ impl GraphEditor {
                 );
             }
         }
+        field.top()
     }
 }
 

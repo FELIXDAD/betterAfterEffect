@@ -69,6 +69,8 @@ pub(super) fn register(app: &mut AppBuilder) {
         ("Average Error", "平均误差"),
         ("Analyze Camera", "分析摄像机"),
         ("Camera solved", "摄像机解算完成"),
+        // Also the point tracker's message when it is stopped.
+        ("Tracking stopped", "跟踪已停止"),
     ]);
 }
 fn start(

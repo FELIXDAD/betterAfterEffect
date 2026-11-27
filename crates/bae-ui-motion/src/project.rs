@@ -87,6 +87,8 @@ pub struct ProjectPanel {
     /// Edit ▸ Find: focus the search field next frame.
     focus_search: bool,
     rename: Option<(PrimPath, String)>,
+    /// Layer ▸ Reveal … in Project: the row to scroll to.
+    scroll_to: Option<PrimPath>,
 }
 
 struct Row {
@@ -400,13 +402,26 @@ impl Panel for ProjectPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
-        let selected_first = session.lock().selected_items.first().cloned();
         // Another panel asked to rename an item here (the Timeline's Rename).
         if let Some(p) = session.lock().rename_item.take()
             && stage.has_prim(&p)
         {
             self.rename = Some((p.clone(), query::display_name_of(stage, &p)));
         }
+        // Layer ▸ Reveal … in Project: open the folders above the item, select
+        // it and bring it into view (AE).
+        let reveal = session.lock().reveal_in_project.take();
+        if let Some(item) = reveal
+            && stage.has_prim(&item)
+        {
+            for folder in item.ancestors() {
+                self.collapsed.remove(&folder);
+            }
+            self.search.clear();
+            session.lock().selected_items = vec![item.clone()];
+            self.scroll_to = Some(item);
+        }
+        let selected_first = session.lock().selected_items.first().cloned();
         self.info_area(ui, cx, selected_first.as_ref());
 
         ui.horizontal(|ui| {
@@ -476,6 +491,10 @@ impl Panel for ProjectPanel {
             .show(ui, |ui| {
                 for (i, row) in rows.iter().enumerate() {
                     let (id, rect) = ui.allocate_space(vec2(width, ROW_H));
+                    if self.scroll_to.as_ref() == Some(&row.path) {
+                        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                        self.scroll_to = None;
+                    }
                     let visible = rect.intersect(ui.clip_rect()).intersect(panel_rect);
                     if !visible.is_positive() {
                         continue;
@@ -740,7 +759,7 @@ impl Panel for ProjectPanel {
                     .find(|(r, _)| r.contains(p))
                     .map(|(_, f)| f.clone())
             });
-            crate::import::import_paths(cx, &dropped, folder);
+            crate::import::drop_paths(cx, &dropped, folder, None);
         }
         // Enter renames the selected item (AE) — unless a focused widget, e.g. a
         // button in another panel, took the Enter.
@@ -795,8 +814,14 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
                 (Some(w), Some(h)) => format!("{w} × {h}"),
                 _ => String::new(),
             };
+            let placeholder = v
+                .as_ref()
+                .and_then(|v| query::static_value(v, "kind"))
+                .is_some_and(|k| matches!(k, Value::Enum(k) if k == "placeholder"));
             let ty = if kind == ItemKind::Solid {
                 "Solid"
+            } else if placeholder {
+                "Placeholder"
             } else {
                 "Footage"
             };

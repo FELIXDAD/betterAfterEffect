@@ -11,6 +11,67 @@ use serde_json::json;
 
 use crate::session::SharedSession;
 
+/// Chooses from the editable label palette, starting at the next mask in the cycle.
+pub(crate) fn new_mask_color(
+    cx: &PanelContext<'_>,
+    layer: &PrimPath,
+    info: &query::CompInfo,
+    pixel: Option<[u8; 4]>,
+) -> egui::Color32 {
+    let prefs = crate::prefs::current(cx.resources);
+    let label = |n| {
+        let [r, g, b] = prefs.label_color(bae_motion::shape::mask_label(n));
+        egui::Color32::from_rgb(r, g, b)
+    };
+    if !prefs.bool("appearance.cycle_mask_colors") {
+        return label(0);
+    }
+    let masks = layer
+        .child("masks")
+        .map(|p| cx.stage.children(&p))
+        .unwrap_or_default();
+    let count = masks.len();
+    if !prefs.bool("appearance.use_contrasting_color_for_mask_path") {
+        return label(count);
+    }
+    let previous = masks.last().map(|m| crate::viewer::mask_color(cx.stage, m));
+    let [r, g, b, alpha] = pixel.unwrap_or([0; 4]);
+    let alpha = f64::from(alpha) / 255.0;
+    let bg = std::array::from_fn(|i| {
+        (f64::from([r, g, b][i]) * alpha + info.bg_color[i].clamp(0.0, 1.0) * 255.0 * (1.0 - alpha))
+            .round() as u8
+    });
+    let background = luminance(bg);
+    let mut best = (0.0, label(count));
+    for offset in 0..16 {
+        let color = label(count + offset);
+        if Some(color) == previous {
+            continue;
+        }
+        let value = luminance([color.r(), color.g(), color.b()]);
+        let contrast = (value.max(background) + 0.05) / (value.min(background) + 0.05);
+        if contrast >= 3.0 {
+            return color;
+        }
+        if contrast > best.0 {
+            best = (contrast, color);
+        }
+    }
+    best.1
+}
+
+fn luminance(rgb: [u8; 3]) -> f64 {
+    let [r, g, b] = rgb.map(|c| {
+        let v = f64::from(c) / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    });
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
 pub(crate) mod ids {
     pub const NEW_MASK: &str = "motion.layer.new_mask";
     pub const MASK_SHAPE: &str = "motion.layer.mask_shape";
@@ -229,12 +290,17 @@ pub(crate) fn handle(
                 .filter(|l| !query::is_locked(stage, l) && takes(l))
             {
                 let [l, t, r, b] = layer_box(stage, comp, layer, now);
+                let Some(info) = query::comp_info(stage, comp) else {
+                    continue;
+                };
+                let color = new_mask_color(cx, layer, &info, None);
                 cx.invoke_with(
                     "mask.create",
                     json!({
                         "layer": layer,
                         "kind": "path",
                         "path": rect_path([l, t, r, b]),
+                        "color": color.to_array().map(|v| f64::from(v) / 255.0),
                     }),
                 );
             }

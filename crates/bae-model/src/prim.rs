@@ -61,6 +61,8 @@ prim_types! {
     EFFECT = "Effect";
     /// One brush, clone or eraser stroke under a Paint effect (`ADBE Paint`).
     PAINT_STROKE = "PaintStroke";
+    /// One pin under a Puppet effect (`ADBE FreePin3`).
+    PUPPET_PIN = "PuppetPin";
     ARTBOARD = "Artboard";
     BOARD = "Board";
     PANEL = "Panel";
