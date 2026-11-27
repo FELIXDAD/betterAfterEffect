@@ -304,7 +304,9 @@ pub(crate) fn interactive_file(
             })?)?;
             let host = host_code().map_err(|e| rquickjs::Exception::throw_message(&ctx, &e))?;
             host.api.load(&ctx)?.eval()?.1.finish::<()>()?;
-            ctx.eval::<(), _>("globalThis.alert = (m,t) => { __scriptQuestion('alert',m,null,t); }; globalThis.confirm = (m,d,t) => __scriptQuestion('confirm',m,d,t); globalThis.prompt = (m,d,t) => __scriptQuestion('prompt',m,d,t);")?;
+            // `alert` keeps the prelude's report entry: it returns nothing, so it never suspends
+            // the run and splits its undo step.
+            ctx.eval::<(), _>("globalThis.confirm = (m,d,t) => __scriptQuestion('confirm',m,d,t); globalThis.prompt = (m,d,t) => __scriptQuestion('prompt',m,d,t);")?;
             let program = if dock {
                 format!("var __dock = new Panel(); (function(){{{}\n}}).call(__dock);", strip_directives(&source))
             } else {source};

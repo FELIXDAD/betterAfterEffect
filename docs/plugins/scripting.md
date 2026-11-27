@@ -34,6 +34,8 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 - 脚本出错时停止运行，**出错之前的修改保留**（和 AE 一样），弹窗显示错误类型、行号和信息，例如 `TypeError at line 12: cannot read property 'name' of null`。一次撤销就能撤回这次运行的全部修改。
 - `alert(msg)` 不会中途打断脚本：所有提示在脚本结束后合并到一个弹窗里显示。
 - `confirm(msg)` 总是返回 `false`（脚本运行中不弹出需要回答的对话框，避免意外执行破坏性操作），`prompt(msg, 默认值)` 返回默认值。
+- 从「文件 ▸ 脚本」运行的 JSX 文件和 ScriptUI 面板例外：`confirm`、`prompt` 和对话框的 `show()` 会停下来等用户回答。等待前后的修改各算一个撤销步骤；面板里每次点击也是一个撤销步骤。回调出错时弹窗显示错误，面板继续可用。
+- ScriptUI 的编辑框输入时触发 `onChanging`，按回车或失去焦点时才触发 `onChange`；滑块拖动时触发 `onChanging`，松手时触发 `onChange`。
 - `$.writeln()`、`$.write()`、`console.log()` 写入日志（日志文件里的 `script` 目标），MCP 的返回结果里也有。
 - 限制：每次运行最多 30 秒（死循环会被停下，之前的修改保留）、128 MiB 内存。脚本不参与逐帧渲染。
 
@@ -153,9 +155,9 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 ## 和 AE 的差别
 
 - `item.id`、`layer.id` 是工程里的路径字符串（例如 `/comps/Comp_1`），不是数字；`app.project.itemByID()` 接受它。
-- 没有 `File`、`Folder`、`Socket`、ScriptUI 面板，也不能读写文件系统；`app.project.save()`、`importFile()` 等暂不支持。
+- 没有 `File`、`Folder`、`Socket`，也不能读写文件系统；ScriptUI 只支持常用控件（按钮、文字、编辑框、复选框、单选按钮、下拉列表、列表框、滑块、进度条、面板和分组）；`app.project.save()`、`importFile()` 等暂不支持。
 - ExtendScript 的预处理行（`#target aftereffects`、`#include`、`#targetengine`）会被忽略；可以使用现代 JavaScript 语法（`let`、箭头函数、模板字符串……）。
-- 撤销：见上文，一次运行始终是一个撤销步骤。
+- 撤销：见上文，一次运行是一个撤销步骤（等用户回答的 JSX 文件和 ScriptUI 面板除外）。
 
 ## MCP：`script.run`
 

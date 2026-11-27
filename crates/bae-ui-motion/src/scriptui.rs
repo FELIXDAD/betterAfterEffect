@@ -1,7 +1,7 @@
 //! egui presentation of live ExtendScript windows and docked panels.
 use bae_app::{AppBuilder, Resources};
 use bae_script::{RUN_SCRIPT, ScriptWindow, ScriptWindows};
-use bae_ui::{Panel, PanelContext, PanelKind};
+use bae_ui::{Panel, PanelContext, PanelKind, tr};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
@@ -44,6 +44,18 @@ pub(crate) fn install(app: &mut AppBuilder, scripts_dir: Option<&Path>) {
     }
 }
 
+pub(crate) const ZH: &[(&str, &str)] = &[("Confirm", "确认"), ("Prompt", "输入")];
+
+/// Text of a control; the default titles and buttons of confirm/prompt are translated.
+fn label(node: &Value) -> &str {
+    let text = node["text"].as_str().unwrap_or_default();
+    if node["translate"] == true {
+        tr(text)
+    } else {
+        text
+    }
+}
+
 struct Host(ScriptWindows);
 
 impl bae_ui::DialogHost for Host {
@@ -53,7 +65,7 @@ impl bae_ui::DialogHost for Host {
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
         for window in self.0.windows() {
             let root = window.tree.as_ref();
-            let title = root["text"].as_str().unwrap_or_default();
+            let title = label(root);
             let id = egui::Id::new(("scriptui", window.id));
             match root["type"].as_str() {
                 Some("dialog") => {
@@ -126,7 +138,7 @@ fn draw(ui: &mut egui::Ui, cx: &mut PanelContext<'_>, window: &ScriptWindow, nod
     let id = node["id"].as_u64().unwrap_or_default();
     ui.push_id((window.id, id), |ui| {
         ui.add_enabled_ui(node["enabled"] == true, |ui| {
-            let text = node["text"].as_str().unwrap_or_default();
+            let text = label(node);
             let event = |cx: &mut PanelContext<'_>, kind: &str, value: Value| {
                 send(cx, window, json!({"id":id, "kind":kind, "value":value}));
             };
@@ -191,7 +203,11 @@ fn draw(ui: &mut egui::Ui, cx: &mut PanelContext<'_>, window: &ScriptWindow, nod
                 }
                 "edittext" => {
                     let mut value = text.to_owned();
-                    if ui.text_edit_singleline(&mut value).changed() {
+                    let response = ui.text_edit_singleline(&mut value);
+                    if response.changed() {
+                        event(cx, "onChanging", json!(value));
+                    }
+                    if response.lost_focus() {
                         event(cx, "onChange", json!(value));
                     }
                 }

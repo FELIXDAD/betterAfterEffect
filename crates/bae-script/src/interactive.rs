@@ -146,7 +146,11 @@ impl ScriptWindows {
                         .send((result, state.generation))
                         .map_err(|_| "script has ended")?;
                 }
-                Request::Display(tree) => {
+                Request::Display(mut tree) => {
+                    let error = tree
+                        .as_object_mut()
+                        .and_then(|t| t.remove("error"))
+                        .and_then(|e| e.as_str().map(str::to_owned));
                     let window = ScriptWindow {
                         id,
                         panel,
@@ -157,7 +161,7 @@ impl ScriptWindows {
                         .unwrap_or_else(|e| e.into_inner())
                         .pending
                         .insert(id, (worker, window));
-                    return Ok(json!(null));
+                    return error.map_or(Ok(json!(null)), Err);
                 }
             }
         }

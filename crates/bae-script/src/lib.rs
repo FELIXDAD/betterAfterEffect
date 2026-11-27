@@ -462,4 +462,63 @@ mod tests {
         assert_eq!(undo_group_hint("app.beginUndoGroup(name)"), None);
         assert_eq!(undo_group_hint("var a = 1;"), None);
     }
+
+    #[test]
+    fn scriptui_callbacks_survive_errors_and_edits_commit_on_change() {
+        let defs = Arc::new(Registry::<EffectDef>::new());
+        let windows = ScriptWindows::default();
+        let mut reg = standard_commands(defs.clone());
+        reg.register(RunScript {
+            windows: Some(windows.clone()),
+            ..RunScript::standalone(defs)
+        })
+        .unwrap();
+        let mut stage = Stage::new();
+        let author = AuthorId::new("user:test").unwrap();
+        let mut run = |params: serde_json::Value| -> ScriptReport {
+            let out = reg
+                .execute(&mut stage, &author, RUN_SCRIPT, params)
+                .unwrap();
+            serde_json::from_value(out.output).unwrap()
+        };
+        let source = r#"alert("ready");
+            var w = new Window("palette", "T");
+            var go = w.add("button", undefined, "Go");
+            var field = w.add("edittext", undefined, "");
+            var clicks = 0;
+            go.onClick = function () {
+                if (++clicks === 1) throw new Error("no comp");
+                app.project.items.addComp("Pass " + clicks, 64, 64, 1, 1, 24);
+            };
+            field.onChange = function () {
+                app.project.items.addComp("Field " + this.text, 64, 64, 1, 1, 24);
+            };
+            w.show();"#;
+        let first = run(serde_json::json!({"source": source, "interactive": true}));
+        assert_eq!((first.alerts, first.error), (vec!["ready".into()], None));
+        let window = windows.windows().remove(0);
+        let ids: Vec<u64> = window.tree["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_u64().unwrap())
+            .collect();
+        let mut event = |id: u64, kind: &str, value: serde_json::Value| {
+            run(serde_json::json!({"window": window.id,
+                "event": {"id": id, "kind": kind, "value": value}}))
+        };
+        let failed = event(ids[0], "onClick", serde_json::Value::Null);
+        assert_eq!(failed.error.as_deref(), Some("Error at line 7: no comp"));
+        assert_eq!(
+            event(ids[0], "onClick", serde_json::Value::Null).error,
+            None
+        );
+        event(ids[1], "onChanging", "1.".into());
+        event(ids[1], "onChange", "1.5".into());
+        let names: Vec<String> = bae_motion::query::comps(&stage)
+            .iter()
+            .map(|p| bae_motion::query::display_name_of(&stage, p))
+            .collect();
+        assert_eq!(names, ["Pass 2", "Field 1.5"]);
+    }
 }
