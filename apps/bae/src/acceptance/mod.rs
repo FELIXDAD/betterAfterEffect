@@ -64,6 +64,8 @@ mod render_autosave;
 #[cfg(target_os = "macos")]
 mod render_queue;
 mod render_templates;
+#[cfg(target_os = "macos")]
+mod responsiveness;
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;

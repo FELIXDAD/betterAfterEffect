@@ -116,6 +116,19 @@ struct Row {
     depth: usize,
 }
 
+/// The outline's rows and what they were built from. Building them walks
+/// every layer's property tree, so they are rebuilt only when the project,
+/// the comp, the revealed or twirled-open properties or the search change,
+/// not on every frame.
+struct RowsCache {
+    revision: u64,
+    comp: PrimPath,
+    reveal: HashMap<PrimPath, Reveal>,
+    expanded: HashSet<String>,
+    search: String,
+    rows: Vec<Row>,
+}
+
 #[derive(Clone, Debug)]
 enum Drag {
     Cti,
@@ -222,6 +235,7 @@ pub struct TimelinePanel {
     /// The property whose language menu is open and its field's selection then.
     lang_press: Option<(PrimPath, String, Option<crate::expr::Selection>)>,
     layers: Option<Arc<TimelineLayers>>,
+    rows: Option<RowsCache>,
     /// Graph Editor mode state (shown when the session's `graph_editor` is on).
     graph: GraphEditor,
     /// This frame shows the Graph Editor.
@@ -584,7 +598,31 @@ impl TimelinePanel {
         layers
     }
 
-    fn rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
+    fn rows(&mut self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
+        let fresh = self.rows.as_ref().is_some_and(|c| {
+            c.revision == stage.revision()
+                && c.comp == layers.comp
+                && c.reveal == s.reveal
+                && c.expanded == self.expanded
+                && c.search == self.search
+        });
+        if !fresh {
+            self.rows = Some(RowsCache {
+                revision: stage.revision(),
+                comp: layers.comp.clone(),
+                reveal: s.reveal.clone(),
+                expanded: self.expanded.clone(),
+                search: self.search.clone(),
+                rows: self.build_rows(stage, layers, s),
+            });
+        }
+        self.rows
+            .as_ref()
+            .map(|c| c.rows.clone())
+            .unwrap_or_default()
+    }
+
+    fn build_rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
         let hide_shy = bool_attr(stage, &layers.comp, "hide_shy_layers");
         let needle = self.search.trim().to_lowercase();
