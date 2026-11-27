@@ -167,6 +167,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
+        r.register(tracker::RecordStabilization),
         r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
         r.register(CropComp),
