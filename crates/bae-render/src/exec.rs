@@ -1650,6 +1650,7 @@ fn plan_op(
 }
 
 /// Records the output conversion of `image` into `target` (a `format` view).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn record_output_pass(
     device: &wgpu::Device,
     pipelines: &mut Pipelines,
@@ -1658,6 +1659,7 @@ pub(crate) fn record_output_pass(
     target: &wgpu::TextureView,
     format: wgpu::TextureFormat,
     uniform: &wgpu::Buffer,
+    color: Option<&crate::display_color::DisplayColor>,
 ) {
     let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bae-render.output"),
@@ -1690,7 +1692,14 @@ pub(crate) fn record_output_pass(
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    pass.set_pipeline(pipelines.output_for(device, format));
+    match color {
+        // Viewer display colour management (RGBA8 targets only).
+        Some(c) if format == wgpu::TextureFormat::Rgba8Unorm => {
+            pass.set_pipeline(&c.pipeline);
+            pass.set_bind_group(1, &c.group, &[]);
+        }
+        _ => pass.set_pipeline(pipelines.output_for(device, format)),
+    }
     pass.set_bind_group(0, &group, &[]);
     pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
     pass.draw(0..3, 0..1);
