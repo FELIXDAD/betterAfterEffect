@@ -24,6 +24,7 @@
 mod appearance_colors;
 mod appearance_preferences;
 mod audio_preferences;
+mod audio_stop;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
 mod camera_preferences;
