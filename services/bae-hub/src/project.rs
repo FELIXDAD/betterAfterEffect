@@ -266,8 +266,9 @@ fn hub_client() -> ClientId {
     ClientId::new(HUB_CLIENT).expect("valid client ID")
 }
 
-fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError> {
-    let config = DirConfig {
+/// Settings of the project directory's `DirTransport`.
+fn store_dir_config() -> DirConfig {
+    DirConfig {
         poll_interval: STORE_POLL,
         watch: false,
         // The cleanup of departed clients (spec 4.7) is off by default. A
@@ -280,12 +281,23 @@ fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError>
         // directory.
         inactive_after: Some(DirConfig::RECOMMENDED_INACTIVE_AFTER),
         ..DirConfig::default()
-    };
-    let store = DirTransport::open(dir, hub_client(), config)?;
+    }
+}
+
+fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError> {
+    let store = DirTransport::open(dir, hub_client(), store_dir_config())?;
     let waker = waker.clone();
     Ok(ThreadedTransport::spawn(store, STORE_TICK, move || {
         waker.wake()
     }))
+}
+
+/// Session settings for a client connection: flow control at the
+/// connection's `max_backlog` (`HubConfig::limits`).
+fn client_config(relay: &Relay, max_backlog: usize) -> SessionConfig {
+    let mut config = relay.peer_config();
+    config.max_backlog = Some(max_backlog);
+    config
 }
 
 /// Session settings for the project directory as a relay peer.
@@ -399,8 +411,7 @@ impl RelayThread {
                         info,
                         reply,
                     } => {
-                        let mut config = relay.peer_config();
-                        config.max_backlog = Some(self.client_backlog);
+                        let config = client_config(&relay, self.client_backlog);
                         let handle = relay.connect_with(transport, config);
                         tracing::info!(
                             project = %self.id,
@@ -566,5 +577,28 @@ mod tests {
         for bad in ["", "a b", "../x", "a/b", "a.b", "é", &"x".repeat(65)] {
             assert!(ProjectId::new(bad).is_err(), "{bad:?}");
         }
+    }
+
+    /// The hub opts in to the cleanup of departed clients (spec 4.7), which
+    /// `DirConfig` leaves off by default.
+    #[test]
+    fn the_project_directory_is_cleaned_up() {
+        let config = store_dir_config();
+        assert_eq!(
+            config.inactive_after,
+            Some(DirConfig::RECOMMENDED_INACTIVE_AFTER)
+        );
+        assert_eq!(DirConfig::default().inactive_after, None);
+        assert!(!config.watch);
+    }
+
+    /// Client sessions hold back at the configured `max_backlog_mib`, not at
+    /// the session default (which happens to equal the hub's default).
+    #[test]
+    fn client_sessions_use_the_configured_backlog() {
+        let relay = Relay::new(hub_client());
+        let config = client_config(&relay, 3 << 20);
+        assert_eq!(config.max_backlog, Some(3 << 20));
+        assert_eq!(config.client, relay.peer_config().client);
     }
 }

@@ -100,6 +100,7 @@
 - **`[limits]` 要配得上**（评审后）：不写 `max_unsent_mib` 时按 `2 × max_message_mib + max_backlog_mib` 算（原来固定 528，调大 `max_message_mib` 后合法的发送也会让连接失败）；`max_unsent_mib` 小于 `max_message_mib + max_backlog_mib`、`max_message_mib` 超过客户端能收的 256 MiB 时拒绝启动（`limits_fit_together`）。部署文档里"NAS 内存很小"改为调小 `max_backlog_mib`。
 - **内存上限**：Relay 按每个连接的 `max_backlog` 做流量控制（`PeerLink` 把 WebSocket 的积压报告给会话），读得慢的客户端那里正常最多排队 16 MiB 加一条消息；排队超过 `max_unsent`（默认 528 MiB）就断开（09 侧，spec 3.1）。
 - **工程目录的清理**：09 的清理（spec 4.7）改为默认关闭，Hub 明确打开，理由见 README"数据目录"。
+- 评审后补了测试：工程目录的 `DirConfig` 打开了清理（`the_project_directory_is_cleaned_up`），客户端会话的 `max_backlog` 来自 `[limits]`（`client_sessions_use_the_configured_backlog`）。以前去掉这两行整个测试集照样通过。
 
 ## 请求（其他工作流在这里留言）
 
