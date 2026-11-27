@@ -619,3 +619,84 @@ fn closing_a_threaded_peer_reports_its_last_writes() {
     assert!(relay.peers().is_empty());
     assert!(relay.close_peer(store).is_none());
 }
+
+/// Hands out `incoming` in order (`None` once empty) and records what is sent;
+/// sending fails while `fail_sends` is above zero (counting down).
+struct Scripted {
+    incoming: std::collections::VecDeque<Result<bae_sync::Message, bae_sync::SyncError>>,
+    sent: Vec<bae_sync::Message>,
+    fail_sends: usize,
+}
+
+impl bae_sync::Transport for Scripted {
+    fn send(&mut self, msg: bae_sync::Message) -> Result<(), bae_sync::SyncError> {
+        if self.fail_sends > 0 {
+            self.fail_sends -= 1;
+            return Err(bae_sync::SyncError::Hub("write failed".into()));
+        }
+        self.sent.push(msg);
+        Ok(())
+    }
+
+    fn recv(&mut self) -> Result<Option<bae_sync::Message>, bae_sync::SyncError> {
+        self.incoming.pop_front().transpose()
+    }
+}
+
+/// Snapshot requests are answered after the pump's import, so they are taken
+/// off the transport first. One taken before the link failed, or after one
+/// whose answer failed, is in no queue any more, and the shared folder does
+/// not ask twice for a compaction: it must still be answered.
+#[test]
+fn snapshot_requests_taken_before_a_failure_are_answered() {
+    use bae_sync::{Message, SyncError};
+
+    let base = base_snapshots();
+    let root = DocKey::sublayer(&SublayerId::root());
+    let anim = DocKey::sublayer(&sl("anim/a"));
+    let hello = || {
+        Ok(Message::hello(
+            ClientId::new("shared-folder").unwrap(),
+            vec![],
+        ))
+    };
+    let request = |doc: &DocKey| Ok(Message::SnapshotRequest { doc: doc.clone() });
+    let snapshots = |t: &Scripted| -> Vec<DocKey> {
+        t.sent
+            .iter()
+            .filter_map(|m| match m {
+                Message::Snapshot { doc, .. } => Some(doc.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+
+    // A request, then the link fails (a `ThreadedTransport` whose worker
+    // queued the request ahead of a failed write).
+    let mut stage = client_stage(&base);
+    let mut session = SyncSession::new(SessionConfig::new(ClientId::new("a").unwrap()));
+    let mut t = Scripted {
+        incoming: [hello(), request(&root), Err(SyncError::Closed)].into(),
+        sent: Vec::new(),
+        fail_sends: 0,
+    };
+    assert!(matches!(
+        session.pump(&mut stage, &mut t),
+        Err(SyncError::Closed)
+    ));
+    assert_eq!(snapshots(&t), vec![root.clone()]);
+
+    // Two requests; the answer to the first fails (its log cannot be written).
+    let mut stage = client_stage(&base);
+    let mut session = SyncSession::new(SessionConfig::new(ClientId::new("a").unwrap()));
+    let mut t = Scripted {
+        incoming: [hello(), request(&anim), request(&root)].into(),
+        sent: Vec::new(),
+        fail_sends: 0,
+    };
+    session.pump(&mut stage, &mut t).unwrap();
+    t.incoming = [request(&anim), request(&root)].into();
+    t.fail_sends = 1;
+    assert!(session.pump(&mut stage, &mut t).is_err());
+    assert_eq!(snapshots(&t), vec![anim.clone(), root.clone(), root]);
+}

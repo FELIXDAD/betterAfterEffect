@@ -5,13 +5,14 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
+use bae_model::loro::VersionVector;
 use bae_model::project::Project;
 use bae_model::{AuthorId, Op, PrimType, Specifier, Stage, SublayerId, Value};
 use bae_sync::{
-    ClientId, DirConfig, DirTransport, DocKey, DocSet, MemoryTransport, SessionConfig, SyncError,
-    SyncSession, ThreadedTransport, Transport,
+    ClientId, DirConfig, DirTransport, DocKey, DocSet, MemoryTransport, Message, PresenceState,
+    SessionConfig, SyncError, SyncSession, ThreadedTransport, Transport,
 };
 use common::*;
 
@@ -47,6 +48,8 @@ struct Client {
     rng: Rng,
     n: u32,
     tag: String,
+    /// Whether random edits may create a name another client creates too.
+    collide: bool,
 }
 
 impl Client {
@@ -59,6 +62,7 @@ impl Client {
             rng: Rng::new(seed),
             n: 0,
             tag: id.to_owned(),
+            collide: true,
         }
     }
 
@@ -73,12 +77,13 @@ impl Client {
     }
 
     fn edit(&mut self) {
-        random_edit(
+        random_edit_with(
             &mut self.stage,
             &self.who,
             &mut self.rng,
             &self.tag,
             &mut self.n,
+            self.collide,
         );
     }
 }
@@ -285,6 +290,7 @@ fn a_failed_append_leaves_no_gap_for_the_next_session() {
         rng,
         n,
         tag,
+        collide,
     } = a;
     // Closing tells that the log still lacks edits.
     let mut old_dir = old_dir;
@@ -298,6 +304,7 @@ fn a_failed_append_leaves_no_gap_for_the_next_session() {
         rng,
         n,
         tag,
+        collide,
     };
     a.pump();
     a.pump();
@@ -372,6 +379,85 @@ fn a_failed_append_does_not_hold_back_other_documents() {
     b.pump();
     b.pump();
     assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
+/// Snapshot requests are answered after the pump's import. One whose answer
+/// fails (its log cannot be written) does not cost the others theirs: the
+/// folder asks once per compaction, so a dropped request would stop that log
+/// from being compacted.
+#[test]
+fn a_failed_snapshot_answer_does_not_hold_back_other_documents() {
+    let (_tmp, dir) = project_dir();
+    let anim = sl("anim/a");
+    let config = DirConfig {
+        compact_min_bytes: 1,
+        compact_ratio: 1,
+        ..fast()
+    };
+    let mut a = Client::open(&dir, "alice", config, 1);
+    a.pump();
+    // The first write starts each log, the second asks for a snapshot of each.
+    for i in 0..2 {
+        create_layer(&mut a, &anim, &format!("a{i}"));
+        set_opacity(&mut a, f64::from(i));
+        a.pump();
+    }
+    assert_eq!(a.dir.stats().compactions, 0);
+    // `anim/a` is asked first; its log cannot be written.
+    let log = a.dir.log_path(&DocKey::sublayer(&anim));
+    let aside = stall(&log);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    assert_eq!(a.dir.stats().compactions, 1, "root was not compacted");
+    unstall(&log, &aside);
+    // The rest catches up: `anim/a` is asked again, everything is compacted.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while a.dir.stats().compactions < 3 {
+        assert!(Instant::now() < deadline, "{:?}", a.dir.stats());
+        std::thread::sleep(Duration::from_millis(10));
+        set_opacity(&mut a, 9.0);
+        a.pump();
+    }
+    assert!(a.dir.close().is_ok());
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
+/// The first scan can miss our own log (a listing that failed on a network
+/// hiccup). An edit before the next poll must not replace it unread: it holds
+/// edits nobody saved.
+#[test]
+fn an_own_log_the_first_scan_missed_is_not_replaced() {
+    let (tmp, dir) = project_dir();
+    let root = SublayerId::root();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    create_layer(&mut a, &root, "unsaved1");
+    a.pump();
+    drop(a);
+    // alice restarts from the saved project; her first scan misses the log.
+    let doc_dir = dir.join("updates/root");
+    let aside = tmp.path().join("aside");
+    fs::rename(&doc_dir, &aside).unwrap();
+    let slow = DirConfig {
+        poll_interval: Duration::from_secs(3600),
+        ..fast()
+    };
+    let mut a = Client::open(&dir, "alice", slow, 2);
+    a.pump();
+    fs::rename(&aside, &doc_dir).unwrap();
+    create_layer(&mut a, &root, "unsaved2");
+    a.pump();
+    a.pump();
+    drop(a);
+    let mut n = Client::open(&dir, "n", fast(), 3);
+    n.pump();
+    n.pump();
+    let layer = n.stage.sublayer(&root).unwrap();
+    for name in ["unsaved1", "unsaved2"] {
+        assert!(layer.has_spec(&p(&format!("{LAYERS}/{name}"))), "{name}");
+    }
 }
 
 #[test]
@@ -550,6 +636,709 @@ fn threaded_transport_moves_io_off_the_caller() {
         }
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+// ---- cleanup of departed clients (spec §4.7) ----
+
+/// Clients idle for an hour count as departed; a cleanup pass on every poll; no
+/// taking over of logs nobody holds (tests that want it turn it on).
+fn cleaner() -> DirConfig {
+    DirConfig {
+        inactive_after: Some(Duration::from_secs(3600)),
+        cleanup_interval: Duration::ZERO,
+        absorb_departed: false,
+        ..fast()
+    }
+}
+
+const DOCS: [&str; 2] = ["root", "anim/a"];
+
+fn layers() -> [SublayerId; 2] {
+    [SublayerId::root(), sl("anim/a")]
+}
+
+fn log(dir: &Path, doc: &str, client: &str) -> PathBuf {
+    dir.join(format!("updates/{doc}/{client}.log"))
+}
+
+fn has_logs(dir: &Path, client: &str) -> [bool; 2] {
+    DOCS.map(|doc| log(dir, doc, client).is_file())
+}
+
+fn set_mtime(path: &Path, t: SystemTime) {
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+}
+
+/// Make `path` look untouched for two hours.
+fn age(path: &Path) {
+    set_mtime(path, SystemTime::now() - Duration::from_secs(2 * 3600));
+}
+
+/// Make the logs `client` left (and its presence file, with `presence`) look two
+/// hours old.
+fn age_client(dir: &Path, client: &str, presence: bool) {
+    for doc in DOCS {
+        let l = log(dir, doc, client);
+        if l.exists() {
+            age(&l);
+        }
+    }
+    let p = dir.join(format!("presence/{client}.presence"));
+    if presence && p.exists() {
+        age(&p);
+    }
+}
+
+/// Edit and pump everyone, then settle.
+fn work(clients: &mut [Client], rounds: usize) {
+    for _ in 0..rounds {
+        for c in clients.iter_mut() {
+            c.edit();
+            c.pump();
+        }
+    }
+    settle(clients);
+}
+
+/// One edit in each sublayer.
+fn edit_each(c: &mut Client) {
+    for id in layers() {
+        c.n += 1;
+        let value = Value::String(format!("{} {}", c.tag, c.n));
+        c.stage.set_edit_target(&id).unwrap();
+        c.stage
+            .transact(&c.who, "note", |tx| {
+                tx.apply(Op::SetValue {
+                    path: p("/comps/main"),
+                    attr: "note".into(),
+                    value: Some(value),
+                })
+            })
+            .unwrap();
+    }
+}
+
+/// Compact `c`'s logs now, as its transport does when they grow: each becomes
+/// one snapshot of `c`'s whole document.
+fn compact(c: &mut Client) {
+    for id in layers() {
+        let layer = c.stage.sublayer(&id).unwrap();
+        c.dir
+            .send(Message::Snapshot {
+                doc: DocKey::sublayer(&id),
+                version: layer.version(),
+                data: layer.export_snapshot().unwrap(),
+            })
+            .unwrap();
+    }
+}
+
+/// What must be identical on converged clients: the project, and every op.
+fn state(stage: &Stage) -> (String, Vec<VersionVector>) {
+    let versions = layers()
+        .iter()
+        .map(|id| stage.sublayer(id).unwrap().version())
+        .collect();
+    (fingerprint(stage), versions)
+}
+
+/// A client joining now sees exactly `expected`, down to every op.
+fn newcomer_sees(dir: &Path, id: &str, expected: &(String, Vec<VersionVector>)) {
+    let mut n = Client::open(dir, id, fast(), 77);
+    n.pump();
+    n.pump();
+    assert!(&state(&n.stage) == expected, "{id} joining now");
+}
+
+/// A record as the logs frame it (`len`, BLAKE3 prefix, payload).
+fn frame(payload: &[u8]) -> Vec<u8> {
+    let mut out = (payload.len() as u32).to_le_bytes().to_vec();
+    out.extend_from_slice(&blake3::hash(payload).as_bytes()[..8]);
+    out.extend_from_slice(payload);
+    out
+}
+
+fn append(path: &Path, bytes: &[u8]) {
+    use std::io::Write;
+    fs::File::options()
+        .append(true)
+        .open(path)
+        .unwrap()
+        .write_all(bytes)
+        .unwrap();
+}
+
+/// `x` and `a` edit together; `x` leaves (its edits only in its logs: nobody
+/// saved the project); `c` joins, edits and compacts, so its logs hold
+/// everything; `a` cleans up. Returns `a`, `c` and the project they share.
+fn remove_departed_x(dir: &Path) -> (Client, Client, (String, Vec<VersionVector>)) {
+    let mut clients = vec![
+        Client::open(dir, "x", fast(), 1),
+        Client::open(dir, "a", cleaner(), 2),
+    ];
+    work(&mut clients, 30);
+    let mut a = clients.pop().unwrap();
+    drop(clients);
+    let mut c = Client::open(dir, "c", fast(), 3);
+    c.pump();
+    c.pump();
+    edit_each(&mut c);
+    c.pump();
+    compact(&mut c);
+    let mut both = vec![a, c];
+    settle(&mut both);
+    let c = both.pop().unwrap();
+    a = both.pop().unwrap();
+    // Not yet: x was active a moment ago.
+    a.pump();
+    assert_eq!(has_logs(dir, "x"), [true, true]);
+    assert!(a.dir.stats().cleanups > 0);
+
+    age_client(dir, "x", true);
+    a.pump();
+    assert_eq!(has_logs(dir, "x"), [false, false]);
+    assert_eq!(a.dir.stats().logs_removed, 2);
+    let expected = state(&a.stage);
+    assert_eq!(state(&c.stage), expected);
+    (a, c, expected)
+}
+
+#[test]
+fn a_departed_clients_logs_are_removed_once_another_log_holds_them() {
+    let (_tmp, dir) = project_dir();
+    let (mut a, c, expected) = remove_departed_x(&dir);
+    // Nothing else was touched, and nothing went wrong.
+    assert_eq!(has_logs(&dir, "a"), [true, true]);
+    assert_eq!(has_logs(&dir, "c"), [true, true]);
+    a.pump();
+    assert_eq!(a.dir.stats().logs_removed, 2);
+    // x's edits are still in the folder (in c's snapshots): a newcomer, starting
+    // from the stale saved project, gets the whole project.
+    drop((a, c));
+    newcomer_sees(&dir, "n", &expected);
+}
+
+#[test]
+fn logs_that_no_other_log_holds_are_kept() {
+    let (_tmp, dir) = project_dir();
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "a", cleaner(), 2),
+    ];
+    work(&mut clients, 20);
+    // c's snapshots hold what x wrote so far, but x goes on editing.
+    let mut c = Client::open(&dir, "c", fast(), 3);
+    c.pump();
+    c.pump();
+    edit_each(&mut c);
+    c.pump();
+    compact(&mut c);
+    clients.push(c);
+    for _ in 0..10 {
+        clients[0].edit();
+        clients[0].pump();
+    }
+    edit_each(&mut clients[0]);
+    settle(&mut clients);
+    let expected = state(&clients[0].stage);
+    let mut c = clients.pop().unwrap();
+    let mut a = clients.pop().unwrap();
+    drop(clients);
+    age_client(&dir, "x", true);
+
+    // 1. No log holds all of x's: a's are deltas, c's snapshots are too old.
+    for _ in 0..3 {
+        a.pump();
+    }
+    assert_eq!(has_logs(&dir, "x"), [true, true]);
+
+    // 2. Now c's do, but x's logs end in records we cannot read: a record that
+    // is not Loro data (its version is empty, so readers skip it) and a torn one.
+    c.pump();
+    compact(&mut c);
+    let lens = DOCS.map(|doc| fs::metadata(log(&dir, doc, "x")).unwrap().len());
+    let junk = Message::Updates {
+        doc: DocKey::sublayer(&SublayerId::root()),
+        version: Default::default(),
+        data: b"not a Loro blob".to_vec(),
+    };
+    append(&log(&dir, "root", "x"), &frame(&junk.encode()));
+    let torn = frame(&junk.encode());
+    append(&log(&dir, "anim/a", "x"), &torn[..torn.len() / 2]);
+    age_client(&dir, "x", true);
+    for _ in 0..3 {
+        a.pump();
+    }
+    assert_eq!(has_logs(&dir, "x"), [true, true]);
+    assert_eq!(a.dir.stats().logs_removed, 0);
+
+    // 3. Without them, c's snapshots are enough.
+    for (doc, len) in DOCS.iter().zip(lens) {
+        let l = log(&dir, doc, "x");
+        fs::File::options()
+            .write(true)
+            .open(&l)
+            .unwrap()
+            .set_len(len)
+            .unwrap();
+        age(&l);
+    }
+    a.pump();
+    assert_eq!(has_logs(&dir, "x"), [false, false]);
+    assert_eq!(a.dir.stats().logs_removed, 2);
+    assert_eq!(state(&a.stage), expected);
+    drop((a, c));
+    newcomer_sees(&dir, "n", &expected);
+}
+
+#[test]
+fn logs_of_clients_that_may_still_be_running_are_kept() {
+    let (_tmp, dir) = project_dir();
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "a", cleaner(), 2),
+        Client::open(&dir, "c", fast(), 3),
+    ];
+    work(&mut clients, 20);
+    // c's logs hold everything x wrote.
+    edit_each(&mut clients[2]);
+    clients[2].pump();
+    compact(&mut clients[2]);
+    let c = clients.pop().unwrap();
+    let mut a = clients.pop().unwrap();
+    let mut x = clients.pop().unwrap();
+    let keep = |a: &mut Client| {
+        for _ in 0..3 {
+            a.pump();
+        }
+        assert_eq!(has_logs(&dir, "x"), [true, true]);
+        assert_eq!(a.dir.stats().logs_removed, 0);
+    };
+
+    // 1. x still runs (holds its lock) but has been quiet for hours.
+    age_client(&dir, "x", true);
+    keep(&mut a);
+
+    // 2. x quit a moment ago: its heartbeat file is fresh.
+    x.session.set_presence(PresenceState {
+        name: "x".into(),
+        ..PresenceState::default()
+    });
+    x.pump();
+    drop(x);
+    assert!(dir.join("presence/x.presence").is_file());
+    age_client(&dir, "x", false);
+    keep(&mut a);
+
+    // 3. One of x's logs was written a moment ago: that keeps the other too.
+    age_client(&dir, "x", true);
+    set_mtime(&log(&dir, "root", "x"), SystemTime::now());
+    keep(&mut a);
+
+    // 3b. A sign of life spelled `X`: on case-insensitive file systems (macOS,
+    // Windows, SMB shares) that is x's own presence file as a listing may spell
+    // it, so the cleanup ignores case everywhere.
+    age_client(&dir, "x", true);
+    let other_case = dir.join("presence/X.presence");
+    fs::write(&other_case, b"").unwrap();
+    keep(&mut a);
+    fs::remove_file(&other_case).unwrap();
+
+    // 4. All quiet: gone.
+    age_client(&dir, "x", true);
+    a.pump();
+    assert_eq!(has_logs(&dir, "x"), [false, false]);
+    assert_eq!(a.dir.stats().logs_removed, 2);
+    let expected = state(&c.stage);
+    assert_eq!(state(&a.stage), expected);
+    drop((a, c));
+    newcomer_sees(&dir, "n", &expected);
+}
+
+#[test]
+fn of_two_logs_holding_the_same_only_one_is_removed() {
+    let (_tmp, dir) = project_dir();
+    let mut w = Client::open(&dir, "w", fast(), 1);
+    for _ in 0..20 {
+        w.edit();
+        w.pump();
+    }
+    edit_each(&mut w);
+    w.pump();
+    let expected = state(&w.stage);
+    // x and y both compacted to the same state, then left; so did w.
+    for id in ["x", "y"] {
+        let mut t = DirTransport::open(&dir, ClientId::new(id).unwrap(), fast()).unwrap();
+        for layer in layers() {
+            let l = w.stage.sublayer(&layer).unwrap();
+            t.send(Message::Snapshot {
+                doc: DocKey::sublayer(&layer),
+                version: l.version(),
+                data: l.export_snapshot().unwrap(),
+            })
+            .unwrap();
+        }
+    }
+    drop(w);
+    for id in ["w", "x", "y"] {
+        age_client(&dir, id, true);
+    }
+    // Two cleaners, one after the other (whichever goes first removes them
+    // all; the unit test `two_cleaners_at_once_remove_only_one_of_two_equal_logs`
+    // in dir.rs interleaves two passes): they pick the same one.
+    let mut cleaners = vec![
+        Client::open(&dir, "a", cleaner(), 2),
+        Client::open(&dir, "b", cleaner(), 3),
+    ];
+    for _ in 0..5 {
+        for c in &mut cleaners {
+            c.pump();
+        }
+    }
+    // w's deltas go (held by either snapshot), and of x and y only x: the one
+    // with the smaller ID.
+    assert_eq!(has_logs(&dir, "w"), [false, false]);
+    assert_eq!(has_logs(&dir, "x"), [false, false]);
+    assert_eq!(has_logs(&dir, "y"), [true, true]);
+    let removed: u64 = cleaners.iter().map(|c| c.dir.stats().logs_removed).sum();
+    assert_eq!(removed, 4);
+    for c in &cleaners {
+        assert_eq!(state(&c.stage), expected);
+    }
+    drop(cleaners);
+    newcomer_sees(&dir, "n", &expected);
+}
+
+#[test]
+fn a_client_whose_logs_were_removed_comes_back() {
+    let (_tmp, dir) = project_dir();
+    let (a, c, expected) = remove_departed_x(&dir);
+    // x returns, from the stale saved project: its old edits come from c's logs.
+    let mut x = Client::open(&dir, "x", fast(), 9);
+    x.pump();
+    x.pump();
+    assert_eq!(state(&x.stage), expected);
+    let mut clients = vec![a, c, x];
+    work(&mut clients, 20);
+    let x = &clients[2];
+    assert_eq!(has_logs(&dir, "x"), [true, true]);
+    assert_eq!(x.dir.stats().repairs, 0, "x simply starts new logs");
+    let expected = state(&x.stage);
+    drop(clients);
+    newcomer_sees(&dir, "n", &expected);
+}
+
+#[test]
+fn a_running_client_repairs_its_log_deleted_underneath() {
+    let (_tmp, dir) = project_dir();
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "a", fast(), 2),
+    ];
+    work(&mut clients, 20);
+    // A cleanup pass on a file system without locks took x for gone. x's edits
+    // were only in these logs (nobody saved the project).
+    for doc in DOCS {
+        fs::remove_file(log(&dir, doc, "x")).unwrap();
+    }
+    // x's next append notices, rewrites its log and adds a full snapshot.
+    edit_each(&mut clients[0]);
+    clients[0].pump();
+    assert_eq!(clients[0].dir.stats().repairs, 2);
+    work(&mut clients, 10);
+    assert_eq!(has_logs(&dir, "x"), [true, true]);
+    let expected = state(&clients[0].stage);
+    drop(clients);
+    newcomer_sees(&dir, "n", &expected);
+}
+
+/// As above, but the session goes away before answering the request for a full
+/// snapshot (the hub drops its store after an error) and a new one attaches to
+/// the same documents. The record that noticed the deletion was not written on
+/// its own: a log holding only it would claim all of x's ops, so the new
+/// session would send none of the older ones and newcomers could not import it.
+#[test]
+fn a_repair_whose_snapshot_never_comes_claims_nothing() {
+    let (_tmp, dir) = project_dir();
+    let mut x = Client::open(&dir, "x", fast(), 1);
+    x.pump();
+    for _ in 0..10 {
+        x.edit();
+        x.pump();
+    }
+    for doc in DOCS {
+        fs::remove_file(log(&dir, doc, "x")).unwrap();
+    }
+    edit_each(&mut x);
+    x.pump();
+    assert_eq!(x.dir.stats().repairs, 2);
+    let Client {
+        stage,
+        session: _,
+        dir: old,
+        who,
+        rng,
+        n,
+        tag,
+        collide,
+    } = x;
+    drop(old);
+    let mut x = Client {
+        stage,
+        session: session("x"),
+        dir: DirTransport::open(&dir, ClientId::new("x").unwrap(), fast()).unwrap(),
+        who,
+        rng,
+        n,
+        tag,
+        collide,
+    };
+    x.pump();
+    x.pump();
+    let expected = state(&x.stage);
+    drop(x);
+    newcomer_sees(&dir, "n", &expected);
+}
+
+#[test]
+fn a_departed_log_nobody_holds_is_taken_over() {
+    let (_tmp, dir) = project_dir();
+    let config = DirConfig {
+        absorb_departed: true,
+        ..cleaner()
+    };
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "a", config, 2),
+    ];
+    work(&mut clients, 20);
+    let expected = state(&clients[0].stage);
+    let mut a = clients.pop().unwrap();
+    drop(clients);
+    age_client(&dir, "x", true);
+    // No log holds x's (a's are deltas): a asks its session for snapshots, its
+    // logs become snapshots holding x's, and then x's go.
+    for _ in 0..4 {
+        a.pump();
+    }
+    assert_eq!(has_logs(&dir, "x"), [false, false]);
+    let stats = a.dir.stats().clone();
+    assert_eq!(stats.absorb_requests, 2, "{stats:?}");
+    assert_eq!(stats.logs_removed, 2, "{stats:?}");
+    // Nothing to take over any more: no further requests.
+    for _ in 0..3 {
+        a.pump();
+    }
+    assert_eq!(a.dir.stats().absorb_requests, 2);
+    assert_eq!(state(&a.stage), expected);
+    drop(a);
+    newcomer_sees(&dir, "n", &expected);
+}
+
+/// A client's own log can be all that holds some ops: edits nobody saved, or a
+/// departed client's log that was deleted because this one held it. A client
+/// that restarts from the saved project and at once takes a departed log over
+/// (its first cleanup pass asks its session for a snapshot) must not replace
+/// its log with a snapshot made before the session read that log back.
+#[test]
+fn a_restarted_client_keeps_what_only_its_own_log_holds() {
+    let (_tmp, dir) = project_dir();
+    let absorb = || DirConfig {
+        absorb_departed: true,
+        ..cleaner()
+    };
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "a", absorb(), 2),
+    ];
+    work(&mut clients, 20);
+    let mut a = clients.pop().unwrap();
+    drop(clients);
+    // a goes on alone, then quits; nobody saves the project.
+    for _ in 0..10 {
+        a.edit();
+        a.pump();
+    }
+    edit_each(&mut a);
+    a.pump();
+    let expected = state(&a.stage);
+    drop(a);
+
+    // 1. a comes back while x looks long gone and no log holds x's: its first
+    // pump scans the folder, runs a cleanup pass and asks for a snapshot.
+    age_client(&dir, "x", true);
+    let mut a = Client::open(&dir, "a", absorb(), 3);
+    for _ in 0..4 {
+        a.pump();
+    }
+    assert_eq!(state(&a.stage), expected);
+    newcomer_sees(&dir, "n1", &expected);
+    let stats = a.dir.stats().clone();
+    assert_eq!(has_logs(&dir, "x"), [false, false], "{stats:?}");
+    assert_eq!(stats.snapshots_appended, 0, "{stats:?}");
+
+    // 2. Now a's logs are all that hold x's edits. y joins, edits and leaves; a
+    // quits and comes back once more, and takes y's logs over too.
+    let mut both = vec![a, Client::open(&dir, "y", fast(), 4)];
+    work(&mut both, 10);
+    edit_each(&mut both[1]);
+    settle(&mut both);
+    let expected = state(&both[0].stage);
+    drop(both);
+    age_client(&dir, "y", true);
+    let mut a = Client::open(&dir, "a", absorb(), 5);
+    for _ in 0..4 {
+        a.pump();
+    }
+    assert_eq!(state(&a.stage), expected);
+    drop(a);
+    newcomer_sees(&dir, "n2", &expected);
+    assert_eq!(has_logs(&dir, "y"), [false, false]);
+}
+
+#[test]
+fn leftover_temporary_and_lock_files_are_removed() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "a", cleaner(), 1);
+    a.pump();
+    // Temporary files of crashed writers, and one being written right now.
+    let stale = [
+        dir.join("updates/root/ghost.tmp-1"),
+        dir.join("updates/anim/a/a.tmp-2"),
+        dir.join("presence/ghost.tmp-3"),
+    ];
+    let fresh = dir.join("updates/root/busy.tmp-4");
+    for f in stale.iter().chain([&fresh]) {
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        fs::write(f, b"partial").unwrap();
+    }
+    for f in &stale {
+        age(f);
+    }
+    // Lock files: of a departed client without logs (goes), of one that still
+    // has a log (stays with it; this one cannot even be read as Loro data), and
+    // of one still running (stays). Ours stays too, however old.
+    let gone = DirTransport::open(&dir, ClientId::new("g").unwrap(), fast()).unwrap();
+    drop(gone);
+    let mut h = DirTransport::open(&dir, ClientId::new("h").unwrap(), fast()).unwrap();
+    h.send(Message::Updates {
+        doc: DocKey::sublayer(&SublayerId::root()),
+        version: Default::default(),
+        data: Vec::new(),
+    })
+    .unwrap();
+    drop(h);
+    let running = DirTransport::open(&dir, ClientId::new("r").unwrap(), fast()).unwrap();
+    for id in ["g", "h", "r", "a"] {
+        age(&dir.join(format!("updates/{id}.lock")));
+    }
+    age(&log(&dir, "root", "h"));
+    a.pump();
+    a.pump();
+    for f in &stale {
+        assert!(!f.exists(), "{}", f.display());
+    }
+    assert!(fresh.exists());
+    assert!(!dir.join("updates/g.lock").exists());
+    for id in ["h", "r", "a"] {
+        assert!(dir.join(format!("updates/{id}.lock")).exists(), "{id}");
+    }
+    assert!(log(&dir, "root", "h").exists());
+    assert_eq!(a.dir.stats().stale_files_removed, 4);
+    assert_eq!(a.dir.stats().logs_removed, 0);
+    // g can come back.
+    drop(running);
+    DirTransport::open(&dir, ClientId::new("g").unwrap(), fast()).unwrap();
+}
+
+/// Clients join, edit, compact and leave in waves while every live one cleans
+/// up: whatever got deleted, a newcomer still gets every op. (No two clients
+/// create the same name here: how the mirror names such twins can depend on
+/// import order, which is the doc model's business, not the folder's.)
+#[test]
+fn clients_coming_and_going_lose_nothing() {
+    let (_tmp, dir) = project_dir();
+    let mut rng = Rng::new(31);
+    let mut live: Vec<Client> = Vec::new();
+    let mut departed: Vec<String> = Vec::new();
+    let mut removed = 0;
+    let mut next = 0u64;
+    for _wave in 0..8 {
+        // Some join (every live client also cleans up; some take logs over),
+        // everyone edits, some compact, one or two leave and look long gone.
+        while live.len() < 3 {
+            let config = DirConfig {
+                absorb_departed: next == 0 || rng.chance(50),
+                ..cleaner()
+            };
+            let mut c = Client::open(&dir, &format!("k{next}"), config, 100 + next);
+            c.collide = false;
+            live.push(c);
+            next += 1;
+        }
+        work(&mut live, 8);
+        for c in &mut live {
+            if rng.chance(40) {
+                compact(c);
+            }
+        }
+        settle(&mut live);
+        for _ in 0..1 + rng.below(2) {
+            let c = live.remove(rng.below(live.len()));
+            removed += c.dir.stats().logs_removed;
+            departed.push(c.tag.clone());
+        }
+        for id in &departed {
+            age_client(&dir, id, true);
+        }
+        for _ in 0..3 {
+            for c in &mut live {
+                c.pump();
+            }
+        }
+    }
+    // Departed logs nobody holds may remain (no live client took them over, or
+    // a live one holds exactly the same and has a smaller ID). A client that
+    // takes logs over and edits every document clears them all.
+    let mut last = Client::open(
+        &dir,
+        "z",
+        DirConfig {
+            absorb_departed: true,
+            ..cleaner()
+        },
+        7,
+    );
+    last.collide = false;
+    last.pump();
+    last.pump();
+    edit_each(&mut last);
+    live.push(last);
+    work(&mut live, 2);
+    for _ in 0..3 {
+        for c in &mut live {
+            c.pump();
+        }
+    }
+    let expected = state(&live[0].stage);
+    removed += live.iter().map(|c| c.dir.stats().logs_removed).sum::<u64>();
+    let left: usize = departed
+        .iter()
+        .map(|id| has_logs(&dir, id).iter().filter(|&&b| b).count())
+        .sum();
+    eprintln!(
+        "{} departed clients: {removed} of their logs removed, {left} left",
+        departed.len()
+    );
+    drop(live);
+    newcomer_sees(&dir, "n", &expected);
+    assert_eq!(left, 0);
+    assert!(removed > 0);
 }
 
 // ---- simulated SMB latency ----
