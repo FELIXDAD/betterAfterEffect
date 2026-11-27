@@ -388,8 +388,19 @@ fn light_options(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
         .and_then(|v| query::static_value(&v, "light:type"))
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_else(|| "spot".into());
+    if ty == "environment" {
+        // AE's order: the picture and how it shows, then its light.
+        return vec![
+            "light:source",
+            "light:background_visible",
+            "light:background_opacity",
+            "light:background_blur",
+            "light:intensity",
+            "light:color",
+        ];
+    }
     let mut attrs = vec!["light:intensity", "light:color"];
-    if ty == "ambient" || ty == "environment" {
+    if ty == "ambient" {
         return attrs;
     }
     if ty == "spot" {

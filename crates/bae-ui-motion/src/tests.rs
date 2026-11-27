@@ -3692,6 +3692,26 @@ fn camera_light_and_material_options_groups() {
         json!({"path": light, "attr": "light:type", "value": Value::Enum("ambient".into())}),
     );
     assert_eq!(groups(&h, &light).last().map(|g| g.1), Some(2), "ambient");
+    // An environment light: its picture (Source) and background, then its light.
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("environment".into())}),
+    );
+    assert_eq!(
+        groups(&h, &light).last().map(|g| g.1),
+        Some(6),
+        "environment"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:source", "value": Value::PrimRef(solid.clone())}),
+    );
+    assert_eq!(
+        h.stage
+            .prim(&light)
+            .and_then(|v| bae_motion::query::static_value(&v, "light:source")),
+        Some(Value::PrimRef(solid.clone()))
+    );
     assert!(
         groups(&h, &solid).iter().all(|g| g.0 != "Material Options"),
         "2D layers have none"

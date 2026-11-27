@@ -256,6 +256,10 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "light:casts_shadows" | "material:casts_shadows" => "Casts Shadows",
         "light:shadow_darkness" => "Shadow Darkness",
         "light:shadow_diffusion" => "Shadow Diffusion",
+        "light:source" => "Source",
+        "light:background_visible" => "Background Visible",
+        "light:background_opacity" => "Background Opacity",
+        "light:background_blur" => "Background Blur",
         "material:light_transmission" => "Light Transmission",
         "material:accepts_shadows" => "Accepts Shadows",
         "material:accepts_lights" => "Accepts Lights",
@@ -796,6 +800,62 @@ pub(crate) fn text_path_picker(
         });
     if let Some(mask) = chosen.filter(|m| *m != current) {
         cx.invoke_with("text.set_path", json!({"layer": layer, "mask": mask}));
+    }
+}
+
+/// Light Options > Source of an environment light (AE's 源): a popup of the
+/// comp's 2D layers whose picture lights the scene, or None.
+pub(crate) fn light_source_picker(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    light: &PrimPath,
+    id: egui::Id,
+) {
+    let stage = cx.stage;
+    let current = stage
+        .prim(light)
+        .and_then(|v| query::static_value(&v, "light:source"))
+        .and_then(|v| v.as_prim_ref().cloned());
+    // AE takes 2D video, still and pre-comp layers of the same comp.
+    let layers: Vec<PrimPath> = query::owning_comp(stage, light)
+        .map(|comp| query::comp_layers(stage, &comp))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| {
+            l != light
+                && !is_3d(stage, l)
+                && !matches!(
+                    query::layer_kind(stage, l).as_deref(),
+                    Some("camera" | "light" | "null" | "adjustment" | "audio")
+                )
+        })
+        .collect();
+    let name = |l: &PrimPath| query::display_name_of(stage, l);
+    let shown = current.as_ref().map_or_else(|| tr("None").to_owned(), name);
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .width(140.0)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), tr("None")).clicked() {
+                chosen = Some(None);
+            }
+            for l in &layers {
+                if ui
+                    .selectable_label(current.as_ref() == Some(l), name(l))
+                    .clicked()
+                {
+                    chosen = Some(Some(l.clone()));
+                }
+            }
+        });
+    match chosen.filter(|l| *l != current) {
+        Some(Some(layer)) => cx.invoke_with(
+            "attr.set",
+            json!({"path": light, "attr": "light:source", "value": bae_model::Value::PrimRef(layer)}),
+        ),
+        Some(None) => cx.invoke_with("attr.clear", json!({"path": light, "attr": "light:source"})),
+        None => {}
     }
 }
 

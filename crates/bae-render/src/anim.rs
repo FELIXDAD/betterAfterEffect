@@ -262,12 +262,14 @@ impl AnimEvaluator {
         // hidden, not a parent or an active layer's matte): the frame does not
         // depend on their content (cache invalidation, `RenderLayer::inert`).
         let parents: Vec<usize> = ec.layers.iter().filter_map(|l| l.parent).collect();
-        let mattes: Vec<usize> = rc
+        let mut mattes: Vec<usize> = rc
             .layers
             .iter()
             .filter(|l| l.active)
             .filter_map(|l| l.track_matte.map(|m| m.layer))
             .collect();
+        // Environment lights read their source layer even when it is hidden.
+        mattes.extend(rc.lights.iter().filter_map(|l| Some(l.environment?.layer)));
         for (i, l) in rc.layers.iter_mut().enumerate() {
             l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
         }
@@ -974,6 +976,9 @@ fn collapse_3d_precomps(ec: &EvaluatedComp, rc: &mut RenderComp) {
             if let Some(index) = &mut light.scope_below {
                 shift(index);
             }
+            if let Some(e) = &mut light.environment {
+                shift(&mut e.layer);
+            }
         }
         rc.layers.splice(i..=i, inner);
         i += n.max(1);
@@ -996,11 +1001,11 @@ fn comp_lights(ec: &EvaluatedComp) -> Arc<[Light]> {
         .iter()
         .enumerate()
         .filter(|(_, l)| l.switches.enabled && l.active)
-        .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
+        .filter_map(|(i, l)| Some(light(ec, i, l, l.light.as_ref()?)))
         .collect()
 }
 
-fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
+fn light(ec: &EvaluatedComp, index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
     use bae_anim::{LightFalloff, LightType};
     Light {
         kind: match s.light_type {
@@ -1027,6 +1032,20 @@ fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
         shadow_darkness: s.shadow_darkness as f32,
         shadow_diffusion: s.shadow_diffusion as f32,
         scope_below: l.switches.adjustment.then_some(index),
+        // The source is a 2D layer of the same comp (AE refuses 3D layers).
+        environment: (s.light_type == LightType::Environment)
+            .then_some(s.source)
+            .flatten()
+            .filter(|&src| ec.layers.get(src).is_some_and(|l| !l.switches.three_d))
+            .map(|layer| crate::light::EnvironmentSource {
+                layer,
+                background: s.background_visible.then(|| {
+                    [
+                        (s.background_opacity / 100.0).clamp(0.0, 1.0) as f32,
+                        (s.background_blur / 100.0).clamp(0.0, 1.0) as f32,
+                    ]
+                }),
+            }),
     }
 }
 

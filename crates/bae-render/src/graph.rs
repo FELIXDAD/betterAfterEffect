@@ -178,6 +178,8 @@ pub enum NodeKind {
     DepthBlur(DepthBlurNode),
     /// A 3D model layer drawn through the camera with a depth buffer.
     Mesh(Box<MeshNode>),
+    /// An environment light's picture behind the layers, through the camera.
+    Sky(Box<SkyNode>),
     /// A lit 3D layer's shadows in its own space.
     ShadowMap(ShadowMapNode),
 }
@@ -198,6 +200,39 @@ pub struct MeshNode {
     /// The comp's size in pixels.
     pub comp_size: [u32; 2],
     /// A linear working space (the shading is not display-encoded).
+    pub linear: bool,
+    /// An environment light with a picture (diffuse light and reflections).
+    pub environment: Option<EnvironmentInput>,
+}
+
+/// An environment light's picture as a node input (`exec/env.rs`).
+#[derive(Clone, Copy, Debug)]
+pub struct EnvironmentInput {
+    /// The source layer's pixels (equirectangular).
+    pub input: NodeId,
+    /// Width of the map's largest level, in texels.
+    pub width: u32,
+    /// Comp directions → picture directions (the light's rotation undone).
+    pub rotation: DMat4,
+    /// Colour × intensity.
+    pub tint: [f32; 3],
+}
+
+/// AE's Background Visible of an environment light: its picture drawn
+/// behind the layers through the camera, premultiplied (`exec/env.rs`).
+#[derive(Debug)]
+pub struct SkyNode {
+    /// The comp (diagnostics).
+    pub comp: PrimPath,
+    pub environment: EnvironmentInput,
+    pub camera: crate::camera::Camera,
+    /// The comp's size in pixels.
+    pub comp_size: [u32; 2],
+    /// Background Opacity, 0–1.
+    pub opacity: f32,
+    /// Background Blur, 0–1.
+    pub blur: f32,
+    /// A linear working space (the picture is not display-encoded).
     pub linear: bool,
 }
 
@@ -288,7 +323,12 @@ impl NodeKind {
                 f(m.coverage);
             }
             NodeKind::DepthBlur(d) => f(d.input),
-            NodeKind::Mesh(_) => {}
+            NodeKind::Mesh(m) => {
+                if let Some(e) = &m.environment {
+                    f(e.input);
+                }
+            }
+            NodeKind::Sky(s) => f(s.environment.input),
             NodeKind::ShadowMap(m) => {
                 for c in m.lighting.casters.iter() {
                     if let crate::light::CasterPixels::Image(id) = c.pixels {
@@ -311,6 +351,7 @@ impl NodeKind {
             NodeKind::Mix(_) => "mix",
             NodeKind::DepthBlur(_) => "depth of field",
             NodeKind::Mesh(_) => "3d model",
+            NodeKind::Sky(_) => "environment background",
             NodeKind::ShadowMap(_) => "shadow map",
         }
     }
@@ -914,6 +955,9 @@ impl Builder<'_, '_> {
             });
         }
         let mut ops = Vec::new();
+        if let Some(sky) = self.sky_op(comp, rect, scale, depth)? {
+            ops.push(sky);
+        }
         if !rect.is_empty() {
             // AE draws from the bottom of the stack (highest index) to the top;
             // contiguous 3D layers form groups drawn in depth order.
@@ -1369,6 +1413,7 @@ impl Builder<'_, '_> {
         model: &crate::input::ModelRef,
         canvas: IRect,
         scale: f64,
+        depth: usize,
     ) -> Result<Option<LayerOp>, RenderError> {
         let layer = &comp.layers[index];
         if layer.opacity <= 0.0 {
@@ -1440,6 +1485,11 @@ impl Builder<'_, '_> {
             scale.to_bits(),
             self.nodes.len(),
         ));
+        let environment = match lights.iter().find(|l| l.environment.is_some()) {
+            Some(light) => self.environment_input(comp, light, depth)?,
+            None => None,
+        };
+        let key = hash_of(&(key, environment.map(|e| self.nodes[e.input.index()].key)));
         let linear = self.linear;
         let node = self.push(Node {
             kind: NodeKind::Mesh(Box::new(MeshNode {
@@ -1450,6 +1500,7 @@ impl Builder<'_, '_> {
                 lights,
                 comp_size: [comp.width, comp.height],
                 linear,
+                environment,
             })),
             rect,
             pixel_scale: scale,
@@ -1482,6 +1533,120 @@ impl Builder<'_, '_> {
         }))
     }
 
+    /// The picture of environment light `light` (AE's Source) as a node
+    /// input: its source layer's pixels with masks and effects. The map is
+    /// 512 texels wide for lighting, 2048 when it also shows as the
+    /// background (never more than the layer has).
+    fn environment_input(
+        &mut self,
+        comp: &RenderComp,
+        light: &crate::light::Light,
+        depth: usize,
+    ) -> Result<Option<EnvironmentInput>, RenderError> {
+        let Some(env) = light.environment else {
+            return Ok(None);
+        };
+        let Some(layer) = comp.layers.get(env.layer) else {
+            return Ok(None);
+        };
+        let source_width = layer
+            .content
+            .known_size()
+            .map_or(comp.width, |s| s[0])
+            .max(1);
+        let cap = if env.background.is_some() { 2048 } else { 512 };
+        let width = source_width.next_power_of_two().clamp(16, cap);
+        // About two layer texels per map texel (level 0 takes four taps).
+        let scale = (f64::from(source_width) / f64::from(width * 2)).max(1.0);
+        let Some(input) =
+            self.layer_image(comp, layer, LayerStage::EffectsAndMasks, scale, depth)?
+        else {
+            return Ok(None);
+        };
+        let k = light.intensity / 100.0;
+        Ok(Some(EnvironmentInput {
+            input,
+            width,
+            rotation: crate::exec::env::rotation(&light.world),
+            tint: light.color.map(|c| c * k),
+        }))
+    }
+
+    /// AE's Background Visible: the first environment light that shows its
+    /// picture draws it under every layer of the comp.
+    fn sky_op(
+        &mut self,
+        comp: &RenderComp,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+    ) -> Result<Option<LayerOp>, RenderError> {
+        let Some((light, [opacity, blur])) = comp
+            .lights
+            .iter()
+            .find_map(|l| Some((l, l.environment?.background?)))
+        else {
+            return Ok(None);
+        };
+        if opacity <= 0.0 || canvas.is_empty() {
+            return Ok(None);
+        }
+        let Some(environment) = self.environment_input(comp, light, depth)? else {
+            return Ok(None);
+        };
+        let camera = comp.view_camera();
+        let key = hash_of(&(
+            "sky",
+            &comp.path,
+            self.nodes[environment.input.index()].key,
+            environment.rotation.to_cols_array().map(f64::to_bits),
+            camera.world.to_cols_array().map(f64::to_bits),
+            camera.zoom.to_bits(),
+            [opacity, blur].map(f32::to_bits),
+            canvas,
+            scale.to_bits(),
+        ));
+        let linear = self.linear;
+        let node = self.push(Node {
+            kind: NodeKind::Sky(Box::new(SkyNode {
+                comp: comp.path.clone(),
+                environment,
+                camera,
+                comp_size: [comp.width, comp.height],
+                opacity,
+                blur,
+                linear,
+            })),
+            rect: canvas,
+            pixel_scale: scale,
+            key,
+            cacheable: false,
+        });
+        Ok(Some(LayerOp {
+            layer: comp.path.clone(),
+            input: OpInput::Image(node),
+            transform: DAffine2::IDENTITY,
+            opacity: 1.0,
+            blend: BlendMode::Normal,
+            dissolve_seed: 0,
+            quality: bae_anim::LayerQuality::Best,
+            preserve_transparency: false,
+            matte: None,
+            mask: None,
+            bounds: canvas,
+            content: Rect::new(
+                f64::from(canvas.x0) * scale,
+                f64::from(canvas.y0) * scale,
+                f64::from(canvas.x1) * scale,
+                f64::from(canvas.y1) * scale,
+            ),
+            projection: None,
+            motion: None,
+            clips: Vec::new(),
+            lighting: None,
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn plan_layer(
         &mut self,
@@ -1495,7 +1660,7 @@ impl Builder<'_, '_> {
     ) -> Result<Option<LayerOp>, RenderError> {
         let layer = &comp.layers[index];
         if let LayerContent::Model(model) = &layer.content {
-            return self.plan_model(comp, index, model, canvas, scale);
+            return self.plan_model(comp, index, model, canvas, scale, depth);
         }
         let motion_samples = if self.native_motion_blur {
             &layer.motion_samples[..]
@@ -3220,7 +3385,7 @@ fn rect_bits(r: &Rect) -> [u64; 4] {
     ]
 }
 
-fn hash_of(value: &impl Hash) -> u64 {
+pub(crate) fn hash_of(value: &impl Hash) -> u64 {
     let mut h = FxHasher::default();
     value.hash(&mut h);
     h.finish()
