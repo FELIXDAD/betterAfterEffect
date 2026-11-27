@@ -44,9 +44,9 @@ pub(crate) struct Editing {
     tool: Tool,
     orientation: LineOrientation,
     preview: Option<std::sync::Arc<Preview>>,
-    /// What the vertical preview was last built from: the template's address,
+    /// What the vertical preview was last built from: the template document,
     /// the text, the screen scale (rebuilt only when one changes).
-    preview_key: Option<(usize, String, f32)>,
+    preview_key: Option<(Option<TextDocument>, String, f32)>,
     font_size: f64,
     align: egui::Align,
     color: Color32,

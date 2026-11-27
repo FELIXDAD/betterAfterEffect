@@ -236,6 +236,11 @@ fn vertical_box_and_selected_range_survive_editing() {
         "text.set_style",
         json!({"layers":[layer],"range":selected,"style":{"baseline_direction":"tate_chu_yoko"}}),
     );
+    // Set while editing: the editor's glyphs follow at once (the two digits share a cell).
+    h.frame(Vec::new(), Modifiers::NONE);
+    let e = h.viewer.type_tool.editing.as_ref().expect("still editing");
+    let chars = &e.preview_layout().expect("vertical preview").chars;
+    assert_eq!(chars[1].origin.y, chars[2].origin.y);
     h.escape();
     h.tools().lock().edit_text_request = Some(layer.clone());
     h.frame(Vec::new(), Modifiers::NONE);

@@ -10,18 +10,17 @@ impl Editing {
         painter: &Painter,
         scale: f32,
     ) {
-        // Unchanged since the last frame: nothing to rebuild (no document
+        // Unchanged since the last frame: nothing to rebuild (compared by
+        // content, so a style set while editing shows at once; no document
         // clone every frame).
-        let source = template.map_or(0, |t| std::ptr::from_ref(t) as usize);
         if self.preview.is_some()
-            && self
-                .preview_key
-                .as_ref()
-                .is_some_and(|(s, text, k)| *s == source && *text == self.buffer && *k == scale)
+            && self.preview_key.as_ref().is_some_and(|(t, text, k)| {
+                t.as_ref() == template && *text == self.buffer && *k == scale
+            })
         {
             return;
         }
-        self.preview_key = Some((source, self.buffer.clone(), scale));
+        self.preview_key = Some((template.cloned(), self.buffer.clone(), scale));
         let mut doc = template.cloned().unwrap_or_else(|| {
             TextDocument::new("", bae_motion::text::DEFAULT_FONT, self.font_size)
         });
@@ -38,7 +37,19 @@ impl Editing {
             doc.box_position = Some(pos);
             doc.box_size = Some(size);
         }
-        self.preview = Preview::get(painter, text_id().with("glyphs"), &doc, scale);
+        let id = text_id().with("glyphs");
+        if self.preview.is_none() {
+            // A new edit: the last edited text must not stand in while this one rasterizes.
+            painter
+                .ctx()
+                .data_mut(|d| d.remove::<std::sync::Arc<Preview>>(id));
+        }
+        self.preview = Preview::get(painter, id, &doc, scale);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn preview_layout(&self) -> Option<&bae_text::TextLayout> {
+        self.preview.as_deref().map(|p| &p.layout)
     }
 
     fn screen_edge(&self, view: &View, points: [[f64; 2]; 2]) -> [Pos2; 2] {

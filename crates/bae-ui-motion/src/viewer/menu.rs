@@ -15,6 +15,7 @@ use crate::timeline::{invert_layer_selection, select_children};
 
 /// Opens AE's menu on a right-click. `under` keeps the layers that were under the
 /// pointer, topmost first, while the menu is open.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn frame(
     under: &mut Vec<PrimPath>,
     key: Option<&bae_motion::KeyRef>,
@@ -23,6 +24,7 @@ pub(super) fn frame(
     session: &SharedSession,
     comp: &EvaluatedComp,
     view: &View,
+    editing: bool,
 ) {
     if resp.secondary_clicked()
         && key.is_none()
@@ -58,7 +60,13 @@ pub(super) fn frame(
                 .layer(&top)
                 .is_some_and(|l| l.kind == bae_model::LayerKind::Text)
         {
-            match context_menu::show(ui, cx, VIEWER_TEXT) {
+            // The orientation is fixed while editing (AE's editing menu has no Horizontal / Vertical).
+            let off: &[&str] = if editing {
+                &["Horizontal", "Vertical"]
+            } else {
+                &[]
+            };
+            match context_menu::show_with(ui, cx, VIEWER_TEXT, off) {
                 Some("Edit Text...") => {
                     crate::tools::shared(cx.resources).lock().edit_text_request = Some(top.clone());
                 }
