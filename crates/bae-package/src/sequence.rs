@@ -79,6 +79,9 @@ fn reference(file_name: &str, pattern: Option<&str>) -> Option<Numbered> {
 /// Every frame file of the sequence `file` belongs to, sorted by frame number.
 /// A file without a frame number is its own one-frame sequence.
 pub(crate) fn members_on_disk(file: &Path, pattern: Option<&str>) -> std::io::Result<Vec<PathBuf>> {
+    if pattern.is_some_and(|p| p.starts_with("*.")) {
+        return bae_model::asset::alphabetical_frames(file);
+    }
     let name = file
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -117,6 +120,21 @@ pub(crate) fn members_in<'a>(
     names: impl Iterator<Item = &'a str>,
 ) -> Vec<String> {
     let (dir, name) = entry.rsplit_once('/').unwrap_or(("", entry));
+    if let Some(extension) = pattern.and_then(|p| p.strip_prefix("*.")) {
+        let mut members: Vec<_> = names
+            .filter(|candidate| {
+                let (folder, base) = candidate.rsplit_once('/').unwrap_or(("", candidate));
+                folder == dir
+                    && !base.starts_with('.')
+                    && base
+                        .rsplit_once('.')
+                        .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case(extension))
+            })
+            .map(str::to_owned)
+            .collect();
+        members.sort();
+        return members;
+    }
     let Some(reference) = reference(name, pattern) else {
         return vec![entry.to_owned()];
     };

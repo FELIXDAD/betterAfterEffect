@@ -249,3 +249,35 @@ fn tab_menu_and_toolbar_navigate_direct_parents_and_children() {
     click_at(&mut h, parent.center());
     assert!(find_text(&h, "Composition Parent").is_some());
 }
+
+/// #735: double-clicking footage in the Project panel opens it in the Footage
+/// panel (AE).
+#[test]
+fn double_clicking_project_footage_opens_the_footage_panel() {
+    let mut h = gui();
+    let dir = tempfile::tempdir().unwrap();
+    let clip = dir.path().join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        "item.import",
+        serde_json::json!({"files": [{"path": clip, "attrs": {
+            "width": {"type": "int", "value": 320},
+            "height": {"type": "int", "value": 180}}}]}),
+    ));
+    settle(&mut h);
+    let row = project_row(&h, "clip.mov");
+    double_click_at(&mut h, row);
+    let open = h.state().workspace.open_panels();
+    assert!(
+        open.iter().any(|p| p.kind() == "footage"),
+        "no Footage panel: {open:?}"
+    );
+    // A solid opens there too (AE).
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let solid = bae_motion::solid::layer_solid(h.state().stage(), &h.state().layers()[0]).unwrap();
+    let name = query::display_name_of(h.state().stage(), &solid);
+    let row = project_row(&h, &name);
+    double_click_at(&mut h, row);
+    let shown = h.state().session().lock().footage_view.clone();
+    assert_eq!(shown, Some(solid));
+}
