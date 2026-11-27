@@ -101,3 +101,32 @@ fn fill_uses_visible_temporal_samples_or_spatial_boundaries_and_keeps_the_exteri
         }
     }
 }
+
+/// A seed frame that does not render (the layer is trimmed away there) leaves
+/// the layer as it is instead of failing the whole frame.
+#[test]
+fn roto_without_its_seed_frame_still_renders() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let seed = Time::from_seconds(1.);
+    let stamp = seed.0 as f64;
+    let scene = |t: Time| {
+        let mut comp = RenderComp::new(path("/comps/main"), 64, 8);
+        comp.time = t;
+        if t == seed {
+            return comp;
+        }
+        let mut layer = solid(CLIP, 64, [1.; 4]);
+        layer.time = t;
+        layer.effects.push(effect(
+            "roto",
+            bae_vision::ROTO,
+            vec![(0, Value::FloatList(vec![stamp, 2., 3., 4., 6., 4.]))],
+        ));
+        comp.layers.push(layer);
+        comp
+    };
+    let frame = pixels(&mut renderer, scene, 1.04);
+    assert_eq!(frame[(4 * 64 + 45) * 4 + 3], 255);
+}

@@ -136,6 +136,7 @@ impl Command for Freeze {
                     comp: Some(comp),
                     precompose: false,
                     create_comp: false,
+                    precompose: false,
                 },
             )?;
             let footage = result
