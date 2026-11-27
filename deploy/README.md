@@ -102,7 +102,7 @@ projects = ["film-a"]      # 只能打开这个工程
 | 不想写配置文件 | 用环境变量 `BAE_HUB_TOKEN`（可写）、`BAE_HUB_READ_TOKEN`（只读） |
 | 局域网完全可信，不想要令牌 | `anonymous = "read"` 或 `"write"`（不推荐） |
 | 换端口 | 改 Docker 的端口映射（例如 `-p 8000:7341`），或者 `hub.toml` 里的 `listen` |
-| NAS 内存很小 | `hub.toml` 的 `[limits]`：`max_unsent_mib` 是给每个客户端排队的数据上限（默认 528），`max_message_mib` 是单条消息上限（默认 256，要放得下最大的一个工程层）。一般不用改：读得慢的客户端那里正常最多排队 16 MiB 加一条消息 |
+| NAS 内存很小 | `hub.toml` 的 `[limits]` 里调小 `max_backlog_mib`（默认 16）：读得慢的客户端那里平时最多排队这么多加一条消息。`max_message_mib` 是单条消息上限（默认 256，也是最大值，要放得下最大的一个工程层）；`max_unsent_mib` 只是兜底的硬上限（不写时按前两个算），调小它省不了平时的内存 |
 
 **权限**（容器用普通用户运行时）：数据目录必须归这个用户所有，或者对它可写。
 

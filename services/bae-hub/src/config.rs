@@ -229,8 +229,14 @@ impl HubConfig {
             if let Some(mib) = l.max_backlog_mib {
                 self.limits.max_backlog = bytes(mib, 1 << 20);
             }
-            if let Some(mib) = l.max_unsent_mib {
-                self.limits.max_unsent = bytes(mib, 1 << 20);
+            match l.max_unsent_mib {
+                Some(mib) => self.limits.max_unsent = bytes(mib, 1 << 20),
+                // Follow the other two, as the default does.
+                None if l.max_message_mib.is_some() || l.max_backlog_mib.is_some() => {
+                    self.limits.max_unsent =
+                        HubLimits::max_unsent_for(self.limits.max_message, self.limits.max_backlog);
+                }
+                None => {}
             }
             if let Some(secs) = l.stall_timeout_secs {
                 self.limits.stall_timeout = Duration::from_secs(secs);
@@ -268,9 +274,30 @@ impl HubConfig {
     }
 
     /// Check the settings (tokens long enough and unique, names present, limits
-    /// not zero).
+    /// not zero and fitting together).
     pub fn validate(&self) -> Result<(), HubError> {
         let l = &self.limits;
+        let mib = |n: usize| n.div_ceil(1 << 20);
+        // Clients connect with the default limits.
+        let clients_take = HubLimits::default().max_incoming;
+        if l.max_message > clients_take {
+            return Err(HubError::Config(format!(
+                "limits: max_message_mib ({} MiB) is more than clients take ({} MiB): \
+                 they would refuse such messages and get them again after every reconnect",
+                mib(l.max_message),
+                mib(clients_take)
+            )));
+        }
+        let held_back = l.max_message.saturating_add(l.max_backlog);
+        if l.max_unsent < held_back {
+            return Err(HubError::Config(format!(
+                "limits: max_unsent_mib ({} MiB) must be at least max_message_mib + \
+                 max_backlog_mib ({} MiB), what may wait for a client that flow control \
+                 held back; leave it out to get 2 x max_message_mib + max_backlog_mib",
+                l.max_unsent >> 20,
+                mib(held_back)
+            )));
+        }
         for (name, zero) in [
             ("max_message_mib", l.max_message == 0 || l.max_incoming == 0),
             ("max_unsent_mib", l.max_unsent == 0),
@@ -392,10 +419,13 @@ pub fn default_config_text(token: &str) -> String {
 # 客户端连接的上限（一般不用改）。
 # [limits]
 # 单条消息的上限（MiB）：发给客户端的、可写客户端发来的。一个工程层的快照要放得下。
+# 不能超过 256（客户端最多收这么大）；调小的话，比它大的工程层就同步不了。
 # max_message_mib = 256
 # 给某个客户端排队等它读的数据超过这么多（MiB）时，先不发工程数据，等它读完再发。
+# 平时每个读得慢的客户端那里最多排队这么多加一条消息；NAS 内存小就调小它。
 # max_backlog_mib = 16
-# 给一个客户端排队的数据最多这么多（MiB），超过就断开它。
+# 给一个客户端排队的数据最多这么多（MiB），超过就断开它。只是兜底的硬上限，
+# 不能小于 max_message_mib + max_backlog_mib；不写就是 2 × max_message_mib + max_backlog_mib。
 # max_unsent_mib = 528
 # 排队超过 max_backlog_mib、并且这么多秒内对方一个字节都没读时断开它。
 # stall_timeout_secs = 30
@@ -524,6 +554,43 @@ mod tests {
         assert!(FileConfig::parse("[limits]\nmax_mesage_mib = 1").is_err());
         let zero = FileConfig::parse("[limits]\nmax_message_mib = 0").unwrap();
         c.apply_file(zero);
+        assert!(c.validate().is_err());
+    }
+
+    /// The limits must fit together: what may wait for a client held back by
+    /// flow control (`max_backlog` plus one message) under the hard cap, and
+    /// messages no larger than clients take. Raising `max_message_mib` alone
+    /// raises the cap with it, as the default is made.
+    #[test]
+    fn limits_fit_together() {
+        let limits = |text: &str| {
+            let mut c = HubConfig::new("/data");
+            c.apply_file(FileConfig::parse(&format!("[limits]\n{text}")).unwrap());
+            c.validate().map(|()| c.limits)
+        };
+        let l = limits("max_message_mib = 64").unwrap();
+        assert_eq!(l.max_unsent, (2 * 64 + 16) << 20);
+        let l = limits("max_message_mib = 100\nmax_backlog_mib = 4").unwrap();
+        assert_eq!(l.max_unsent, (2 * 100 + 4) << 20);
+        let l = limits("max_backlog_mib = 32").unwrap();
+        assert_eq!(l.max_unsent, (2 * 256 + 32) << 20);
+        // Given explicitly, as long as a held-back client fits.
+        let l = limits("max_message_mib = 64\nmax_unsent_mib = 80").unwrap();
+        assert_eq!(l.max_unsent, 80 << 20);
+        let e = limits("max_unsent_mib = 64").unwrap_err().to_string();
+        assert!(e.contains("max_unsent_mib"), "{e}");
+        let e = limits("max_message_mib = 64\nmax_unsent_mib = 79")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("max_unsent_mib"), "{e}");
+        // Clients take at most 256 MiB: larger messages would be refused,
+        // and sent again after every reconnect.
+        let e = limits("max_message_mib = 512").unwrap_err().to_string();
+        assert!(e.contains("max_message_mib"), "{e}");
+        assert!(limits("max_message_mib = 256").is_ok());
+        // The same checks for settings made in code.
+        let mut c = HubConfig::new("/data");
+        c.limits.max_unsent = c.limits.max_message;
         assert!(c.validate().is_err());
     }
 

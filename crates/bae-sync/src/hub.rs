@@ -31,7 +31,9 @@ use crate::transport::Transport;
 /// [`crate::SessionConfig::max_backlog`]), so a peer that reads slowly holds
 /// at most `max_backlog` plus one message (and the `Hello`s, presence and
 /// snapshot answers sent meanwhile, which are small or rare). Whatever sends,
-/// more than `max_unsent` never waits: the link fails instead.
+/// more than `max_unsent` never waits (as long as it is not below
+/// `max_message`: a message that finds nothing waiting is always taken): the
+/// link fails instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HubLimits {
     /// Largest encoded protocol message this side sends. A whole sublayer
@@ -60,25 +62,37 @@ pub struct HubLimits {
     /// this wait fails, and so does the link from then on (a relay drops it).
     /// A message that finds nothing waiting is always taken, so any message up
     /// to `max_message` can be sent. Sessions that hold back at `max_backlog`
-    /// stay well below it; it stops what does not (snapshot requests sent over
-    /// and over, a session without flow control).
+    /// stay below it if it is at least `max_message + max_backlog` (better
+    /// [`HubLimits::max_unsent_for`], the default); it stops what does not
+    /// hold back (snapshot requests sent over and over, a session without
+    /// flow control).
     pub max_unsent: usize,
     /// How long nothing may go out while more than `max_backlog` waits; also
     /// how long [`Transport::close`] waits while nothing moves.
     pub stall_timeout: Duration,
 }
 
+impl HubLimits {
+    /// The `max_unsent` that fits `max_message` and `max_backlog`, as the
+    /// default is made: room for what a held-back session leaves waiting (one
+    /// message over `max_backlog`) plus one snapshot answer. It must be at
+    /// least `max_message + max_backlog`, or a peer that a session held back
+    /// for legitimately can be cut off.
+    pub fn max_unsent_for(max_message: usize, max_backlog: usize) -> usize {
+        max_message.saturating_mul(2).saturating_add(max_backlog)
+    }
+}
+
 impl Default for HubLimits {
     /// 256 MiB messages both ways, flow control at 16 MiB, at most 528 MiB
-    /// waiting (room for what a held-back session leaves waiting, one message
-    /// over `max_backlog`, plus one snapshot answer), 30 s stall timeout.
+    /// waiting ([`HubLimits::max_unsent_for`]), 30 s stall timeout.
     fn default() -> Self {
         const MAX_MESSAGE: usize = 256 << 20;
         HubLimits {
             max_message: MAX_MESSAGE,
             max_incoming: MAX_MESSAGE,
             max_backlog: crate::session::DEFAULT_MAX_BACKLOG,
-            max_unsent: 2 * MAX_MESSAGE + crate::session::DEFAULT_MAX_BACKLOG,
+            max_unsent: Self::max_unsent_for(MAX_MESSAGE, crate::session::DEFAULT_MAX_BACKLOG),
             stall_timeout: Duration::from_secs(30),
         }
     }

@@ -45,9 +45,9 @@ bae-hub healthcheck                   # 本机的服务正常就返回 0（Docke
 | 额外的可写令牌 | — | `BAE_HUB_TOKEN` | — | — |
 | 额外的只读令牌 | — | `BAE_HUB_READ_TOKEN` | — | — |
 | 空闲卸载（秒，0 不卸载） | `idle_unload_secs` | — | — | 600 |
-| 单条消息上限（MiB）：发给客户端的、可写客户端发来的 | `[limits]` `max_message_mib` | — | — | 256 |
+| 单条消息上限（MiB）：发给客户端的、可写客户端发来的；不能超过 256 | `[limits]` `max_message_mib` | — | — | 256 |
 | 流量控制（MiB）：给某个客户端排队的数据超过这么多时先不发工程数据 | `[limits]` `max_backlog_mib` | — | — | 16 |
-| 给一个客户端排队的数据最多这么多（MiB），超过就断开 | `[limits]` `max_unsent_mib` | — | — | 528 |
+| 给一个客户端排队的数据最多这么多（MiB），超过就断开；不能小于前两个的和 | `[limits]` `max_unsent_mib` | — | — | 2 × `max_message_mib` + `max_backlog_mib`（528） |
 | 排队超过 `max_backlog_mib` 又一直不读的客户端几秒后断开 | `[limits]` `stall_timeout_secs` | — | — | 30 |
 | 只读连接发来的单条消息上限（KiB） | `[limits]` `read_only_max_message_kib` | — | — | 16384 |
 
@@ -61,7 +61,7 @@ access = "write"          # write：可编辑、可新建工程；read：只能�
 projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*" 表示全部
 ```
 
-`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
+`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。几个值要配得上，配不上时拒绝启动：`max_message_mib` 不能超过 256（客户端最多收这么大，超过的消息客户端拒收，重连后又发，永远卡住）；`max_unsent_mib` 不能小于 `max_message_mib + max_backlog_mib`（被流量控制暂停的客户端那里可能合法地排队这么多），不写时跟着另外两个算。`max_message_mib` 调小的话，比它大的工程层就同步不了：可写客户端发来时连接被断开，重连后又发。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
 
 一个数据目录同时只能被一个 `bae-hub` 使用（靠 `hub.lock` 保证）。
 
@@ -145,7 +145,8 @@ Authorization: Bearer <令牌>
 
 - 单条消息（也是单帧）默认最大 256 MiB，一个工程层的快照要放得下。
 - **流量控制**：给某个客户端排队、等它读的数据超过 16 MiB 时，Relay 先不给它发工程数据（照常收它的消息、回 `Hello`、转发在线状态），等它读下去再接着发。客户端每 5 秒一个 `Hello`，读得慢的客户端（比如经 VPN 第一次同步大工程）还没收完时，以前每个 `Hello` 都会让 Relay 把它缺的全部再排一份，NAS 很快内存不够。现在每个连接最多排队 16 MiB 加一条消息。
-- 不管怎样，给一个客户端排队的数据不超过 528 MiB，超过就断开它（守流量控制的会话到不了这里）。
+- 不管怎样，给一个客户端排队的数据不超过 `max_unsent_mib`（默认 528 MiB），超过就断开它（守流量控制的会话到不了这里：它不能小于 `max_message_mib + max_backlog_mib`）。
+- NAS 内存小时调小 `max_backlog_mib`：平时每个读得慢的客户端那里最多排队它加一条消息。只调小 `max_unsent_mib` 省不了平时的内存。
 - 排队超过 16 MiB、并且 30 秒内一个字节都没读的客户端被断开；还在读的不断开，读得再慢也能收完。
 
 ## 测试

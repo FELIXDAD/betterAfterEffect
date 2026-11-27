@@ -97,6 +97,7 @@
 - **只读连接只收不太大的消息**（默认 16 MiB）：原来所有连接都接受 256 MiB 的消息，只读连接的修改要整条收完、解码后才丢掉。现在接入时就用小一些的接收上限，超过的读到帧头就断开；发给只读连接的消息照样可以很大。
   - 起初是 1 MiB。评审发现两个问题：`Hello` 随文档数 × Loro peer 数增长（约 11 字节一对，1 MiB 约 9.5 万对）；会话不知道自己只读，查看者本地的修改会在 Hub 每个 `Hello` 之后、每次重连之后再发，一个文档里超过 1 MiB 的查看者每次连上都被断开（实测 4 秒断开几百次），以前 Hub 只是丢掉这些修改。
   - 现在默认 16 MiB，客户端知道令牌只读时（`/v1/status` 的 `access`）设 `SessionConfig::send_data = false`（09，spec 2.4 第 5 步），什么数据都不发（`viewers_with_large_local_edits_stay_connected`）。
+- **`[limits]` 要配得上**（评审后）：不写 `max_unsent_mib` 时按 `2 × max_message_mib + max_backlog_mib` 算（原来固定 528，调大 `max_message_mib` 后合法的发送也会让连接失败）；`max_unsent_mib` 小于 `max_message_mib + max_backlog_mib`、`max_message_mib` 超过客户端能收的 256 MiB 时拒绝启动（`limits_fit_together`）。部署文档里"NAS 内存很小"改为调小 `max_backlog_mib`。
 - **内存上限**：Relay 按每个连接的 `max_backlog` 做流量控制（`PeerLink` 把 WebSocket 的积压报告给会话），读得慢的客户端那里正常最多排队 16 MiB 加一条消息；排队超过 `max_unsent`（默认 528 MiB）就断开（09 侧，spec 3.1）。
 - **工程目录的清理**：09 的清理（spec 4.7）改为默认关闭，Hub 明确打开，理由见 README"数据目录"。
 
