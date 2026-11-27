@@ -371,3 +371,90 @@ fn view_layouts_show_more_views_and_a_click_makes_one_active() {
     tool_action(&h, ids::LAYOUT, json!({"views": 1}));
     assert_eq!(panes(&h), (vec![View3d::Custom(2)], 0));
 }
+
+/// Share View Options (on by default): off, each view of the layout keeps its
+/// own View menu toggles; a click on a view brings its own back.
+#[test]
+fn unshared_views_keep_their_own_view_options() {
+    use crate::viewer::view3d::ids;
+    let mut h = H::new();
+    h.frame(Vec::new(), Modifiers::NONE);
+    tool_action(&h, ids::LAYOUT, json!({"views": 2}));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(crate::viewer::view3d::shares_options(&h.resources));
+    tool_action(&h, ids::SHARE, json!({}));
+    assert!(!crate::viewer::view3d::shares_options(&h.resources));
+    // Show Grid in the active (right) view only.
+    tool_action(&h, "motion.view.show_grid", json!({}));
+    assert!(h.session().lock().view_options.grid);
+    // A click in the left view: its own options, no grid.
+    let left = Pos2::new(300.0, 400.0);
+    h.move_to(left, Modifiers::NONE, Vec::new());
+    h.pointer_button(left, true, Modifiers::NONE);
+    h.pointer_button(left, false, Modifiers::NONE);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let comp = h.comp.clone();
+    assert_eq!(h.session().lock().views3d[&comp].active(), 0);
+    assert!(!h.session().lock().view_options.grid, "the left view's own");
+    // Back to the right view: its grid again.
+    let right = Pos2::new(980.0, 400.0);
+    h.move_to(right, Modifiers::NONE, Vec::new());
+    h.pointer_button(right, true, Modifiers::NONE);
+    h.pointer_button(right, false, Modifiers::NONE);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(h.session().lock().view_options.grid);
+    // Sharing again: one set for all views.
+    tool_action(&h, ids::SHARE, json!({}));
+    assert!(crate::viewer::view3d::shares_options(&h.resources));
+}
+
+/// View ▸ Split with New Locked Viewer: a new Composition viewer to the right
+/// of the viewer, locked to the active comp. It keeps showing that comp when
+/// another one becomes active; working in it makes its comp active again.
+#[test]
+fn split_with_new_locked_viewer() {
+    use bae_ui::Panel as _;
+    let mut h = H::new();
+    let r = tool_action(&h, crate::tools::ids::SPLIT_LOCKED, json!({}));
+    assert_eq!(r.split.len(), 1, "{:?}", r.split);
+    let (id, beside) = &r.split[0];
+    assert_eq!(id.kind(), "composition");
+    assert_eq!(beside.as_str(), "composition");
+    let comp = h.comp.clone();
+    assert_eq!(h.session().lock().viewer_pins.get(id.as_str()), Some(&comp));
+    // The harness viewer stands in for the new one.
+    let pin = h.session().lock().viewer_pins.remove(id.as_str()).unwrap();
+    h.session()
+        .lock()
+        .viewer_pins
+        .insert("composition".into(), pin);
+    h.viewer = CompositionViewer::new(None);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let other = path(
+        &h.run(
+            "comp.create",
+            json!({"width": 320, "height": 180, "name": "Other"}),
+        )["path"],
+    );
+    h.session().lock().open_comp(&other);
+    let title = {
+        let mut requests = PanelRequests::default();
+        let pid = PanelId::new("composition");
+        let cx = PanelContext::new(
+            &pid,
+            "Composition",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        h.viewer.tab(&cx).title
+    };
+    assert!(!title.contains("Other"), "still its own comp: {title}");
+    // A frame with the viewer focused makes its comp the active one.
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.session().lock().active_comp.as_ref(), Some(&comp));
+    // Saved and restored locked to it.
+    let state = h.viewer.save_state().unwrap();
+    assert_eq!(state["pinned"], json!(comp));
+}

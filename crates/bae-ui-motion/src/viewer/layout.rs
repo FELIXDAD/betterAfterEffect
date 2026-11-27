@@ -1,7 +1,8 @@
 //! View layouts (View ▸ Switch View Layout, the viewer's Select View Layout
 //! popup): 1, 2 or 4 views of the comp, each with its own 3D view. The active
-//! view is the full viewer (tools, overlays); the others show their 3D view
-//! and the selected layers' boxes, and a click makes one active.
+//! view is the full viewer (tools, overlays); the others show their 3D view,
+//! grid and safe areas and the selected layers' boxes, and a click makes one
+//! active. Share View Options off gives each view its own View menu toggles.
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::DVec2;
@@ -77,6 +78,7 @@ impl CompositionViewer {
             .cloned()
             .unwrap_or_default();
         let selected = session.lock().selected_layers.clone();
+        let shared = session.lock().view_options;
         let ppp = ui.ctx().pixels_per_point();
         self.extra_gpu.resize_with(rects.len(), || None);
         for (i, (&rect, &pane)) in rects.iter().zip(panes).enumerate() {
@@ -104,6 +106,8 @@ impl CompositionViewer {
             let c = info.bg_color;
             let to = |v: f64| (v * 255.0) as u8;
             painter.rect_filled(frame, 0.0, Color32::from_rgb(to(c[0]), to(c[1]), to(c[2])));
+            // Its grid and safe areas: the shared View menu toggles, or its own.
+            let opts = views.options_of(i).unwrap_or(shared);
             if self.gpu.is_some() && self.extra_gpu[i].is_none() {
                 self.extra_gpu[i] = GpuPreview::new(cx.resources, ui.ctx());
             }
@@ -126,6 +130,8 @@ impl CompositionViewer {
                     Color32::WHITE,
                 );
             }
+            let clip = painter.with_clip_rect(frame.intersect(rect));
+            Self::paint_guides(cx, &painter, &clip, frame, &view, opts);
             let outer = render::Affine::new(bae_anim::glam::DMat4::IDENTITY);
             for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
                 if self.prefs.show_precomp_bounds {
@@ -156,12 +162,13 @@ impl CompositionViewer {
                 .interact(rect, ui.id().with(("view", i)), Sense::click())
                 .clicked()
             {
-                session
-                    .lock()
-                    .views3d
+                let mut s = session.lock();
+                let mut options = s.view_options;
+                s.views3d
                     .entry(info.path.clone())
                     .or_default()
-                    .activate(i);
+                    .activate(i, &mut options);
+                s.view_options = options;
             }
         }
         // AE marks the active view's corners.
