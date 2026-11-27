@@ -2397,3 +2397,38 @@ fn remove_unused_consolidate_and_reduce_project() {
     assert!(fx.try_run("item.reduce", json!({"items": []})).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn locked_markers_cannot_be_moved_edited_or_deleted() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.layer(&comp, "solid", json!({}));
+    let m = p(
+        fx.run("marker.add", json!({"owner": layer, "time": SEC}))["path"]
+            .as_str()
+            .unwrap(),
+    );
+    fx.run("marker.lock", json!({"owners": [layer], "locked": true}));
+    assert!(bae_motion::markers::markers_locked(&fx.stage, &layer));
+    assert!(
+        fx.try_run("marker.move", json!({"markers": [m], "delta": SEC}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("marker.edit", json!({"path": m, "comment": "x"}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("marker.delete", json!({"markers": [m]}))
+            .is_err()
+    );
+    // Adding stays possible; the comp's own markers are separate.
+    fx.run("marker.add", json!({"owner": layer, "time": 2 * SEC}));
+    fx.run("marker.add", json!({"owner": comp, "time": SEC}));
+    fx.run("marker.lock", json!({"owners": [layer], "locked": false}));
+    fx.run("marker.move", json!({"markers": [m], "delta": SEC}));
+    assert_eq!(
+        bae_motion::markers::marker_time(&fx.stage, &m),
+        Time(2 * SEC)
+    );
+}

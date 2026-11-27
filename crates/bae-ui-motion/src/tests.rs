@@ -1091,12 +1091,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.animation.ease",
         "menu.edit.copy",
         "menu.layer.markers.lock_markers",
+        "menu.layer.markers.update_markers_from_source",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
     let handled: std::collections::HashSet<String> =
-        ["motion.layer.lock_markers".to_owned()].into();
+        ["motion.layer.update_markers_from_source".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -1124,7 +1125,8 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Lock Markers once handled.
+    // A selected layer: layer commands too (Lock Markers among them); Update
+    // Markers From Source once a module handles it.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -1133,11 +1135,12 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.edit.duplicate",
         "motion.layer.arrange.front",
         "menu.edit.copy",
+        "menu.layer.markers.lock_markers",
         "shell.file.save",
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(6, "menu.layer.markers.lock_markers");
+    with_fit.insert(7, "menu.layer.markers.update_markers_from_source");
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();

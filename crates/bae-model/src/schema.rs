@@ -267,6 +267,9 @@ const LAYER: &[AttrDef] = &[
     boolean("solo", false),
     boolean("locked", false),
     boolean("shy", false),
+    // Layer ▸ Markers ▸ Lock Markers: the layer's markers cannot be moved,
+    // edited or deleted.
+    boolean("markers_locked", false),
     prim_ref("parent"),
     choice("blend_mode", "normal", BLEND_MODES),
     choice(
@@ -473,6 +476,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             ),
             boolean("preserve_frame_rate", false),
             boolean("preserve_resolution", false),
+            // The comp's own markers locked (the marker menu's Lock Markers).
+            boolean("markers_locked", false),
             boolean("hide_shy_layers", false)
                 .doc("Timeline: hide layers whose Shy switch is on (AE Hide Shy Layers)."),
             boolean("draft_3d", false).doc("AE Draft 3D: fast 3D previews."),
