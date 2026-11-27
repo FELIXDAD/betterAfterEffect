@@ -532,6 +532,7 @@ impl bae_ui::DialogHost for MotionDialogs {
     }
 
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
+        crate::import::auto_reload::on_focus(ctx, cx);
         if crate::effects::lut::poll(ctx, cx) {
             return;
         }
