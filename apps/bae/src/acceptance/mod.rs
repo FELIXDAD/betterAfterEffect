@@ -468,6 +468,18 @@ pub(crate) struct MenuItemView {
 
 pub(crate) type Ui = Harness<'static, Gui>;
 
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
 /// A harness around a fresh [`Gui`].
 pub(crate) fn gui() -> Ui {
     gui_with(Gui::new())

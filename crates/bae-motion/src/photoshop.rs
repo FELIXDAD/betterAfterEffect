@@ -176,6 +176,7 @@ fn footage(
             .run(
                 tx,
                 ImportParams {
+                    precompose: false,
                     folder_label: p.folder_label,
                     parent: Some(parent.clone()),
                     comp: None,
