@@ -76,7 +76,7 @@ projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*"
 | `/healthz` | 否 | 返回 `ok` |
 | `/v1/info` | 否 | 返回 `{"service": "bae-hub", "version", "protocol": 同步协议版本, "sync_path": "/projects/<project>", "anonymous": null / "read" / "write"}`。客户端连接前用它确认对方是 Hub、协议是否兼容、要不要向用户要令牌 |
 | `/v1/status` | 是 | 运行时间、已加载的工程数、在线客户端数，以及**当前令牌的名字和权限**（`access`）。同步连接自己的权限在握手响应里（见下一节），不需要另外查 |
-| `/v1/projects` | 是 | 这个令牌能看到的工程。每个工程有：`id`、`loaded`、`docs`、`peers`（客户端 ID、令牌名、权限、地址、连接时间）、`disk_bytes`、`saving`、`not_saved`（修改照常转发、但不保存的文档，见下）、消息计数 |
+| `/v1/projects` | 是 | 这个令牌能看到的工程。每个工程有：`id`、`loaded`、`docs`、`peers`（客户端 ID、令牌名、权限、地址、连接时间、`max_incoming`：它握手时说的单条消息上限，旧版本为 `null`）、`disk_bytes`、`saving`、`not_saved`（修改照常转发、但不保存的文档，见下）、消息计数 |
 | `/projects/<工程 ID>` | 是 | WebSocket 同步，见下一节。不带 WebSocket 升级头时返回 426 |
 
 状态码：
@@ -147,9 +147,8 @@ Authorization: Bearer <令牌>
 **消息大小与内存**（`bae_sync::HubLimits`，spec 3.1）：
 
 - 单条消息（也是单帧）默认最大 256 MiB，一个工程层的快照要放得下。
-- 要发给某个客户端的一个工程层超过这个上限时（比如工程层是一点点改大的，新加入的客户端缺整段），Relay 只对这个客户端跳过这个工程层，其他工程层照发，连接不断（spec 2.4 第 3 步）。日志里记一条 warn（"a document does not fit in one message to this client"）：跳过时一次；客户端从别的途径拿到了一部分、或者重连之后，Hub 再试，仍放不下时再记一次。warn 的括号里说怎么办：上限是 Hub 的 `max_message_mib`、而它小于 256 时，可以调大（最多 256，也不超过这个客户端握手时说的值）；已经是 256 时，这个工程层通不过 Hub：删掉其中的内容没用（放不下的是客户端缺的全部修改历史，不是现在的大小，删除只会再加修改），只能把内容移到新的、更小的工程层；上限是客户端自己的设置（握手里说的不比 Hub 的大）时，调 Hub 没用。
+- 要发给某个客户端的一个工程层超过这个上限时（比如工程层是一点点改大的，新加入的客户端缺整段），Relay 只对这个客户端跳过这个工程层，其他工程层照发，连接不断（spec 2.4 第 3 步）。日志里记一条 warn（"a document does not fit in one message to this client"）：跳过时一次；客户端从别的途径拿到了一部分、或者重连之后，Hub 再试，仍放不下时再记一次。warn 的括号里按这条消息的大小说怎么办：超过 256 MiB（Hub 一条消息最多发这么多，`max_message_mib` 不能更大）时，这个工程层通不过 Hub：删掉其中的内容没用（放不下的是客户端缺的全部修改历史，不是现在的大小，删除只会再加修改），只能把内容移到新的、更小的工程层（`@history` 也通不过，没有办法）；否则说是 Hub 的 `max_message_mib`、客户端自己的上限（握手时说的，`/v1/projects` 的 `max_incoming`），还是两个都比它小，要调大到多少：只是客户端的小时，调 Hub 没用。以前 Relay 断开这个客户端，它重连后又被断开，别的工程层也拿不到。
 - 别人的在线状态（选中的图层很多）发不给某个客户端时也只跳过，记一条 warn（"a collaborator's presence ... does not fit"），连接不断；那个客户端暂时看不到这个人。
-- 工程目录的一条记录最长 1 GiB（spec 4.2）。一个工程层要写的修改比这还大时不写，记一条 error（"does not fit in one record of the project directory"）：修改照样转发给其他客户端，只是没存盘。以前 Relay 断开这个客户端，它重连后又被断开，别的工程层也拿不到。
 - **流量控制**：给某个客户端排队、等它读的数据超过 16 MiB 时，Relay 先不给它发工程数据（照常收它的消息、回 `Hello`、转发在线状态），等它读下去再接着发。客户端每 5 秒一个 `Hello`，读得慢的客户端（比如经 VPN 第一次同步大工程）还没收完时，以前每个 `Hello` 都会让 Relay 把它缺的全部再排一份，NAS 很快内存不够。现在每个连接最多排队 16 MiB 加一条消息。
 - 不管怎样，给一个客户端排队的数据不超过 `max_unsent_mib`（默认 528 MiB），超过就断开它（守流量控制的会话到不了这里：它不能小于 `max_message_mib + max_backlog_mib`）。
 - NAS 内存小时调小 `max_backlog_mib`：平时每个读得慢的客户端那里最多排队它加一条消息。只调小 `max_unsent_mib` 省不了平时的内存。

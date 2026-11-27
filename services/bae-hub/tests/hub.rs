@@ -168,6 +168,15 @@ fn read_only_clients_see_but_cannot_edit() {
     let viewer = peers.iter().find(|p| p["client"] == "viewer").unwrap();
     assert_eq!(viewer["access"], "read");
     assert_eq!(viewer["token"], "viewer");
+    // What each client said it takes (`x-bae-max-incoming`), which the
+    // hub's warnings about layers that do not fit go by.
+    for peer in &peers {
+        assert_eq!(
+            peer["max_incoming"],
+            bae_sync::HubLimits::default().max_incoming as u64,
+            "{peer}"
+        );
+    }
 }
 
 /// A note of `len` random letters in `/comps/main` of `layer` (Loro does

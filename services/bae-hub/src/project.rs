@@ -105,6 +105,10 @@ pub struct PeerStatus {
     pub addr: String,
     /// Unix milliseconds.
     pub connected_ms: u64,
+    /// The largest message the client said it takes in the handshake
+    /// (`x-bae-max-incoming`; the hub sends it at most this much in one
+    /// message); `null` for an older build.
+    pub max_incoming: Option<u64>,
 }
 
 /// Snapshot of a project's state, refreshed after every pump.
@@ -338,47 +342,64 @@ impl StoreNotes {
 }
 
 /// What helps with a document that does not fit in one message to a client,
-/// for the hub's warning: `max` is the limit it was over
-/// (`SyncError::MessageTooLarge`), `hub_max` the hub's own `max_message`
-/// (`max_message_mib`), `client` what the client said it takes
+/// for the hub's warning: `len` is the message's size and `max` the limit it
+/// was over (`SyncError::MessageTooLarge`), `hub_max` the hub's own
+/// `max_message` (`max_message_mib`), `client` what the client said it takes
 /// (`x-bae-max-incoming`, [`PeerInfo::max_incoming`]; `None` for an older
-/// build). At what clients take by default (`max_incoming`, 256 MiB;
-/// `HubConfig::validate` refuses more for the hub, and it is its default)
-/// the layer cannot go through the hub at all. Below that, a link sends at
-/// most the smaller of `hub_max` and `client`, so when `client` is at most
-/// `max` the limit is the client's own (also when both are equal), which the
-/// hub's settings do not change; otherwise it is the hub's, and raising it
-/// helps up to what the client takes. What does not fit is every op
-/// of the layer the client lacks (`SyncSession` sends Loro updates, not the
-/// current state), so deleting content does not help, it adds ops: only new
-/// layers with a shorter history do.
-fn too_large_hint(max: usize, hub_max: usize, client: Option<usize>) -> String {
-    let clients_take = HubLimits::default().max_incoming;
-    if max >= clients_take {
-        format!(
-            "{} is the most clients take in one message, so the layer cannot sync through \
-             the hub; deleting content from it does not help (what does not fit is its edit \
-             history, not its current size): move the content into new, smaller layers",
-            size(clients_take)
-        )
-    } else if max < hub_max || client.is_some_and(|c| c <= max) {
-        format!(
-            "the client takes at most {} per message, which is its own setting; \
-             raising max_message_mib does not help",
-            size(max)
-        )
-    } else {
-        let up_to = client.map_or(clients_take, |c| c.min(clients_take));
-        format!(
-            "max_message_mib in [limits] is {}; raising it, up to {}{}, may let it sync",
+/// build, which takes what the hub sends). A link sends at most the smaller
+/// of `hub_max` and `client`, so the hint says which of the two is below
+/// `len` (or both), and by how much to raise it. Above 256 MiB (what clients
+/// take by default; `HubConfig::validate` refuses more for the hub) nothing
+/// helps: what does not fit is every op of the document the client lacks
+/// (`SyncSession` sends Loro updates, not the current state), so deleting
+/// content does not help, it adds ops; for a layer, only new layers with a
+/// shorter history do.
+fn too_large_hint(
+    doc: &DocKey,
+    len: usize,
+    max: usize,
+    hub_max: usize,
+    client: Option<usize>,
+) -> String {
+    let most = HubLimits::default().max_incoming;
+    if len > most {
+        return if *doc == DocKey::History {
+            format!(
+                "{} is the most the hub sends in one message (max_message_mib cannot be set \
+                 higher), so the project's version history cannot sync through the hub to \
+                 this client; deleting versions does not help (what does not fit is its edit \
+                 history)",
+                size(most)
+            )
+        } else {
+            format!(
+                "{} is the most the hub sends in one message (max_message_mib cannot be set \
+                 higher), so the layer cannot sync through the hub; deleting content from it \
+                 does not help (what does not fit is its edit history, not its current \
+                 size): move the content into new, smaller layers",
+                size(most)
+            )
+        };
+    }
+    let need = len.div_ceil(1 << 20);
+    let hub_short = hub_max < len;
+    match client.filter(|c| *c < len) {
+        Some(c) if hub_short => format!(
+            "max_message_mib in [limits] is {} and the client takes at most {} per message \
+             (its own setting); only raising both, to {need} MiB or more, lets it sync",
             size(hub_max),
-            size(up_to),
-            if up_to < clients_take {
-                " (what this client takes)"
-            } else {
-                ""
-            }
-        )
+            size(c)
+        ),
+        Some(c) => format!(
+            "the client takes at most {} per message, which is its own setting; raising \
+             max_message_mib does not help",
+            size(c)
+        ),
+        None if hub_short => format!(
+            "max_message_mib in [limits] is {}; raising it to {need} or more lets it sync",
+            size(hub_max)
+        ),
+        None => format!("the link takes at most {} per message", size(max)),
     }
 }
 
@@ -594,55 +615,13 @@ impl RelayThread {
             let out = relay.pump();
             received += out.received as u64;
             sent += out.sent as u64;
+            // Before the disconnects below forget who a failed peer was.
+            self.log_skipped(out.errors, &peers);
             for (handle, e) in out.disconnected {
                 if Some(handle) == store {
                     self.store_failed(&e, &mut store, &mut retry_store_at);
                 } else if let Some(info) = peers.remove(&handle) {
                     tracing::info!(project = %self.id, peer = ?handle, addr = %info.addr, reason = %e, "client disconnected");
-                }
-            }
-            for (handle, e) in out.errors {
-                // Reported when it is first skipped, and again only when a
-                // retry does not fit either (spec 2.4 step 3).
-                match &e {
-                    SyncError::MessageTooLarge { doc: Some(_), .. } if Some(handle) == store => {
-                        tracing::error!(
-                            project = %self.id,
-                            error = %e,
-                            "a document does not fit in one record of the project directory; \
-                             its edits are relayed but not saved"
-                        );
-                    }
-                    SyncError::MessageTooLarge {
-                        doc: Some(_), max, ..
-                    } => {
-                        let info = peers.get(&handle);
-                        tracing::warn!(
-                            project = %self.id,
-                            peer = ?handle,
-                            addr = ?info.map(|i| i.addr),
-                            error = %e,
-                            "a document does not fit in one message to this client; it is not \
-                             sent to it until the client has more of it from elsewhere or \
-                             reconnects ({})",
-                            too_large_hint(*max, self.max_message, info.and_then(|i| i.max_incoming))
-                        );
-                    }
-                    SyncError::MessageTooLarge { doc: None, .. } => {
-                        let addr = peers.get(&handle).map(|i| i.addr);
-                        tracing::warn!(
-                            project = %self.id,
-                            peer = ?handle,
-                            addr = ?addr,
-                            error = %e,
-                            "a collaborator's presence (a very long selection) does not fit in \
-                             one message to this client; it is not shown to it until a smaller \
-                             one fits"
-                        );
-                    }
-                    _ => {
-                        tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
-                    }
                 }
             }
             notes.check(&self.id, &relay, store);
@@ -653,6 +632,7 @@ impl RelayThread {
             if peers.is_empty() && store.is_some() {
                 let out = relay.flush();
                 sent += out.sent as u64;
+                self.log_skipped(out.errors, &peers);
                 if let Some((_, e)) = out
                     .disconnected
                     .into_iter()
@@ -706,6 +686,7 @@ impl RelayThread {
         // connection.
         let out = relay.pump();
         let flushed = relay.flush();
+        self.log_skipped(out.errors.into_iter().chain(flushed.errors), &peers);
         for (handle, e) in out.disconnected.into_iter().chain(flushed.disconnected) {
             if Some(handle) == store {
                 tracing::error!(project = %self.id, error = %e, "project directory failed while closing; the last edits may not be saved");
@@ -719,6 +700,60 @@ impl RelayThread {
         }
         drop(relay);
         tracing::info!(project = %self.id, "project closed");
+    }
+
+    /// Log what the relay skipped for a peer (`RelayOutcome::errors`; the
+    /// link goes on). A document that does not fit in one message to a
+    /// client is logged when it is skipped, and again only when a retry does
+    /// not fit either (spec 2.4 step 3), with what helps
+    /// ([`too_large_hint`]); so is another client's presence that does not
+    /// fit for it.
+    fn log_skipped(
+        &self,
+        errors: impl IntoIterator<Item = (PeerHandle, SyncError)>,
+        peers: &BTreeMap<PeerHandle, PeerInfo>,
+    ) {
+        for (handle, e) in errors {
+            let info = peers.get(&handle);
+            match &e {
+                SyncError::MessageTooLarge {
+                    doc: Some(doc),
+                    size,
+                    max,
+                } => {
+                    tracing::warn!(
+                        project = %self.id,
+                        peer = ?handle,
+                        addr = ?info.map(|i| i.addr),
+                        error = %e,
+                        "a document does not fit in one message to this client; it is not \
+                         sent to it until the client has more of it from elsewhere or \
+                         reconnects ({})",
+                        too_large_hint(
+                            doc,
+                            *size,
+                            *max,
+                            self.max_message,
+                            info.and_then(|i| i.max_incoming)
+                        )
+                    );
+                }
+                SyncError::MessageTooLarge { doc: None, .. } => {
+                    tracing::warn!(
+                        project = %self.id,
+                        peer = ?handle,
+                        addr = ?info.map(|i| i.addr),
+                        error = %e,
+                        "a collaborator's presence (a very long selection) does not fit in \
+                         one message to this client; it is not shown to it until a smaller \
+                         one fits"
+                    );
+                }
+                _ => {
+                    tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
+                }
+            }
+        }
     }
 
     /// The project directory's link failed: stop using it, reopen it later.
@@ -761,6 +796,7 @@ impl RelayThread {
                         .connected
                         .duration_since(SystemTime::UNIX_EPOCH)
                         .map_or(0, |d| d.as_millis() as u64),
+                    max_incoming: info.max_incoming.map(|n| n as u64),
                 })
                 .collect(),
             docs: relay.docs().doc_keys().len(),
@@ -901,7 +937,10 @@ mod tests {
     /// refuses to start, and when the client's own limit is the smaller one
     /// the hub's setting changes nothing. At the default it then said the
     /// layer could sync once "made smaller", but deleting content from it
-    /// only adds to the ops the client lacks.
+    /// only adds to the ops the client lacks. Later it looked only at the
+    /// limits, not at the message: a 300 MiB layer got "raise
+    /// max_message_mib" on a 64 MiB hub, and with both limits at 64 MiB only
+    /// the client's was blamed.
     #[test]
     fn the_too_large_warning_says_what_helps() {
         let check = |hub_max_mib: u64| {
@@ -914,52 +953,67 @@ mod tests {
             );
             c.validate().is_ok()
         };
-        let clients_take = HubLimits::default().max_incoming;
+        let layer = DocKey::parse("anim/a").unwrap();
+        let most = HubLimits::default().max_incoming;
         let default = HubConfig::new(".").limits.max_message;
-        assert_eq!(default, clients_take);
-        // The default: the most there is, raising it is refused.
-        let hint = too_large_hint(default, default, Some(default));
-        assert!(!check((default >> 20) as u64 + 1));
-        assert!(!hint.contains("raising"), "{hint}");
-        assert!(hint.contains("256 MiB"), "{hint}");
-        // Deleting content only adds ops: what does not fit is the layer's
-        // history (all the ops the client lacks), so only new layers help.
-        assert!(
-            !hint.contains("made smaller")
-                && hint.contains("deleting content")
-                && hint.contains("history")
-                && hint.contains("new, smaller layers"),
-            "{hint}"
-        );
-        // A hub configured below that: raising it may help, as far as the
-        // hub takes it (an older client did not say what it takes)...
-        for client in [Some(clients_take), None] {
-            let hint = too_large_hint(64 << 20, 64 << 20, client);
-            assert!(check((clients_take >> 20) as u64));
+        assert_eq!(default, most);
+        assert!(!check((most >> 20) as u64 + 1));
+        assert!(check((most >> 20) as u64));
+        const MIB: usize = 1 << 20;
+
+        // Over what the hub can send at all: nothing helps but new layers,
+        // whatever the limits and whatever the client takes.
+        for (hub_max, client) in [
+            (default, Some(default)),
+            (default, Some(512 * MIB)),
+            (default, None),
+            (64 * MIB, Some(64 * MIB)),
+            (64 * MIB, Some(256 * MIB)),
+        ] {
+            let max = client.map_or(hub_max, |c| c.min(hub_max));
+            let hint = too_large_hint(&layer, 300 * MIB, max, hub_max, client);
             assert!(
-                hint.contains("max_message_mib in [limits] is 64 MiB")
-                    && hint.contains("up to 256 MiB,"),
-                "{hint}"
+                !hint.contains("raising")
+                    && !hint.contains("own setting")
+                    && hint.contains("256 MiB is the most the hub sends")
+                    && hint.contains("deleting content")
+                    && hint.contains("history")
+                    && hint.contains("new, smaller layers"),
+                "{hub_max} {client:?}: {hint}"
             );
         }
-        // ...and as far as this client takes.
-        let hint = too_large_hint(64 << 20, 64 << 20, Some(100 << 20));
+        // The version history is no layer: no advice about layers.
+        let hint = too_large_hint(&DocKey::History, 300 * MIB, default, default, None);
         assert!(
-            hint.contains("up to 100 MiB (what this client takes)"),
+            hint.contains("version history") && !hint.contains("layer"),
             "{hint}"
         );
-        // The client's own limit is the smaller one, or as small as the
-        // hub's: raising the hub's does not help.
-        for (max, hub_max, client, want) in [
-            (256 << 10, default, Some(256 << 10), "256 KiB"),
-            (256 << 10, 64 << 20, Some(256 << 10), "256 KiB"),
-            (64 << 20, 64 << 20, Some(64 << 20), "64 MiB"),
-        ] {
-            let hint = too_large_hint(max, hub_max, client);
+
+        // Only the hub's limit is below it: raise it, by enough (an older
+        // client did not say what it takes, and takes what the hub sends).
+        for client in [Some(most), Some(150 * MIB), None] {
+            let hint = too_large_hint(&layer, 100 * MIB + 1, 64 * MIB, 64 * MIB, client);
             assert!(
-                hint.contains(&format!("takes at most {want} per message"))
-                    && hint.contains("does not help"),
-                "{hint}"
+                hint.contains("max_message_mib in [limits] is 64 MiB")
+                    && hint.contains("raising it to 101 or more"),
+                "{client:?}: {hint}"
+            );
+        }
+        // Only the client's: the hub's setting does not help.
+        for hub_max in [default, 200 * MIB] {
+            let hint = too_large_hint(&layer, 100 * MIB, 64 * MIB, hub_max, Some(64 * MIB));
+            assert!(
+                hint.contains("takes at most 64 MiB per message") && hint.contains("does not help"),
+                "{hub_max}: {hint}"
+            );
+        }
+        // Both, also when they are equal.
+        for (hub_max, client) in [(64 * MIB, 64 * MIB), (64 * MIB, 32 * MIB)] {
+            let hint = too_large_hint(&layer, 100 * MIB, client, hub_max, Some(client));
+            assert!(
+                hint.contains("max_message_mib in [limits] is 64 MiB")
+                    && hint.contains("only raising both, to 100 MiB or more"),
+                "{hub_max} {client}: {hint}"
             );
         }
     }
@@ -970,6 +1024,7 @@ mod tests {
     #[test]
     fn small_limits_in_the_too_large_warning_are_not_zero() {
         let hub_max = HubLimits::default().max_incoming;
+        let layer = DocKey::parse("anim/a").unwrap();
         for (max, want) in [
             (100, "100 bytes"),
             (1023, "1023 bytes"),
@@ -979,7 +1034,7 @@ mod tests {
             (3 << 19, "1.50 MiB"),
             (64 << 20, "64 MiB"),
         ] {
-            let hint = too_large_hint(max, hub_max, Some(max));
+            let hint = too_large_hint(&layer, max + 1, max, hub_max, Some(max));
             assert!(
                 hint.contains(&format!("takes at most {want} per message")),
                 "{max}: {hint}"
@@ -1190,6 +1245,9 @@ mod tests {
                 && text.contains("for document anim/a"),
             "{text}"
         );
+        // The hint knows what this client said it takes (`PeerInfo`): as
+        // little as the hub sends, so raising the hub's alone does not help.
+        assert!(text.contains("only raising both"), "{text}");
         assert!(!clients[2].has_all_of(&clients[0], "anim/a"));
         assert!(clients.iter().all(|c| c.too_large.len() <= 1));
     }
