@@ -432,6 +432,12 @@ impl Command for SetVertices {
             == Some("none");
         let closes = is_mask && was_open && p.shape.closed && mode_none;
         let path = p.path.clone();
+        // A RotoBezier path's tangents follow its vertices.
+        let shape = if is_roto_bezier(tx.stage(), &path) {
+            roto_bezier(&p.shape)
+        } else {
+            p.shape
+        };
         SetAt.run(
             tx,
             SetAtParams {
@@ -439,7 +445,7 @@ impl Command for SetVertices {
                 path: p.path,
                 attr: PATH_ATTR.into(),
                 time: p.time.unwrap_or(Time::ZERO),
-                value: Value::Bezier(p.shape),
+                value: Value::Bezier(shape),
             },
         )?;
         if closes {
@@ -483,11 +489,13 @@ impl Command for InsertVertex {
     ) -> Result<InsertVertexOutput, CommandError> {
         let t = p.t.unwrap_or(0.5);
         let seg = p.segment;
+        let roto = is_roto_bezier(tx.stage(), &p.path);
         edit_all(tx, &p.path, |b| {
             if seg >= segment_count(b) {
                 return Err(fail(format!("the path has no segment {seg}")));
             }
-            Ok(split(b, seg, t))
+            let b = split(b, seg, t);
+            Ok(if roto { roto_bezier(&b) } else { b })
         })?;
         Ok(InsertVertexOutput { index: seg + 1 })
     }
@@ -512,6 +520,7 @@ impl Command for DeleteVertex {
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         let i = p.index;
+        let roto = is_roto_bezier(tx.stage(), &p.path);
         edit_all(tx, &p.path, |b| {
             if i >= b.vertices.len() {
                 return Err(fail(format!("the path has no vertex {i}")));
@@ -519,8 +528,125 @@ impl Command for DeleteVertex {
             if b.vertices.len() < 2 {
                 return Err(fail("cannot delete the only vertex of a path"));
             }
-            Ok(remove(b, i))
+            let b = remove(b, i);
+            Ok(if roto { roto_bezier(&b) } else { b })
         })
+    }
+}
+
+/// RotoBezier switch of a mask or shape Path (AE: its tangents follow the
+/// vertices).
+pub const ROTO_BEZIER_ATTR: &str = "roto_bezier";
+
+/// Whether the RotoBezier switch of the path prim `path` is on.
+pub fn is_roto_bezier(stage: &bae_model::Stage, path: &PrimPath) -> bool {
+    stage
+        .prim(path)
+        .and_then(|v| query::static_value(&v, ROTO_BEZIER_ATTR))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+}
+
+/// `p` running the other way (vertex order, tangents and feather points).
+pub fn reversed(p: &BezierPath) -> BezierPath {
+    let segments = segment_count(p) as u32;
+    let mut feather = p.feather.clone();
+    for f in &mut feather {
+        f.segment = segments.saturating_sub(1).saturating_sub(f.segment);
+        f.t = 1.0 - f.t;
+    }
+    BezierPath {
+        vertices: p.vertices.iter().rev().copied().collect(),
+        in_tangents: p.out_tangents.iter().rev().copied().collect(),
+        out_tangents: p.in_tangents.iter().rev().copied().collect(),
+        closed: p.closed,
+        feather,
+    }
+}
+
+/// `p` starting at vertex `i` (Set First Vertex): a closed path turns, an
+/// open one can only start at either end.
+pub fn with_first_vertex(p: &BezierPath, i: usize) -> Result<BezierPath, CommandError> {
+    let n = p.vertices.len();
+    if i >= n {
+        return Err(fail(format!("the path has no vertex {i}")));
+    }
+    if !p.closed {
+        return match i {
+            0 => Ok(p.clone()),
+            _ if i + 1 == n => Ok(reversed(p)),
+            _ => Err(fail("an open path starts at one of its ends")),
+        };
+    }
+    let turn =
+        |v: &[[f64; 2]]| -> Vec<[f64; 2]> { v[i..].iter().chain(&v[..i]).copied().collect() };
+    let mut feather = p.feather.clone();
+    for f in &mut feather {
+        f.segment = ((f.segment as usize + n - i) % n) as u32;
+    }
+    Ok(BezierPath {
+        vertices: turn(&p.vertices),
+        in_tangents: turn(&p.in_tangents),
+        out_tangents: turn(&p.out_tangents),
+        closed: true,
+        feather,
+    })
+}
+
+/// What [`EditWhole`] does to every keyframe of the paths.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(tag = "edit", rename_all = "snake_case")]
+pub enum WholeEdit {
+    /// Layer ▸ Mask and Shape Path ▸ Closed.
+    Closed { closed: bool },
+    /// ▸ RotoBezier: on, the tangents follow the vertices from now on; off,
+    /// they stay as they are.
+    RotoBezier { on: bool },
+    /// ▸ Set First Vertex.
+    FirstVertex { index: usize },
+}
+
+pub struct EditWhole;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct EditWholeParams {
+    /// Mask or shape Path prims.
+    pub paths: Vec<PrimPath>,
+    #[serde(flatten)]
+    pub edit: WholeEdit,
+}
+
+impl Command for EditWhole {
+    type Params = EditWholeParams;
+    type Output = ();
+    const ID: &'static str = "path.edit_whole";
+    const TITLE: &'static str = "Mask and Shape Path";
+    const DESCRIPTION: &'static str = "Layer > Mask and Shape Path on whole masks or shape Paths, in every keyframe: open or close them (`closed`), switch RotoBezier (automatic tangents), or set the first vertex (`first_vertex`, by index).";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        if p.paths.is_empty() {
+            return Err(fail("give at least one path"));
+        }
+        ensure_unlocked(tx.stage(), &p.paths)?;
+        for path in &p.paths {
+            let roto = is_roto_bezier(tx.stage(), path);
+            let tangents = |b: BezierPath, on: bool| if on { roto_bezier(&b) } else { b };
+            match p.edit {
+                WholeEdit::Closed { closed } => edit_all(tx, path, |b| {
+                    let mut b = b.clone();
+                    b.closed = closed;
+                    Ok(tangents(b, roto))
+                })?,
+                WholeEdit::RotoBezier { on } => {
+                    edit_all(tx, path, |b| Ok(tangents(b.clone(), on)))?;
+                    crate::util::set(tx, path, ROTO_BEZIER_ATTR, Value::Bool(on))?;
+                }
+                WholeEdit::FirstVertex { index } => {
+                    edit_all(tx, path, |b| with_first_vertex(b, index))?
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -536,6 +662,22 @@ mod tests {
             closed: true,
             feather: Vec::new(),
         }
+    }
+
+    #[test]
+    fn first_vertex_turns_closed_paths_and_reverses_open_ones() {
+        let p = square();
+        let q = with_first_vertex(&p, 2).unwrap();
+        assert_eq!(
+            q.vertices,
+            [[100.0, 100.0], [0.0, 100.0], [0.0, 0.0], [100.0, 0.0]]
+        );
+        let mut open = square();
+        open.closed = false;
+        assert!(with_first_vertex(&open, 1).is_err());
+        let r = with_first_vertex(&open, 3).unwrap();
+        assert_eq!(r.vertices[0], [0.0, 100.0]);
+        assert_eq!(r.vertices[3], [0.0, 0.0]);
     }
 
     #[test]

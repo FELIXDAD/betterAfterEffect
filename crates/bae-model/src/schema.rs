@@ -502,7 +502,13 @@ pub static SCHEMAS: &[PrimSchema] = &[
     PrimSchema {
         prim_type: PrimType::PATH,
         doc: "Free-form shape path.",
-        attrs: &[bezier("path"), choice("direction", "normal", DIRECTION)],
+        attrs: &[
+            bezier("path"),
+            choice("direction", "normal", DIRECTION),
+            boolean("roto_bezier", false)
+                .fixed()
+                .doc("RotoBezier: the tangents follow the vertices."),
+        ],
     },
     PrimSchema {
         prim_type: PrimType::RECT,
@@ -691,6 +697,9 @@ pub static SCHEMAS: &[PrimSchema] = &[
             float("expansion", 0.0),
             color("color", [1.0, 1.0, 0.0, 1.0]).fixed(),
             boolean("locked", false),
+            boolean("roto_bezier", false)
+                .fixed()
+                .doc("RotoBezier: the tangents follow the vertices."),
         ],
     },
     PrimSchema {

@@ -3901,3 +3901,40 @@ fn crop_comp_and_camera_focus() {
         .unwrap();
     assert!(d > 0.0, "{d}");
 }
+
+/// File ▸ Dependencies ▸ Find Missing Footage: the Project panel searches for
+/// "Missing Footage" and lists only footage whose file is gone.
+#[test]
+fn find_missing_footage_lists_footage_without_a_file() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let dir = tempfile::tempdir().unwrap();
+    let here = dir.path().join("here.mov");
+    let gone = dir.path().join("gone.mov");
+    std::fs::write(&here, b"clip").unwrap();
+    std::fs::write(&gone, b"clip").unwrap();
+    let out = h.run(
+        "item.import",
+        json!({"files": [{"path": here}, {"path": gone}]}),
+    );
+    let gone_item = PrimPath::new(out["items"][1].as_str().unwrap()).unwrap();
+    std::fs::remove_file(&gone).unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::FIND_MISSING_FOOTAGE));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    let shown = project.shown_items(&h.stage);
+    assert!(shown.contains(&gone_item), "{shown:?}");
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|p| h
+                .stage
+                .prim(p)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET)))
+            .count(),
+        1
+    );
+}
