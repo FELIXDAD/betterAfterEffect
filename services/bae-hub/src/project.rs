@@ -945,4 +945,199 @@ mod tests {
         assert_eq!(config.max_backlog, Some(3 << 20));
         assert_eq!(config.client, relay.peer_config().client);
     }
+
+    /// A link that takes messages up to `.1` bytes, as a hub link does.
+    struct Limited(bae_sync::MemoryTransport, usize);
+
+    impl Transport for Limited {
+        fn send(&mut self, msg: bae_sync::Message) -> Result<(), SyncError> {
+            let size = msg.encoded_len();
+            if size > self.1 {
+                return Err(SyncError::MessageTooLarge {
+                    doc: msg.doc().cloned(),
+                    size,
+                    max: self.1,
+                });
+            }
+            self.0.send(msg)
+        }
+
+        fn recv(&mut self) -> Result<Option<bae_sync::Message>, SyncError> {
+            self.0.recv()
+        }
+
+        fn max_message_size(&self) -> Option<usize> {
+            Some(self.1)
+        }
+    }
+
+    /// A client of a project's relay thread, linked to it in memory.
+    struct TestClient {
+        docs: bae_sync::MemDocs,
+        session: bae_sync::SyncSession,
+        link: Limited,
+        /// Documents of the `MessageTooLarge` errors it reported.
+        too_large: Vec<DocKey>,
+    }
+
+    impl TestClient {
+        /// Joins with `root` and `anim/a` as in `base`; both ends of the
+        /// link take at most `max` bytes per message.
+        fn join(project: &Project, name: &str, base: &[u8], max: usize) -> TestClient {
+            let (ours, theirs) = bae_sync::MemoryTransport::pair();
+            let info = PeerInfo {
+                token: Arc::from(name),
+                access: Access::Write,
+                addr: SocketAddr::from(([127, 0, 0, 1], 1)),
+                connected: SystemTime::now(),
+            };
+            project
+                .connect(Box::new(Limited(theirs, max)), info)
+                .unwrap();
+            let mut docs = bae_sync::MemDocs::new();
+            for doc in ["root", "anim/a"] {
+                docs.load(DocKey::parse(doc).unwrap(), base).unwrap();
+            }
+            TestClient {
+                docs,
+                session: bae_sync::SyncSession::new(SessionConfig::new(
+                    ClientId::new(name).unwrap(),
+                )),
+                link: Limited(ours, max),
+                too_large: Vec::new(),
+            }
+        }
+
+        fn pump(&mut self) {
+            let out = self.session.pump(&mut self.docs, &mut self.link).unwrap();
+            for e in out.errors {
+                match e {
+                    SyncError::MessageTooLarge { doc: Some(doc), .. } => self.too_large.push(doc),
+                    e => panic!("{e}"),
+                }
+            }
+        }
+
+        /// `len` pseudo-random letters under `name` in `doc`.
+        fn note(&self, doc: &str, name: &str, len: usize, seed: u64) {
+            let mut x = seed | 1;
+            let text: String = (0..len)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    char::from(b'a' + (x % 26) as u8)
+                })
+                .collect();
+            let d = self.docs.get(&DocKey::parse(doc).unwrap()).unwrap();
+            d.get_map("m").insert(name, text).unwrap();
+            d.commit();
+        }
+
+        /// Whether it has everything `from` has of `doc`.
+        fn has_all_of(&self, from: &TestClient, doc: &str) -> bool {
+            let doc = DocKey::parse(doc).unwrap();
+            let want = from.docs.version(&doc).unwrap();
+            self.docs
+                .version(&doc)
+                .is_some_and(|v| v.includes_vv(&want))
+        }
+    }
+
+    fn pump_until(clients: &mut [TestClient], what: &str, done: impl Fn(&[TestClient]) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            for c in clients.iter_mut() {
+                c.pump();
+            }
+            if done(clients) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "{what}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Which side logs a layer that does not fit in one message (what
+    /// deploy/README.md and the README tell admins). The hub warns when it
+    /// holds a layer it cannot send to a client: grown in edits that each
+    /// fit, a newcomer lacks all of them. A client whose own edit does not
+    /// fit skips it and reports it itself: nothing reaches the hub, which
+    /// logs nothing.
+    #[test]
+    fn the_hub_warns_only_about_layers_it_cannot_send() {
+        const LIMIT: usize = 64 << 10;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("film");
+        fs::create_dir_all(&dir).unwrap();
+        let mut config = HubConfig::new(tmp.path());
+        config.limits.max_message = LIMIT;
+        config.limits.max_incoming = LIMIT;
+        // The relay thread, as `Project::open` starts it, logging here.
+        let log = CapturedLog::default();
+        let id = ProjectId::new("film").unwrap();
+        let (thread, events, status) = RelayThread::new(id.clone(), dir, &config);
+        let subscriber = log.subscriber();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            tracing::subscriber::with_default(subscriber, || thread.run(ready_tx));
+        });
+        ready_rx.recv().unwrap().unwrap();
+        let project = Project {
+            id,
+            events,
+            status,
+            thread: Mutex::new(Some(handle)),
+        };
+        let base = bae_model::loro::LoroDoc::new();
+        base.get_map("m").insert("base", "base").unwrap();
+        base.commit();
+        let base = base.export(bae_model::loro::ExportMode::Snapshot).unwrap();
+        let mut clients = vec![
+            TestClient::join(&project, "editor", &base, LIMIT),
+            TestClient::join(&project, "early", &base, LIMIT),
+        ];
+        pump_until(&mut clients, "hello", |c| {
+            c.iter().all(|c| c.session.remote_versions().is_some())
+        });
+
+        // The editor's own edit does not fit: it skips it and says so.
+        clients[0].note("root", "big", 100 << 10, 1);
+        pump_until(&mut clients, "the editor's report", |c| {
+            !c[0].too_large.is_empty()
+        });
+        clients[0].note("anim/a", "small", 100, 2);
+        pump_until(&mut clients, "the small edit", |c| {
+            c[1].has_all_of(&c[0], "anim/a")
+        });
+        assert_eq!(clients[0].too_large, [DocKey::parse("root").unwrap()]);
+        assert!(!clients[1].has_all_of(&clients[0], "root"));
+        assert_eq!(log.text(), "", "the hub logged a layer it never got");
+
+        // `anim/a` grows in edits that each fit; a newcomer lacks them all.
+        for i in 0..4 {
+            clients[0].note("anim/a", &format!("note{i}"), 20 << 10, 3 + i);
+            pump_until(&mut clients, "a note", |c| c[1].has_all_of(&c[0], "anim/a"));
+        }
+        clients.push(TestClient::join(&project, "late", &base, LIMIT));
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !log.text().contains("does not fit") {
+            assert!(Instant::now() < deadline, "no warning");
+            for c in &mut clients {
+                c.pump();
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        project.shutdown();
+        let text = log.text();
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(
+            text.contains("WARN")
+                && text.contains("does not fit in one message to this client")
+                && text.contains("for document anim/a"),
+            "{text}"
+        );
+        assert!(!clients[2].has_all_of(&clients[0], "anim/a"));
+        assert!(clients.iter().all(|c| c.too_large.len() <= 1));
+    }
 }
