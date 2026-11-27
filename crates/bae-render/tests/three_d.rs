@@ -1110,3 +1110,112 @@ fn transparency_shows_what_is_behind() {
     let tilted = render(&mut r, &scene(50.0, 100.0, 60.0)).px(100, 100);
     assert!(tilted[0] > half[0] + 20, "{tilted:?} vs {half:?}");
 }
+
+/// Advanced 3D reflections: a 3D layer with Reflection Intensity reflects
+/// the picture of an environment light that reaches it.
+#[test]
+fn layers_reflect_the_environment_picture() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    use bae_render::light::{EnvironmentSource, Falloff, Light, LightKind};
+    let scene = |intensity: f32| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut plane = solid_3d(
+            "plane",
+            [1.0; 4],
+            [200, 200],
+            DVec3::new(100.0, 100.0, 0.0),
+            DVec3::ZERO,
+        );
+        plane.material.reflection_intensity = intensity;
+        let mut picture = solid("picture", RED, [400, 200]);
+        picture.visible = false;
+        comp.layers = vec![plane, picture];
+        comp.lights = vec![Light {
+            kind: LightKind::Environment,
+            world: DMat4::IDENTITY,
+            point_of_interest: DVec3::ZERO,
+            color: [1.0, 1.0, 1.0],
+            intensity: 100.0,
+            cone_angle: 90.0,
+            cone_feather: 50.0,
+            falloff: Falloff::None,
+            radius: 500.0,
+            falloff_distance: 500.0,
+            casts_shadows: false,
+            shadow_darkness: 100.0,
+            shadow_diffusion: 0.0,
+            scope_below: None,
+            environment: Some(EnvironmentSource {
+                layer: 1,
+                background: None,
+            }),
+        }];
+        comp
+    };
+    let plain = render(&mut r, &scene(0.0)).px(100, 100);
+    assert!(plain[1] > 200 && plain[2] > 200, "lit white: {plain:?}");
+    let mirror = render(&mut r, &scene(100.0)).px(100, 100);
+    assert!(
+        mirror[0] > 200 && mirror[1] < 30 && mirror[2] < 30,
+        "reflects the red picture: {mirror:?}"
+    );
+    let half = render(&mut r, &scene(50.0)).px(100, 100);
+    assert!(half[1] > 60 && half[1] < 200, "half: {half:?}");
+}
+
+/// Advanced 3D Extrusion Depth: a 3D layer whose provider gives outlines is
+/// drawn as a solid that deep — turned away, its sides show beside the face.
+#[test]
+fn extruded_layers_are_solids() {
+    use bae_render::source::{OutlineFill, Outlines, SourceProvider};
+    struct Square;
+    impl SourceProvider for Square {
+        fn id(&self) -> &str {
+            "test.square"
+        }
+        fn source(
+            &self,
+            _: &bae_render::CustomContent,
+        ) -> Result<Arc<dyn bae_render::LayerSource>, bae_render::RenderError> {
+            Err(bae_render::RenderError::Other("drawn as a solid".into()))
+        }
+        fn outlines(&self, _: &bae_render::CustomContent) -> Option<Arc<Outlines>> {
+            Some(Arc::new(Outlines {
+                fills: vec![OutlineFill {
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    contours: vec![vec![[0.0, 0.0], [80.0, 0.0], [80.0, 80.0], [0.0, 80.0]]],
+                }],
+            }))
+        }
+    }
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    r.providers_mut().register(Arc::new(Square));
+    let row = |r: &mut Renderer, depth: f64| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut layer = RenderLayer::new(
+            p("/comps/main/layers/square"),
+            LayerContent::Custom(bae_render::CustomContent {
+                provider: "test.square".into(),
+                prim: p("/comps/main/layers/square"),
+                size: Some([80, 80]),
+                hash: 1,
+                data: Arc::new(()),
+            }),
+        );
+        layer.matrix_3d = Some(
+            DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+                * bae_render::camera::xyz_rotation(DVec3::new(0.0, 60.0, 0.0))
+                * DMat4::from_translation(DVec3::new(-40.0, -40.0, 0.0)),
+        );
+        layer.extrusion = depth;
+        comp.layers = vec![layer];
+        let img = render(r, &comp);
+        (0..200).filter(|&x| img.px(x, 100)[3] > 128).count()
+    };
+    let thin = row(&mut r, 1.0);
+    let deep = row(&mut r, 100.0);
+    assert!(thin > 20, "the face: {thin}");
+    assert!(deep > thin + 40, "the side too: {deep} vs {thin}");
+}

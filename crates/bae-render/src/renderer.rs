@@ -297,6 +297,10 @@ impl SourceResolver for Resolver<'_> {
     fn custom(&mut self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
         self.providers.resolve(content)
     }
+
+    fn outlines(&mut self, content: &CustomContent) -> Option<Arc<crate::source::Outlines>> {
+        self.providers.get(&content.provider)?.outlines(content)
+    }
 }
 
 impl Renderer {

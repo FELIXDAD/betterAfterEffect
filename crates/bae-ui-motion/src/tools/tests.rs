@@ -209,8 +209,15 @@ fn every_tool_is_in_one_group_and_named_in_chinese() {
 fn shortcuts_parse_and_do_not_clash() {
     let b = bindings();
     // + Esc (Switch to Last 3D View).
-    assert_eq!(b.len(), SHORTCUTS.len() + NUDGES.len() + 1 + GIZMOS.len());
-    let mut chords: Vec<String> = b.iter().map(|b| b.chord.to_string()).collect();
+    assert_eq!(
+        b.len(),
+        SHORTCUTS.len() + NUDGES.len() + 1 + GIZMOS.len() + FREE_TRANSFORM_PANELS.len()
+    );
+    // One action per chord in each scope.
+    let mut chords: Vec<(String, Option<String>)> = b
+        .iter()
+        .map(|b| (b.chord.to_string(), b.when.clone()))
+        .collect();
     chords.sort();
     chords.dedup();
     assert_eq!(chords.len(), b.len(), "two tool actions share a chord");

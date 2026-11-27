@@ -158,6 +158,23 @@ pub struct Lighting {
     /// 3D models of its group that cast shadows on it (drawn into its shadow
     /// map only: a layer with model casters always uses the map).
     pub models: Arc<[ModelCaster]>,
+    /// Advanced 3D reflections of an environment light's picture.
+    pub reflection: Option<Reflection>,
+}
+
+/// Advanced 3D Reflection Intensity, Sharpness and Rolloff of a 3D layer,
+/// reflecting the picture of an environment light that reaches it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Reflection {
+    pub environment: crate::graph::EnvironmentInput,
+    /// 0–1.
+    pub intensity: f32,
+    /// 0–1: 1 a mirror, lower blurrier.
+    pub sharpness: f32,
+    /// 0–1: reflections only at glancing angles at 1.
+    pub rolloff: f32,
+    /// A linear working space (the picture is not display-encoded).
+    pub linear: bool,
 }
 
 /// A 3D model layer casting shadows on a lit layer.
@@ -166,11 +183,15 @@ pub struct ModelCaster {
     pub model: Arc<crate::model::Model>,
     /// Model space → comp space.
     pub matrix: DMat4,
+    /// Advanced 3D Shadow Color (straight RGB).
+    pub shadow_color: [f32; 3],
 }
 
 impl PartialEq for ModelCaster {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.model, &other.model) && self.matrix == other.matrix
+        Arc::ptr_eq(&self.model, &other.model)
+            && self.matrix == other.matrix
+            && self.shadow_color == other.shadow_color
     }
 }
 
@@ -231,6 +252,9 @@ pub struct ShadowCaster {
     pub transmission: f32,
     /// What blocks the light.
     pub pixels: CasterPixels,
+    /// Advanced 3D Shadow Color (straight RGB; black by default): what the
+    /// shadow turns the light into where the caster blocks it.
+    pub shadow_color: [f32; 3],
     /// Per light of the receiver it is attached to: where its shadow can
     /// fall on the receiver (receiver layer pixels, the softest edge
     /// included; empty: nowhere). Missing: anywhere.
@@ -256,7 +280,9 @@ pub(crate) const HEADER_VEC4S: usize = 7;
 /// Vec4s per light in a lighting record.
 pub(crate) const LIGHT_VEC4S: usize = 5;
 /// Vec4s per shadow caster in a lighting record.
-pub(crate) const CASTER_VEC4S: usize = 8;
+pub(crate) const CASTER_VEC4S: usize = 9;
+/// Reflection block at the end of a record (its offset in the first row's w).
+pub(crate) const REFLECTION_VEC4S: usize = 4;
 
 impl Lighting {
     /// Vec4s of the GPU records (one per motion-blur sample when sampled).
@@ -265,7 +291,12 @@ impl Lighting {
             + LIGHT_VEC4S * self.lights.len()
             + (CASTER_VEC4S + self.lights.len()) * self.casters.len()
             + 1
-            + SHADOW_TILES * SHADOW_TILES * self.lights.len();
+            + SHADOW_TILES * SHADOW_TILES * self.lights.len()
+            + if self.reflection.is_some() {
+                REFLECTION_VEC4S
+            } else {
+                0
+            };
         one * self.samples.len().max(1)
     }
 
@@ -280,6 +311,7 @@ impl Lighting {
         pixel_scale: f64,
         atlas: &dyn Fn(NodeId) -> Option<[[f32; 4]; 2]>,
         use_map: bool,
+        reflection_levels: u32,
         out: &mut Vec<[f32; 4]>,
     ) -> u32 {
         let first = out.len() as u32;
@@ -404,6 +436,8 @@ impl Lighting {
                 px_per_world as f32,
                 kind,
             ]);
+            let [r, g, b] = c.shadow_color;
+            out.push([r, g, b, 0.0]);
             // Per light: the footprint in input texels (the shader skips the
             // caster outside it).
             let mut feet = Vec::with_capacity(self.lights.len());
@@ -435,6 +469,26 @@ impl Lighting {
             ));
         } else {
             self.pack_tiles(&to_texel, &footprints, out);
+        }
+        // Reflections (`reflection_levels`: the picture's mip levels, 0
+        // while it is missing): rows of comp → picture directions with the
+        // levels, the encode flag, intensity; the light's colour with the
+        // sharpness. Its offset goes in the first row's w, the rolloff in the
+        // second's.
+        if let Some(r) = self.reflection.filter(|_| reflection_levels > 0) {
+            let at = out.len() - first as usize;
+            out[first as usize][3] = at as f32;
+            out[first as usize + 1][3] = r.rolloff;
+            let rows = r.environment.rotation;
+            let row = |i: usize, w: f32| {
+                let v = rows.row(i);
+                [v.x as f32, v.y as f32, v.z as f32, w]
+            };
+            out.push(row(0, reflection_levels as f32));
+            out.push(row(1, f32::from(u8::from(!r.linear))));
+            out.push(row(2, r.intensity));
+            let [cr, cg, cb] = r.environment.tint;
+            out.push([cr, cg, cb, r.sharpness]);
         }
         first
     }
@@ -639,7 +693,10 @@ fn shadow(point: DVec3, l: &Light, casters: &[ShadowCaster], pixel: f64) -> DVec
             f64::from(color[1]),
             f64::from(color[2]),
         );
-        f *= DVec3::ONE - darkness * a * (DVec3::ONE - tr * col);
+        let [r, g, b] = c.shadow_color.map(f64::from);
+        // What passes: the transmitted colour, else the shadow colour.
+        let pass = tr * col + (1.0 - tr) * DVec3::new(r, g, b);
+        f *= DVec3::ONE - darkness * a * (DVec3::ONE - pass);
     }
     f
 }
@@ -698,6 +755,13 @@ pub struct Material {
     /// Advanced 3D: Transparency Rolloff in percent (default 0): less
     /// transparency where the layer is seen at a glancing angle.
     pub transparency_rolloff: f32,
+    /// Advanced 3D: Shadow Color (straight RGB, default black).
+    pub shadow_color: [f32; 3],
+    /// Advanced 3D: Reflection Intensity, Sharpness, Rolloff in percent
+    /// (defaults 0, 100, 0).
+    pub reflection_intensity: f32,
+    pub reflection_sharpness: f32,
+    pub reflection_rolloff: f32,
 }
 
 impl Default for Material {
@@ -714,6 +778,10 @@ impl Default for Material {
             metal: 100.0,
             transparency: 0.0,
             transparency_rolloff: 0.0,
+            shadow_color: [0.0; 3],
+            reflection_intensity: 0.0,
+            reflection_sharpness: 100.0,
+            reflection_rolloff: 0.0,
         }
     }
 }

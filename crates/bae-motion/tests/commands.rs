@@ -2358,3 +2358,65 @@ fn crop_comp_resizes_and_keeps_the_kept_part_in_place() {
         .is_err()
     );
 }
+
+#[test]
+fn remove_unused_consolidate_and_reduce_project() {
+    let dir = std::env::temp_dir().join(format!("bae-cleanup-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let other = dir.join("other.mov");
+    std::fs::write(&other, b"other").unwrap();
+    let mut fx = Fx::new();
+    let import = |fx: &mut Fx, path: &std::path::Path| {
+        let out = fx.run("item.import", json!({"files": [{"path": path}]}));
+        p(out["items"][0].as_str().unwrap())
+    };
+    // The same file twice, another file, and a comp using them.
+    let a = import(&mut fx, &clip);
+    let b = import(&mut fx, &clip);
+    let c = import(&mut fx, &other);
+    let main = fx.comp();
+    let la = fx.layer(&main, "footage", json!({"source": a}));
+    let lb = fx.layer(&main, "footage", json!({"source": b}));
+    let out = fx.run("item.consolidate", json!({}));
+    assert_eq!(out["removed"], 1);
+    let src = |fx: &Fx, l: &PrimPath| fx.value(l, "source");
+    assert_eq!(src(&fx, &la), Some(Value::PrimRef(a.clone())));
+    assert_eq!(src(&fx, &lb), Some(Value::PrimRef(a.clone())));
+    assert!(!fx.stage.has_prim(&b));
+    // `other.mov` is used by no layer.
+    let out = fx.run("item.remove_unused", json!({}));
+    assert_eq!(out["removed"], 1);
+    assert!(!fx.stage.has_prim(&c) && fx.stage.has_prim(&a));
+    // Reduce to another comp: the main comp and its footage go.
+    let side = fx.comp();
+    let out = fx.run("item.reduce", json!({"items": [side]}));
+    assert_eq!(out["removed"], 2);
+    assert!(fx.stage.has_prim(&side) && !fx.stage.has_prim(&main) && !fx.stage.has_prim(&a));
+    assert!(fx.try_run("item.reduce", json!({"items": []})).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn new_item_replaces_footage_and_keeps_its_layers() {
+    let dir = std::env::temp_dir().join(format!("bae-replace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run("item.import", json!({"files": [{"path": clip}]}));
+    let old = p(out["items"][0].as_str().unwrap());
+    let comp = fx.comp();
+    let layer = fx.layer(&comp, "footage", json!({"source": old}));
+    let out = fx.run(
+        "item.new",
+        json!({"kind": "solid", "name": "Backdrop", "width": 640, "height": 360,
+               "color": [1.0, 0.0, 0.0, 1.0], "replace": old}),
+    );
+    let new = p(out["item"].as_str().unwrap());
+    assert!(!fx.stage.has_prim(&old));
+    assert_eq!(new.parent(), old.parent(), "in the replaced item's folder");
+    assert_eq!(fx.value(&layer, "source"), Some(Value::PrimRef(new)));
+    let _ = std::fs::remove_dir_all(dir);
+}
