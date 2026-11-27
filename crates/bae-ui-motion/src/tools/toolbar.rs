@@ -438,7 +438,7 @@ fn add_targets(stage: &bae_model::Stage, session: &crate::session::SharedSession
 }
 
 /// The Add link and its menu (AE): one `shape.add_item` per pick.
-fn add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, o: &ToolOptions) {
+pub(crate) fn add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, o: &ToolOptions) {
     let session = common::session(cx.resources);
     let targets = add_targets(cx.stage, &session);
     let mut picked = None;

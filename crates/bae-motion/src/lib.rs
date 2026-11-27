@@ -93,6 +93,7 @@ pub mod precompose;
 pub mod project_settings;
 pub mod puppet;
 pub mod query;
+mod roto;
 pub mod shape;
 pub mod solid;
 pub mod text;
@@ -155,6 +156,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
+        r.register(roto::Freeze),
         r.register(puppet::AddPin),
         r.register(puppet::DeletePins),
         r.register(puppet::SetMesh),

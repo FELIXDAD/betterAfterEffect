@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bae-vision.workspace = true
 bae-interop-psd.workspace = true
 bae-app.workspace = true
 bae-model.workspace = true

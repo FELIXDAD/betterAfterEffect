@@ -18,7 +18,7 @@ use crate::{
 use super::{image_grid, layer_input};
 use bae_render::effect::LayerStage;
 
-mod flow;
+pub(crate) mod flow;
 mod timewarp;
 
 const LABEL: &str = "bae.effects.temporal";
