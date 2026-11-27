@@ -427,6 +427,18 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        actions::ids::TRACK_CAMERA => spec.enabled_when(|cx| {
+            let session = common::session(cx.resources);
+            let s = session.lock();
+            !s.selected_layers.is_empty()
+                && s.selected_layers.iter().all(|l| {
+                    !bae_motion::query::is_locked(cx.stage, l)
+                        && matches!(
+                            bae_motion::query::layer_kind(cx.stage, l).as_deref(),
+                            Some("footage" | "solid" | "pre_comp" | "shape" | "text")
+                        )
+                })
+        }),
         actions::ids::CACHE_WHEN_IDLE => spec.checked_when(|cx| {
             crate::prefs::current(cx.resources).bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
         }),

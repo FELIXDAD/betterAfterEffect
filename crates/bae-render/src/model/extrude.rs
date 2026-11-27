@@ -10,9 +10,10 @@ use std::sync::Arc;
 use super::{Material, Model, Part};
 use crate::source::Outlines;
 
-/// The solid of `outlines` extruded `depth` layer pixels (one part per fill,
-/// coloured by it). `None` when nothing is filled.
-pub fn extrude(outlines: &Outlines, depth: f64) -> Option<Model> {
+/// The solid of `outlines` extruded `depth` layer pixels with `bevel` on its
+/// front and back edges (one part per fill, coloured by it). `None` when
+/// nothing is filled.
+pub fn extrude(outlines: &Outlines, depth: f64, bevel: Option<Bevel>) -> Option<Model> {
     let mut parts = Vec::new();
     let mut materials = Vec::new();
     for fill in &outlines.fills {
@@ -21,7 +22,7 @@ pub fn extrude(outlines: &Outlines, depth: f64) -> Option<Model> {
             ..Part::default()
         };
         for (outer, holes) in nest(&fill.contours) {
-            add_solid(&mut part, &outer, &holes, depth);
+            add_solid(&mut part, &outer, &holes, depth, bevel);
         }
         if part.indices.is_empty() {
             continue;
@@ -286,27 +287,127 @@ pub(crate) fn triangulate(poly: &[P]) -> Vec<[usize; 3]> {
     out
 }
 
-/// The front and back faces and the sides of one outer contour with holes.
-fn add_solid(part: &mut Part, outer: &[P], holes: &[Vec<P>], depth: f64) {
-    let poly = bridge(outer, holes);
-    let tris = triangulate(&poly);
-    let z = depth as f32;
-    let push = |part: &mut Part, p: [f32; 3], n: [f32; 3], uv: [f32; 2]| {
-        part.positions.push(p);
+/// AE's bevel of extruded text and shapes (Geometry Options).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bevel {
+    pub style: BevelStyle,
+    /// Layer pixels (at most half the extrusion).
+    pub depth: f64,
+    /// Holes' bevels, a share of `depth` (Hole Bevel Depth, 0–1).
+    pub hole_scale: f64,
+    /// Bevel Direction Inward (into the outline) rather than Outward.
+    pub inward: bool,
+}
+
+/// AE's Bevel Style (None is no bevel).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BevelStyle {
+    Angular,
+    Concave,
+    Convex,
+}
+
+/// `c` moved `d` pixels into its solid side (a positive-area outer
+/// shrinks, a negative-area hole grows); mitred corners, limited at sharp
+/// ones.
+fn offset(c: &[P], d: f64) -> Vec<P> {
+    if d == 0.0 {
+        return c.to_vec();
+    }
+    let n = c.len();
+    let inward = |a: P, b: P| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len = (dx * dx + dy * dy).sqrt().max(1e-12);
+        [-dy / len, dx / len]
+    };
+    (0..n)
+        .map(|i| {
+            let (p, a, b) = (c[(i + n - 1) % n], c[i], c[(i + 1) % n]);
+            let (n1, n2) = (inward(p, a), inward(a, b));
+            let m = [n1[0] + n2[0], n1[1] + n2[1]];
+            let len = (m[0] * m[0] + m[1] * m[1]).sqrt();
+            let m = if len < 1e-9 {
+                n2
+            } else {
+                [m[0] / len, m[1] / len]
+            };
+            let k = d / (m[0] * n1[0] + m[1] * n1[1]).max(0.3);
+            [a[0] + m[0] * k, a[1] + m[1] * k]
+        })
+        .collect()
+}
+
+/// The bevel's cross-section from the face's edge to the side wall:
+/// (inset into the outline, depth behind the face), both 0–1 of the bevel
+/// depth.
+fn profile(style: BevelStyle) -> Vec<(f64, f64)> {
+    let steps = if style == BevelStyle::Angular { 1 } else { 6 };
+    (0..=steps)
+        .map(|k| {
+            let t = k as f64 / steps as f64;
+            let a = t * std::f64::consts::FRAC_PI_2;
+            match style {
+                BevelStyle::Angular => (1.0 - t, t),
+                // Rounded: a quarter circle around (1, 1), bulging toward
+                // the corner it replaces.
+                BevelStyle::Convex => (1.0 - a.sin(), 1.0 - a.cos()),
+                // Carved: a quarter circle around the corner.
+                BevelStyle::Concave => (a.cos(), a.sin()),
+            }
+        })
+        .collect()
+}
+
+/// The front and back faces, bevels and sides of one outer contour with
+/// holes.
+fn add_solid(part: &mut Part, outer: &[P], holes: &[Vec<P>], depth: f64, bevel: Option<Bevel>) {
+    let push = |part: &mut Part, p: [f64; 3], n: [f32; 3]| {
+        part.positions.push(p.map(|v| v as f32));
         part.normals.push(n);
-        part.uvs.push(uv);
+        part.uvs.push([0.0; 2]);
         part.positions.len() as u32 - 1
     };
-    // Front (z = 0, toward the camera at −z) and back (z = depth).
-    for (zz, nz, flip) in [(0.0f32, -1.0f32, false), (z, 1.0, true)] {
+    let bevel = bevel.filter(|b| b.depth > 0.0 && depth > 0.0);
+    let b = bevel.map_or(0.0, |b| b.depth.min(depth / 2.0));
+    let steps = bevel.map_or(vec![(0.0, 0.0)], |b| profile(b.style));
+    // Each contour's rings, from the face's edge to the side wall: the
+    // contour offset by the profile's inset (Outward bevels grow past the
+    // outline) and that far behind the face.
+    let contours: Vec<&[P]> = std::iter::once(outer)
+        .chain(holes.iter().map(Vec::as_slice))
+        .collect();
+    let rings: Vec<Vec<(Vec<P>, f64)>> = contours
+        .iter()
+        .enumerate()
+        .map(|(ci, c)| {
+            let scale = if ci == 0 {
+                1.0
+            } else {
+                bevel.map_or(1.0, |b| b.hole_scale.clamp(0.0, 1.0))
+            };
+            let inward = bevel.is_none_or(|b| b.inward);
+            steps
+                .iter()
+                .map(|&(inset, z)| {
+                    let d = if inward { inset } else { inset - 1.0 } * b * scale;
+                    (offset(c, d), z * b * scale)
+                })
+                .collect()
+        })
+        .collect();
+    // Faces on the innermost rings.
+    let face: Vec<P> = bridge(
+        &rings[0][0].0,
+        &rings[1..]
+            .iter()
+            .map(|r| r[0].0.clone())
+            .collect::<Vec<_>>(),
+    );
+    let tris = triangulate(&face);
+    for (zz, nz, flip) in [(0.0, -1.0f32, false), (depth, 1.0, true)] {
         let base = part.positions.len() as u32;
-        for p in &poly {
-            push(
-                part,
-                [p[0] as f32, p[1] as f32, zz],
-                [0.0, 0.0, nz],
-                [0.0; 2],
-            );
+        for p in &face {
+            push(part, [p[0], p[1], zz], [0.0, 0.0, nz]);
         }
         for t in &tris {
             let [a, b, c] = t.map(|i| base + i as u32);
@@ -320,25 +421,55 @@ fn add_solid(part: &mut Part, outer: &[P], holes: &[Vec<P>], depth: f64) {
     if depth <= 0.0 {
         return;
     }
-    // Sides, flat-shaded per edge.
-    for contour in std::iter::once(outer).chain(holes.iter().map(Vec::as_slice)) {
-        let n = contour.len();
-        for i in 0..n {
-            let (a, b) = (contour[i], contour[(i + 1) % n]);
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 1e-9 {
+    // Strips between consecutive rings (front bevel, side, back bevel),
+    // flat-shaded, facing out of the solid.
+    let quad = |part: &mut Part, a0: P, b0: P, z0: f64, a1: P, b1: P, z1: f64| {
+        let (dx, dy) = (b0[0] - a0[0], b0[1] - a0[1]);
+        let e = [b0[0] - a0[0], b0[1] - a0[1], 0.0];
+        let f = [a1[0] - a0[0], a1[1] - a0[1], z1 - z0];
+        let mut nrm = [
+            e[1] * f[2] - e[2] * f[1],
+            e[2] * f[0] - e[0] * f[2],
+            e[0] * f[1] - e[1] * f[0],
+        ];
+        if nrm[0] * dy - nrm[1] * dx < 0.0 {
+            nrm = nrm.map(|v| -v);
+        }
+        let len = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt();
+        if len < 1e-12 {
+            return;
+        }
+        let nrm = nrm.map(|v| (v / len) as f32);
+        let v = [
+            push(part, [a0[0], a0[1], z0], nrm),
+            push(part, [b0[0], b0[1], z0], nrm),
+            push(part, [b1[0], b1[1], z1], nrm),
+            push(part, [a1[0], a1[1], z1], nrm),
+        ];
+        part.indices.extend([v[0], v[2], v[1], v[0], v[3], v[2]]);
+    };
+    for contour_rings in &rings {
+        // Front bevel, the side, the back bevel (mirrored).
+        let mut chain: Vec<(&[P], f64)> = contour_rings
+            .iter()
+            .map(|(r, z)| (r.as_slice(), *z))
+            .collect();
+        chain.extend(
+            contour_rings
+                .iter()
+                .rev()
+                .map(|(r, z)| (r.as_slice(), depth - *z)),
+        );
+        for w in chain.windows(2) {
+            let ((r0, z0), (r1, z1)) = (w[0], w[1]);
+            if (z1 - z0).abs() < 1e-9 && r0 == r1 {
                 continue;
             }
-            // Outward for a positive-area outer (and an inner hole edge).
-            let nrm = [(dy / len) as f32, (-dx / len) as f32, 0.0];
-            let v = [
-                push(part, [a[0] as f32, a[1] as f32, 0.0], nrm, [0.0; 2]),
-                push(part, [b[0] as f32, b[1] as f32, 0.0], nrm, [0.0; 2]),
-                push(part, [b[0] as f32, b[1] as f32, z], nrm, [0.0; 2]),
-                push(part, [a[0] as f32, a[1] as f32, z], nrm, [0.0; 2]),
-            ];
-            part.indices.extend([v[0], v[2], v[1], v[0], v[3], v[2]]);
+            let n = r0.len();
+            for i in 0..n {
+                let j = (i + 1) % n;
+                quad(part, r0[i], r0[j], z0, r1[i], r1[j], z1);
+            }
         }
     }
 }
@@ -400,12 +531,53 @@ mod tests {
                 contours: vec![vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]],
             }],
         };
-        let model = extrude(&outlines, 5.0).unwrap();
+        let model = extrude(&outlines, 5.0, None).unwrap();
         let part = &model.parts[0];
         // 2 faces of 2 triangles and 4 sides of 2.
         assert_eq!(part.indices.len() / 3, 12);
         let zs: Vec<f32> = part.positions.iter().map(|p| p[2]).collect();
         assert!(zs.contains(&0.0) && zs.contains(&5.0));
         assert_eq!(model.materials[0].base_color[0], 1.0);
+    }
+
+    #[test]
+    fn bevels_cut_the_edges() {
+        let outlines = Outlines {
+            fills: vec![OutlineFill {
+                color: [1.0; 4],
+                contours: vec![vec![[0.0, 0.0], [40.0, 0.0], [40.0, 40.0], [0.0, 40.0]]],
+            }],
+        };
+        let bevel = |style, inward| Bevel {
+            style,
+            depth: 4.0,
+            hole_scale: 1.0,
+            inward,
+        };
+        let face_xs = |m: &Model| -> (f32, f32) {
+            m.parts[0]
+                .positions
+                .iter()
+                .zip(&m.parts[0].normals)
+                .filter(|(p, n)| p[2] == 0.0 && n[2] == -1.0)
+                .fold((f32::MAX, f32::MIN), |(lo, hi), (p, _)| {
+                    (lo.min(p[0]), hi.max(p[0]))
+                })
+        };
+        // Inward: the face shrinks by the bevel depth; the side starts behind it.
+        let angular = extrude(&outlines, 20.0, Some(bevel(BevelStyle::Angular, true))).unwrap();
+        assert_eq!(face_xs(&angular), (4.0, 36.0));
+        let plain = extrude(&outlines, 20.0, None).unwrap();
+        // Faces 2 + 2, sides 4 × 2; an angular bevel adds 2 × 4 quads.
+        assert_eq!(plain.parts[0].indices.len() / 3, 12);
+        assert_eq!(angular.parts[0].indices.len() / 3, 12 + 16);
+        // Outward: the face keeps the outline, the bevel grows past it.
+        let out = extrude(&outlines, 20.0, Some(bevel(BevelStyle::Convex, false))).unwrap();
+        assert_eq!(face_xs(&out), (0.0, 40.0));
+        let xs = out.parts[0].positions.iter().map(|p| p[0]);
+        assert!(xs.fold(f32::MAX, f32::min) < -3.9);
+        // Curved bevels take several steps.
+        let concave = extrude(&outlines, 20.0, Some(bevel(BevelStyle::Concave, true))).unwrap();
+        assert!(concave.parts[0].indices.len() > angular.parts[0].indices.len());
     }
 }

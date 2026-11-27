@@ -267,9 +267,13 @@ pub struct NewItemParams {
     #[serde(default)]
     pub duration: Option<bae_model::Time>,
     /// The folder to put it in (default: Solids for a solid, the items folder
-    /// for a placeholder).
+    /// for a placeholder; with `replace`, that item's folder).
     #[serde(default)]
     pub parent: Option<PrimPath>,
+    /// File ▸ Replace Footage ▸ Solid… / Placeholder…: this item's layers use
+    /// the new item, and this item goes.
+    #[serde(default)]
+    pub replace: Option<PrimPath>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -296,7 +300,13 @@ impl Command for NewItem {
         if name.is_empty() {
             return Err(fail("the item needs a name"));
         }
-        let parent = match p.parent {
+        if let Some(old) = &p.replace {
+            tx.stage().require_prim(old)?;
+        }
+        let parent = match p
+            .parent
+            .or_else(|| p.replace.as_ref().and_then(PrimPath::parent))
+        {
             Some(parent) => {
                 tx.stage().require_prim(&parent)?;
                 parent
@@ -351,6 +361,28 @@ impl Command for NewItem {
                 }
                 set(tx, &item, "duration", Value::Time(duration))?;
             }
+        }
+        if let Some(old) = p.replace {
+            // Every layer showing the old item shows the new one (AE keeps
+            // the layers, locked ones too), then the old item goes.
+            let users: Vec<PrimPath> = query::comps(tx.stage())
+                .into_iter()
+                .flat_map(|c| query::comp_layers(tx.stage(), &c))
+                .filter(|l| {
+                    tx.stage()
+                        .prim(l)
+                        .and_then(|v| query::static_value(&v, "source"))
+                        == Some(Value::PrimRef(old.clone()))
+                })
+                .collect();
+            tx.allow_locked(|tx| -> Result<(), CommandError> {
+                for layer in &users {
+                    set(tx, layer, "source", Value::PrimRef(item.clone()))?;
+                }
+                Ok(())
+            })?;
+            crate::layer::DeleteItems
+                .run(tx, crate::layer::DeleteItemsParams { paths: vec![old] })?;
         }
         Ok(NewItemOutput { item })
     }
