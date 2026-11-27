@@ -2752,22 +2752,32 @@ mod tests {
     /// Temporary files of ours are removed when we open the folder writable,
     /// also with the cleanup off (the default): probe files whose delete
     /// failed (`probe_writable`, the clock probe) and what a crash left in
-    /// document folders (`remove_leftovers`); others' files are left alone.
-    /// `probe_lock` tells a lock file we can open, or none, from one we
-    /// cannot.
+    /// document folders and `presence/` (`remove_leftovers`); others' files
+    /// are left alone. `probe_lock` tells a lock file we can open, or none,
+    /// from one we cannot.
     #[test]
     fn our_leftover_probe_files_are_removed_on_open() {
         let tmp = tempfile::tempdir().unwrap();
         let updates = tmp.path().join(UPDATES);
         fs::create_dir_all(updates.join("root")).unwrap();
+        fs::create_dir_all(tmp.path().join(PRESENCE)).unwrap();
         let a = ClientId::new("a").unwrap();
         // What `probe_writable` leaves when it cannot delete its file.
         let probe = write_probe_path(tmp.path(), &a);
         fs::write(&probe, b"").unwrap();
-        let ours = ["a.tmp-1", "root/a.tmp-4"];
-        let others = ["b.tmp-3", "ab.tmp-5", "root/b.tmp-6"];
+        let ours = [
+            "updates/a.tmp-1",
+            "updates/root/a.tmp-4",
+            "presence/a.tmp-7",
+        ];
+        let others = [
+            "updates/b.tmp-3",
+            "updates/ab.tmp-5",
+            "updates/root/b.tmp-6",
+            "presence/b.tmp-8",
+        ];
         for name in ours.iter().chain(&others) {
-            fs::write(updates.join(name), b"").unwrap();
+            fs::write(tmp.path().join(name), b"").unwrap();
         }
         assert_eq!(DirConfig::default().inactive_after, None);
         assert!(
@@ -2777,12 +2787,12 @@ mod tests {
         let t = transport(tmp.path(), "a", DirConfig::default());
         assert!(!probe.exists(), "{}", probe.display());
         for gone in ours {
-            assert!(!updates.join(gone).exists(), "{gone}");
+            assert!(!tmp.path().join(gone).exists(), "{gone}");
         }
-        for kept in others.iter().chain(&["a.lock"]) {
-            assert!(updates.join(kept).exists(), "{kept}");
+        for kept in others.iter().chain(&["updates/a.lock"]) {
+            assert!(tmp.path().join(kept).exists(), "{kept}");
         }
-        assert_eq!(t.stats().stale_files_removed, 3);
+        assert_eq!(t.stats().stale_files_removed, 4);
         assert!(t.last_error().is_none(), "{:?}", t.last_error());
         // A probe of ours that can write leaves nothing behind.
         assert!(DirTransport::probe_writable(tmp.path(), &a).unwrap());

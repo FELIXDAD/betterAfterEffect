@@ -1875,7 +1875,10 @@ mod tests {
     /// Windows/SMB: our lock file is "delete pending" for longer than the
     /// lock wait, after another client's cleanup deleted it): a file of our
     /// own can be created in `updates/`, so it is not taken for a read-only
-    /// folder; the attempt is retried and the link is writable.
+    /// folder; the attempt is retried and the link is writable. The probe
+    /// leaves nothing behind: checked while the denied attempt is offline,
+    /// since the retry that holds the lock removes our temporary files
+    /// anyway (`DirTransport::remove_leftovers`).
     #[test]
     fn a_denied_lock_in_a_writable_folder_is_retried_not_read_only() {
         let (_tmp, dir, config) = folder_fixture("lock");
@@ -1892,20 +1895,24 @@ mod tests {
         wait_for("online", || {
             c.pump(&mut docs);
             assert_ne!(c.access(), Access::Read, "{:?}", c.status());
-            offline |= matches!(c.status().state, ConnectionState::Offline { .. });
+            if matches!(c.status().state, ConnectionState::Offline { .. }) && !offline {
+                offline = true;
+                // The denied attempt probed before it reported; the retry
+                // only starts on a later `pump`, once the backoff ran out.
+                assert_eq!(c.connect_attempts(), 1);
+                let left: Vec<_> = std::fs::read_dir(dir.join("updates"))
+                    .unwrap()
+                    .flatten()
+                    .map(|e| e.file_name())
+                    .filter(|n| n.to_string_lossy().contains(".tmp-"))
+                    .collect();
+                assert!(left.is_empty(), "the probe left {left:?}");
+            }
             c.is_online()
         });
         assert!(offline, "the denied attempt went offline");
         assert_eq!(c.access(), Access::Write);
         assert_eq!(c.connect_attempts(), 2);
-        // The probe left nothing behind.
-        let left: Vec<_> = std::fs::read_dir(dir.join("updates"))
-            .unwrap()
-            .flatten()
-            .map(|e| e.file_name())
-            .filter(|n| n.to_string_lossy().contains(".tmp-"))
-            .collect();
-        assert!(left.is_empty(), "{left:?}");
     }
 
     /// A folder linked read-only checks every `failed_retry` whether it can
