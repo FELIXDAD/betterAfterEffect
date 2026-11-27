@@ -328,6 +328,9 @@ pub struct Session {
     /// The mask or shape path whose vertices the Composition viewer has
     /// selected (Ctrl+T then runs Free Transform Points, AE).
     pub(crate) vertex_path: Option<PrimPath>,
+    /// Composition viewers opened locked to a comp (View > Split with New
+    /// Locked Viewer), by panel id, until they take it.
+    pub(crate) viewer_pins: HashMap<String, PrimPath>,
     /// Their indices.
     pub(crate) vertex_indices: Vec<usize>,
     /// Vertices of `vertex_path` the viewer selects next (after Set First
