@@ -28,12 +28,22 @@ pub(super) fn ruler_step(axis: &TimeAxis, info: &CompInfo, min_px: f32) -> i64 {
         .unwrap_or(600 * fps)
 }
 
-pub(super) fn ruler_label(frame: i64, info: &CompInfo) -> String {
+/// AE 26's ruler labels: seconds and frames ("00:15f", "01:00f") while the
+/// step is under a second, whole seconds ("05s") above; minutes in front past
+/// one ("1:05s").
+pub(super) fn ruler_label(frame: i64, info: &CompInfo, step: i64) -> String {
     let fps = info.frame_rate.as_f64().round().max(1.0) as i64;
-    if frame % fps == 0 {
-        format!("{}s", frame / fps)
+    let (secs, f) = (frame.div_euclid(fps), frame.rem_euclid(fps));
+    let (m, s) = (secs / 60, secs % 60);
+    let sec = if m > 0 {
+        format!("{m}:{s:02}")
     } else {
-        format!("{}f", frame % fps)
+        format!("{s:02}")
+    };
+    if step < fps {
+        format!("{sec}:{f:02}f")
+    } else {
+        format!("{sec}s")
     }
 }
 
@@ -423,18 +433,52 @@ impl TimelinePanel {
 
         ui.set_clip_rect(clip);
 
-        // Ruler and work area (right part of both header rows).
+        // AE's time graph header, top to bottom: the time navigator, the ruler
+        // (labels over ticks, CTI handle), and in the column-title row the work
+        // area bar with the cache line under it.
         let ruler = Rect::from_min_max(
             pos2(axis.left, head.top()),
             pos2(head.right(), colrow.bottom()),
         );
         let p = ui.painter().with_clip_rect(ruler);
-        p.rect_filled(ruler, 0.0, color::TIMELINE_BG);
+        p.rect_filled(ruler, 0.0, color::PANEL);
+        // Time navigator: the visible part of the comp.
+        let nav_y = head.top() + 8.0;
+        let total = info.duration.0.max(1) as f32;
+        let span = Rect::from_min_max(
+            pos2(axis.left + PAD, nav_y),
+            pos2(axis.left + axis.width - PAD, nav_y + 9.0),
+        );
+        let nav = Rect::from_min_max(
+            pos2(
+                span.left() + span.width() * (axis.start.0 as f32 / total).clamp(0.0, 1.0),
+                span.top(),
+            ),
+            pos2(
+                span.left()
+                    + span.width() * ((axis.start + axis.span).0 as f32 / total).clamp(0.0, 1.0),
+                span.bottom(),
+            ),
+        );
+        p.rect_filled(nav, 0.0, color::NAVIGATOR);
+        p.rect_stroke(
+            nav,
+            0.0,
+            Stroke::new(1.0, color::APP_BG),
+            egui::StrokeKind::Outside,
+        );
+        for x in [nav.left(), nav.right()] {
+            p.rect_filled(
+                Rect::from_center_size(pos2(x, nav.center().y), vec2(4.0, 11.0)),
+                1.0,
+                color::ACCENT,
+            );
+        }
         // Work area bar.
-        let wa_top = head.top() + 14.0;
+        let wa_top = colrow.top() + 1.0;
         let wa = Rect::from_min_max(
             pos2(axis.x(info.work_area.start), wa_top),
-            pos2(axis.x(info.work_area.end), wa_top + 8.0),
+            pos2(axis.x(info.work_area.end), wa_top + 15.0),
         );
         let (mut ws, mut we) = (info.work_area.start, info.work_area.end);
         if let Some(Drag::WorkArea { origin, start, end }) = &self.drag
@@ -449,13 +493,30 @@ impl TimelinePanel {
                 we = snap(we + d);
             }
         }
+        p.rect_filled(
+            Rect::from_min_max(
+                pos2(ruler.left(), wa.top()),
+                pos2(ruler.right(), wa.bottom()),
+            ),
+            0.0,
+            color::TIMELINE_BG,
+        );
         let wa_draw = Rect::from_min_max(pos2(axis.x(ws), wa.top()), pos2(axis.x(we), wa.bottom()));
-        p.rect_filled(wa_draw, 2.0, color::WORK_AREA);
-        // Ticks.
-        let step = ruler_step(axis, info, 60.0);
+        p.rect_filled(wa_draw, 0.0, color::WORK_AREA);
+        p.hline(
+            wa_draw.x_range(),
+            wa_draw.top() + 0.5,
+            Stroke::new(1.0, bae_ui::theme::brighten(color::WORK_AREA, 16)),
+        );
+        for x in [wa_draw.left() + 1.5, wa_draw.right() - 1.5] {
+            p.vline(x, wa_draw.y_range(), Stroke::new(3.0, color::ACCENT));
+        }
+        // Ticks: labels centred over them (AE).
+        // AE puts labels about 50 pt apart.
+        let step = ruler_step(axis, info, 48.0);
         let first = info.frame_rate.time_to_frame(axis.start) / step * step;
         let mut f = first;
-        let tick_y = colrow.bottom();
+        let tick_y = head.bottom();
         loop {
             let t = info.frame_rate.frame_to_time(f);
             if t > axis.start + axis.span {
@@ -464,16 +525,16 @@ impl TimelinePanel {
             let x = axis.x(t);
             p.vline(
                 x,
-                (tick_y - 8.0)..=tick_y,
+                (tick_y - 6.0)..=tick_y,
                 Stroke::new(1.0, color::TEXT_DIM),
             );
             p.text(
-                pos2(x + 3.0, tick_y - 12.0),
-                Align2::LEFT_CENTER,
+                pos2(x, tick_y - 12.0),
+                Align2::CENTER_CENTER,
                 if frames_first {
                     (start_frame + f).to_string()
                 } else {
-                    ruler_label(start_frame + f, info)
+                    ruler_label(start_frame + f, info, step)
                 },
                 theme::small(),
                 color::TEXT,
@@ -484,7 +545,7 @@ impl TimelinePanel {
                 if minor * k < step {
                     p.vline(
                         xm,
-                        (tick_y - 4.0)..=tick_y,
+                        (tick_y - 3.0)..=tick_y,
                         Stroke::new(1.0, color::TEXT_DISABLED),
                     );
                 }
@@ -499,27 +560,28 @@ impl TimelinePanel {
             {
                 p.hline(
                     axis.x(span.start)..=axis.x(span.end),
-                    wa_top + 8.0 + 2.0,
-                    Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
+                    wa.bottom() + 2.5,
+                    Stroke::new(3.0, egui::Color32::from_rgb(0x10, 0xc0, 0x20)),
                 );
             }
         }
-        // CTI handle.
+        // CTI handle on the ruler; its line runs down through the work area.
         let x = axis.x(now);
+        let handle_bottom = head.bottom();
         p.add(Shape::convex_polygon(
             vec![
-                pos2(x - 5.0, ruler.bottom() - 14.0),
-                pos2(x + 5.0, ruler.bottom() - 14.0),
-                pos2(x + 5.0, ruler.bottom() - 6.0),
-                pos2(x, ruler.bottom()),
-                pos2(x - 5.0, ruler.bottom() - 6.0),
+                pos2(x - 5.0, handle_bottom - 14.0),
+                pos2(x + 5.0, handle_bottom - 14.0),
+                pos2(x + 5.0, handle_bottom - 6.0),
+                pos2(x, handle_bottom),
+                pos2(x - 5.0, handle_bottom - 6.0),
             ],
             color::ACCENT,
             Stroke::NONE,
         ));
         p.vline(
             x,
-            ruler.bottom() - 6.0..=ruler.bottom(),
+            handle_bottom - 6.0..=ruler.bottom(),
             Stroke::new(1.0, color::ACCENT),
         );
 
@@ -534,7 +596,10 @@ impl TimelinePanel {
             .labeled(egui::WidgetType::Slider, tr("Work Area"));
         let ruler_resp = ui
             .interact(
-                Rect::from_min_max(pos2(ruler.left(), wa.bottom() + 1.0), ruler.max),
+                Rect::from_min_max(
+                    pos2(ruler.left(), nav.bottom() + 1.0),
+                    pos2(ruler.right(), head.bottom()),
+                ),
                 ui.id().with("ruler"),
                 Sense::click_and_drag(),
             )
@@ -596,11 +661,11 @@ impl TimelinePanel {
             session.lock().stop();
             self.drag = None;
         }
-        // Comp markers between the work area bar and the ruler numbers (on top of the
-        // ruler, so they take the clicks).
+        // Comp markers on the work area row, the marker bin at its right end (AE);
+        // drawn last, so they take the clicks.
         let strip = Rect::from_min_max(
-            pos2(ruler.left(), wa.bottom() + 1.0),
-            pos2(ruler.right(), head.bottom()),
+            pos2(ruler.left(), wa.top()),
+            pos2(ruler.right(), wa.bottom()),
         );
         self.comp_markers_ui(ui, cx, session, info, axis, strip);
     }

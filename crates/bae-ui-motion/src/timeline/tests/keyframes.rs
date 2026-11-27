@@ -548,7 +548,8 @@ fn sequence_layers_dialog_and_cti_snap() {
         .find(|(s, _)| s == bae_ui::tr("Source Name"))
         .map(|(_, r)| r.center().y)
         .expect("column header");
-    let p = pos2(x_of(&tl, 1.0) + 5.0, header_y);
+    // On the ruler, above the column titles (their row holds the work area, AE).
+    let p = pos2(x_of(&tl, 1.0) + 5.0, header_y - 18.0);
     h.click(&mut tl, p, Modifiers::SHIFT);
     assert_eq!(h.session().lock().time(&comp), Time(SEC), "snapped");
     h.click(&mut tl, p, Modifiers::NONE);

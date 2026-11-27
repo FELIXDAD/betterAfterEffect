@@ -74,13 +74,15 @@ impl TimelinePanel {
                 _ => color::PANEL,
             };
             p.rect_filled(outline, 0.0, bg);
+            // AE: the time graph is #262626 for layers and properties; a
+            // selected layer's row is highlighted across it.
             p.rect_filled(
                 graph,
                 0.0,
-                if matches!(row.kind, RowKind::Layer) {
-                    color::TIMELINE_BG
+                if matches!(row.kind, RowKind::Layer) && layer_selected {
+                    color::ROW_SELECTED
                 } else {
-                    color::PANEL
+                    color::TIMELINE_BG
                 },
             );
             p.hline(
