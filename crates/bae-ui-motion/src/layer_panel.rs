@@ -115,6 +115,12 @@ pub(crate) fn open_clicked(
     tool: crate::tools::Tool,
     eval: &mut EvalCache,
 ) {
+    // AE: a camera or light has no Layer panel; double-clicking it opens its
+    // Camera Settings or Light Settings.
+    if camera_or_light(cx.stage, layer) {
+        crate::dialogs::layer_settings(cx, session, layer);
+        return;
+    }
     let prefs = crate::prefs::current(cx.resources);
     let paint =
         tool.is_layer_paint() && prefs.bool("composition.double_click_paint_roto_opens_layer");
@@ -178,6 +184,13 @@ pub(crate) fn open_clicked(
     }
     session.lock().layer_panel = Some(layer.clone());
     cx.open_panel("layer");
+}
+
+fn camera_or_light(stage: &bae_model::Stage, layer: &PrimPath) -> bool {
+    matches!(
+        query::layer_kind(stage, layer).as_deref(),
+        Some("camera" | "light")
+    )
 }
 
 /// The layer the panel shows: the one opened last, or the selected one.

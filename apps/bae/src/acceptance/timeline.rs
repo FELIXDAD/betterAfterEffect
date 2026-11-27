@@ -259,10 +259,12 @@ fn space_with_nothing_focused_plays_and_stops() {
 #[test]
 fn space_on_a_focused_button_presses_it_and_does_not_play() {
     let mut h = comp_with_solid();
-    // The Render Queue's "Remove" button gets keyboard focus (Tab), then Space.
+    // The Render Queue's + (Add Output Module) gets keyboard focus, then Space.
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
-    queue_control(&h, 1, "Remove").expect("Remove").focus();
+    queue_control(&h, 1, "Add Output Module")
+        .expect("Add Output Module")
+        .focus();
     settle(&mut h);
     press(&mut h, Modifiers::NONE, Key::Space);
     settle(&mut h);
@@ -270,8 +272,9 @@ fn space_on_a_focused_button_presses_it_and_does_not_play() {
         !h.state().is_playing(),
         "Space on a focused button started playback"
     );
-    assert!(
-        h.state().render_queue().lock().items().is_empty(),
+    assert_eq!(
+        h.state().render_queue().lock().items()[0].outputs.len(),
+        2,
         "Space did not press the focused button"
     );
 }
@@ -492,11 +495,14 @@ fn enter_on_a_focused_button_does_not_start_a_rename() {
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     h.state().session().lock().selected_layers = h.state().layers();
-    queue_control(&h, 1, "Remove").expect("Remove").focus();
+    queue_control(&h, 1, "Add Output Module")
+        .expect("Add Output Module")
+        .focus();
     settle(&mut h);
     key(&mut h, Modifiers::NONE, Key::Enter);
-    assert!(
-        h.state().render_queue().lock().items().is_empty(),
+    assert_eq!(
+        h.state().render_queue().lock().items()[0].outputs.len(),
+        2,
         "Enter did not press the button"
     );
     to_front(&mut h, "timeline");

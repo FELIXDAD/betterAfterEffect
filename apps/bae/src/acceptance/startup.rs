@@ -693,10 +693,8 @@ fn inputs_are_named_apart_from_their_values() {
     assert!(unnamed.is_empty(), "inputs without a name: {unnamed:#?}");
     let all = labels(&h);
     for name in [
-        "Render Item 1 “Comp 1” · Format",
+        "Render Item 1 “Comp 1” · Log",
         "Render Item 1 “Comp 1” · Output To",
-        "Render Item 1 “Comp 1” · Frames · Start",
-        "Render Item 1 “Comp 1” · Frames · End",
         "Source Text",
     ] {
         assert!(
@@ -718,9 +716,9 @@ fn render_queue_items_are_told_apart() {
     let all = labels(&h);
     for n in [1, 2] {
         for what in [
-            "Remove",
+            "Render Settings",
+            "Output Module",
             "Output To",
-            "Format",
             "Log",
             "File Name and Location Templates",
         ] {
@@ -887,16 +885,18 @@ fn render_queue_items_of_one_comp_stay_distinct_after_removing_one() {
     assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
     for n in 1..=3 {
         assert!(
-            queue_control(&h, n, "Remove").is_some(),
-            "no Render Item {n} · Remove"
+            queue_control(&h, n, "Log").is_some(),
+            "no Render Item {n} · Log"
         );
     }
-    queue_control(&h, 1, "Remove").unwrap().click();
-    settle(&mut h);
-    assert_eq!(h.state().render_queue().lock().items().len(), 2);
-    assert!(queue_control(&h, 1, "Remove").is_some() && queue_control(&h, 2, "Remove").is_some());
     assert!(
-        queue_control(&h, 3, "Remove").is_none(),
+        queue_menu(&mut h, 1, "Remove"),
+        "no Remove in the item menu"
+    );
+    assert_eq!(h.state().render_queue().lock().items().len(), 2);
+    assert!(queue_control(&h, 1, "Log").is_some() && queue_control(&h, 2, "Log").is_some());
+    assert!(
+        queue_control(&h, 3, "Log").is_none(),
         "numbers not renumbered after removing item 1"
     );
     assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
