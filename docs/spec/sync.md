@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F。分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；冲突提示与离线合并汇总（6.4）。分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -65,6 +65,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 在收到对方第一个 `Hello` 之前不发任何数据（不知道对方有什么，全量发送太浪费）。
 
 **丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发。断线重连时调用 `SyncSession::reset()`。
+
+**补齐**：`SyncSession::is_caught_up(docs)`：对方在上次 `reset` 之后说过 `Hello`，并且它列出的、`docs` 里有的每个文档，本地版本都包含对方已知拥有的版本（`remote_versions()`：它的 `Hello`，加上之后双方互发的数据）。本地没有的文档（`unknown_docs`）不等。重连之后它第一次为真，就是调用 `ConflictTracker::caught_up` 的时机（6.4）。
 
 ### 2.5 别人新建的工程层
 
@@ -282,8 +284,59 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 重放的旧心跳不能改写或复活别人；坏 JSON 被忽略。
 - 经共享目录：心跳文件、TTL 离线、主动离开、一小时前的残留文件被忽略（把修改时间改成现在后又能看到，证明是按时间过滤的）。
 
+### 6.4 冲突提示与离线合并汇总（`ConflictTracker`，`conflicts.rs`）
+
+只观察、只报告：不改工程数据，不进任何撤销栈。在持有 Stage 的线程上调用，代价有上限（见下）。
+
+**元素**：CRDT 各自按"后写者胜"合并的最小单位：属性的静态值、表达式、某个时间上的一个关键帧（工程层存储里各是一个 map 键，见 bae-model `Sublayer` 的存储布局）。两个人改同一属性的不同关键帧，或者一个改值、一个改表达式，不会互相覆盖，不报告。
+
+**在线：并发修改提示**（`ConcurrentEdit`）
+
+- 工程打开时创建 `ConflictTracker::new(&stage, config)`（记下每个工程层本地历史的末尾），Stage 被替换时重建。
+- 应用把每个本地事件（`local` / `undo` / `redo`）交给 `observe(stage, event)`；每次 `SyncSession::pump` 之后调用 `check(stage)`（远端事件也可以交给 `observe`，效果相同）。
+- 本地事件：只读这次提交自己的 Loro 操作，按 `(工程层, TreeID, 属性, 元素)` 记下我们设的值、本地时钟时间、我们的操作 ID 和当时的版本向量。
+  - 自动回滚失败事务的提交（标签 `rollback: …`）不算。
+  - 最多记 `max_recent` 个（默认 1024），超过窗口 `window`（默认 10 秒）的丢掉。
+  - 一次超过 `max_ops_per_edit`（默认 2048）个操作的提交（粘贴、导入）不逐个记：它们主要是新建的 Prim，别人不可能改过。
+- `check`：
+  - 对有记录的工程层，看版本向量里有没有新到的别人的操作；没有就结束（每层一次版本向量比较）。
+  - 有的话，用 Loro 的 `get_changed_containers_in`（不解码）找出新操作写了哪些"记着的 map"，把范围对半拆，只解码这些操作附近的（每段最多 32 个）。同一作者、同一标签的连续提交会被 Loro 合成一个 change，所以按整个 change 过滤不够。
+  - 整个工程不扫描：`tests/conflicts.rs` 里，1000 个图层各改一次的导入，只检查了 1 个元素、解码了不到 64 个操作；没有自己修改的客户端什么都不解码。
+- 判断（只看导入时距我们修改不超过窗口的；导入里有别人对这个元素的新操作才判断）：
+  - **被覆盖**（`Overridden`）：现在持有这个键的操作（Loro `get_last_editor`）不是我们的，收敛值和我们设的不同。`winner` 是胜出操作提交信息里的作者（取不到为 `None`，界面显示"未知"）。`concurrent = true`：对方修改时还没有我们的操作（真正的同时修改，按 Loro 的顺序决定）；`false`：对方看到我们的值之后又改了。报告后这条记录不再保留。
+  - **我们胜出**（`Kept`）：我们的操作仍然持有这个键，但这次带来了别人对同一元素的修改（值不同）。对方那边收到的是 `Overridden`，这边是较轻的提示（"Alice 也改了这个"）：`theirs` 是输掉的值，`others` 是他们，`winner` 是我们。看到了我们的操作再改的一定胜出，所以输掉的都是同时修改。这种导入不改变任何可见状态，Stage 不发事件，所以要在每次 pump 之后调用 `check`。
+  - **Prim 被删**（`PrimRemoved`）：我们改过的 Prim 被别人删了（或随祖先一起），`winner` 是删除者；Prim 上每个记着的元素各一条。
+  - 对方设成和我们相同的值：不报告。
+- 字段：`sublayer`、`node`（TreeID）、`path`（本客户端镜像里的当前路径，只用于显示；被删的 Prim 用我们修改时的路径）、`attr`、`element`、`outcome`、`ours`（`None`：我们删掉了它，比如删了关键帧）、`result`（收敛值）、`theirs`、`winner`、`others`、`concurrent`、`edited_at`（我们修改的时间）、`at`（导入的时间）。
+- 不在线提示的：结构性修改（新建、删除、移动、改名、类型、引用）的冲突。离线汇总里报告新建和删除。
+
+**离线：合并汇总**（`MergeSummary`）
+
+- 连接断开时（传输出错、Hub 不可达、共享目录不可达，或者用户主动离线）调用 `connection_lost(stage)`：记下当前的 `ProjectVersion`。再次调用保留第一次的。
+- 重连：`SyncSession::reset()`，然后照常 `pump`。`is_caught_up(docs)`（2.4）第一次为真时调用 `caught_up(stage)`，得到汇总。
+  - Hub：它的 `Hello` 列出它拥有的全部内容。
+  - 共享目录：目录的 `Hello` 只列出本客户端的传输层已经读到的，所以要在传输层重新轮询过目录的那次 pump 之后检查（`poll_interval` 到期，或者先调用 `DirTransport::poll_soon`）。调用早了只会少报之后才读到的修改（那些按在线提示处理）。
+- 等待重连期间，断开之后做的修改不出在线提示（都在汇总里）；断开之前做的照常提示。`caught_up` 之后，已经汇总过的远端操作不会再提示一次。
+- 也可以直接调用 `merge_summary(stage, since)`。只读版本向量和历史，与传输方式无关：
+  - "我们的"：本 Stage 自己的 Loro peer 在 `since` 之后的操作（本地编辑、撤销、重做，这个客户端上的任何作者，所以 Agent 的修改也算）；其余都是别人的。工程重新打开后 peer 会变，所以 `since` 必须来自同一个 Stage。
+  - `kept`：我们改过的元素（断开前就存在的 Prim 上），值保持不变；`others` 是同期也改过它（值不同）的人。
+  - `overridden`：被别人的值覆盖（`winner`），或者 Prim 被别人删掉（`prim_removed`，`path` 是它在我们版本里的路径）。
+  - `prims`：我们新建（只列最上层）或删除的 Prim 的结果：`Added`；`AddedButRemoved`（父节点被别人删了）；`Removed`；`RemovedButChanged`（别人同期改过它或它下面的东西，那些修改随之看不到了）；`RemovalUndone`（别人同时的移动按 Loro 的顺序胜出，它回来了）。`by` 是相关的其他作者。我们新建的 Prim 上的属性修改不另外列。
+  - `merged`：别人改了什么，按 Prim：`history::diff`（5.3）从"合并前我们拥有的版本"（`since` 加上我们自己的操作）到现在，所以只有别人的修改，包括他们胜过我们的地方。
+  - `conflicts()`：没有按我们的意思保留下来的个数（`overridden` 加上冲突类的 `prims`）。
+  - 代价和一次 `history::diff` 相当（要用到那个版本的只读快照），每次重连调用一次，不要每帧调用。
+- **已删除的 Prim 上的操作**：Loro 给不出已删除节点里的容器的路径（`get_path_to_container` 返回 `None`），所以这里按容器 ID 的结构解析：可合并 map 的 ID 里有父 map 和键（`ContainerID::parse_mergeable`），一层层往上到树节点的元数据 map（`TreeID::associated_meta_container`）。`history::diff` 的作者统计（5.3）保持原来的做法，输出不变；因此两个版本之间改过、现在已经删掉的 Prim，差异里只有树操作的作者（要不要也改成按结构解析，待定）。
+
+**验证**（`crates/bae-sync/tests/conflicts.rs`，全部用显式时间，不依赖机器快慢；谁胜出由 Loro 的顺序决定，测试让一方先多做几次无关修改，Lamport 更大，结果确定）：
+
+- 经 Hub，两人在窗口内改同一个不透明度：输的一方收到 `Overridden`（我们的值、收敛值、胜出者、同时修改），赢的一方收到 `Kept`（输掉的值和人）；对方看到我们的值之后再改，`concurrent` 为假。
+- 超过窗口不报告；窗口可配置。同一属性不同时间的关键帧不报告，同一时间的报告；值和表达式互不影响，两个表达式报告。撤销、重做算我们的修改（报告撤销设回的值）。只有对方改、或者对方改的是我们没碰的属性：不报告，不解码任何操作。我们改着的 Prim 被删：每个元素一条 `PrimRemoved`。
+- 1000 个图层的大导入只检查我们改过的那个元素。
+- 离线（Hub）：A 断开后改、B 在线改，A 重连补齐后：保留的（含 B 同期改过但 A 胜出的）、被覆盖的（B 胜出、Prim 被 B 删掉）、A 新建的、建在被 B 删掉的文件夹里的、A 删掉而 B 改过的、B 的移动让 A 的删除失效的；`merged` 只有 B 的修改；A 不出在线提示，B 收到在线提示；两边都没有新东西时汇总为空。
+- 离线（共享目录，`DirTransport`）：同样的保留、覆盖和 `merged`。
+
 ## 7. 给其他工作流
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
 - **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。
-- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。
+- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。`ConflictTracker`（6.4）：`ConcurrentEdit` 用于"你的修改被 Bob 的覆盖了" / "Alice 也改了这个"的提示，`MergeSummary` 用于重连后"合并成了什么样"的说明。

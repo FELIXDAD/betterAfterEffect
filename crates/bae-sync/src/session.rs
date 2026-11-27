@@ -211,6 +211,33 @@ impl SyncSession {
         self.announced.clear();
     }
 
+    /// What the remote is known to have, per document: its last `Hello`, plus
+    /// what it sent and what we sent since. `None` until it said hello (after
+    /// [`reset`](Self::reset), until it says hello again).
+    pub fn remote_versions(&self) -> Option<&BTreeMap<DocKey, VersionVector>> {
+        self.remote.as_ref()
+    }
+
+    /// Whether we have everything the remote is known to have: it said hello
+    /// since the last [`reset`](Self::reset), and every document of `docs` it
+    /// listed is included in the local version. Documents `docs` does not hold
+    /// (reported in [`PumpOutcome::unknown_docs`]) are not waited for.
+    ///
+    /// After a reconnect (`reset`, then pumps), the first time this holds is when
+    /// to call `ConflictTracker::caught_up`. Hub: its `Hello` lists everything it
+    /// has. Shared folder: the folder's `Hello` lists what this client's
+    /// transport has read from it so far, so check after a pump in which the
+    /// transport polled the folder again.
+    pub fn is_caught_up(&self, docs: &dyn DocSet) -> bool {
+        let Some(remote) = &self.remote else {
+            return false;
+        };
+        remote.iter().all(|(key, theirs)| {
+            docs.version(key)
+                .is_none_or(|ours| ours.includes_vv(theirs))
+        })
+    }
+
     /// Documents with local ops the remote is not known to have yet ("unsynced
     /// changes"). Everything counts as unsynced before the remote said hello.
     pub fn unsynced(&self, docs: &dyn DocSet) -> Vec<DocKey> {
