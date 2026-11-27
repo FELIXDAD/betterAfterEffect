@@ -992,7 +992,12 @@ fn menu_bar_follows_the_ae_catalog() {
     }
     assert_eq!(tops, expect);
     let built = menu_lines(&tree);
-    let wanted = catalog_lines();
+    let mut wanted = catalog_lines();
+    let install = wanted
+        .iter()
+        .position(|line| line == "File > Scripts > Install ScriptUI Panel...")
+        .unwrap();
+    wanted.insert(install, "File > Scripts > Open Script Editor...".to_owned());
     let first_diff = built
         .iter()
         .zip(&wanted)
@@ -3998,6 +4003,47 @@ fn find_missing_footage_lists_footage_without_a_file() {
             .count(),
         1
     );
+}
+
+/// Edit ▸ Purge: the memory caches here (the viewers' frames through
+/// `Session::purge`); Undo and the disk cache go on to the shell.
+#[test]
+fn purge_memory_here_undo_and_disk_in_the_shell() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let purge = |what: &str| Invocation::with_params(ids::PURGE, json!({ "what": what }));
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("timeline");
+    let mut cx = PanelContext::new(
+        &id,
+        "Timeline",
+        &h.stage,
+        &h.author,
+        &h.resources,
+        &mut requests,
+    );
+    let session = h.session();
+    assert!(crate::actions::handle(
+        &purge("image_cache_memory"),
+        &mut cx,
+        &session
+    ));
+    assert_eq!(session.lock().purge, 1);
+    assert!(
+        !crate::actions::handle(&purge("all_memory"), &mut cx, &session),
+        "undo: the shell"
+    );
+    assert_eq!(session.lock().purge, 2);
+    assert!(!crate::actions::handle(&purge("undo"), &mut cx, &session));
+    assert!(!crate::actions::handle(
+        &purge("disk_cache"),
+        &mut cx,
+        &session
+    ));
+    assert_eq!(session.lock().purge, 2);
 }
 
 /// File ▸ Dependencies ▸ Find Missing Effects: the Project panel lists the

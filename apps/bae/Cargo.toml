@@ -20,6 +20,7 @@ bae-agent.workspace = true
 bae-app.workspace = true
 bae-effects.workspace = true
 bae-gpu.workspace = true
+bae-media.workspace = true
 bae-model.workspace = true
 bae-motion.workspace = true
 bae-package.workspace = true
