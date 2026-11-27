@@ -3901,3 +3901,32 @@ fn crop_comp_and_camera_focus() {
         .unwrap();
     assert!(d > 0.0, "{d}");
 }
+
+/// File ▸ Replace Footage ▸ Solid… / Placeholder…: the dialog opens for the
+/// selected footage and OK makes the new item replace it in one step.
+#[test]
+fn replace_footage_with_solid_or_placeholder() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (_, solid, _) = h.comp_with_layers();
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_items = vec![item.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::REPLACE_WITH_PLACEHOLDER));
+    assert!(r.invocations.is_empty(), "the dialog comes first");
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "item.new");
+    assert_eq!(r.invocations[0].params["kind"], "placeholder");
+    assert_eq!(r.invocations[0].params["replace"], json!(item));
+    h.apply(r);
+    assert!(!h.stage.has_prim(&item));
+    let source = h
+        .stage
+        .prim(&solid)
+        .unwrap()
+        .value("source")
+        .and_then(|v| v.as_prim_ref())
+        .cloned();
+    assert!(source.is_some_and(|s| h.stage.has_prim(&s)));
+}
