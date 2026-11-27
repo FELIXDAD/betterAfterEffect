@@ -1142,6 +1142,13 @@ impl Session {
         self.validated = Some((stage.revision(), fingerprint(self)));
     }
 
+    /// The audio device is playing preview samples right now.
+    pub fn audio_audible(&self) -> bool {
+        self.output
+            .as_ref()
+            .is_some_and(bae_media::playback::AudioOutput::audible)
+    }
+
     /// Keep the meters moving through the last audible scrub sample.
     pub(crate) fn monitoring_audio(&self) -> bool {
         (self.audio_clock || self.last_scrub.is_some())
@@ -1324,15 +1331,20 @@ impl Session {
         true
     }
 
+    /// Play the prepared mix from `at`; without sound in it, silence whatever
+    /// the device still plays from an earlier seek.
     fn sound(&self, at: Time, range: TimeRange, repeat: bool) -> bool {
-        if self.mix_has_audio
-            && let Some(output) = &self.output
-        {
+        let Some(output) = &self.output else {
+            return false;
+        };
+        if self.mix_has_audio {
             output.set_muted(false);
             output.seek(at, range, repeat);
-            return true;
+            true
+        } else {
+            output.stop();
+            false
         }
-        false
     }
 
     pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
@@ -1378,10 +1390,10 @@ impl Session {
         }
     }
 
+    /// Stop playing. The device goes silent from its next buffer, whatever
+    /// started the sound (playback, a scrub, a reseek the flags missed).
     pub fn stop(&mut self) {
-        if (self.audio_clock || self.last_scrub.is_some())
-            && let Some(output) = &self.output
-        {
+        if let Some(output) = &self.output {
             output.stop();
             output.set_muted(false);
         }
@@ -1442,6 +1454,14 @@ impl Session {
             output.set_muted(mute && self.audio_clock && self.playback_stats.slow);
         }
         self.mute_slow_preview = mute;
+        // A viewer locked to another comp keeps the playing comp's mix.
+        if self
+            .playback
+            .as_ref()
+            .is_some_and(|pb| pb.comp != info.path)
+        {
+            return;
+        }
         if self.playback.is_some()
             && self.prepare_mix(cx, info)
             && let Some(pb) = &self.playback

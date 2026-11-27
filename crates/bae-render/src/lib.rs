@@ -68,7 +68,7 @@ pub mod source;
 pub mod testing;
 pub mod three_d;
 
-pub use anim::AnimEvaluator;
+pub use anim::{AnimEvaluator, ProxyUse};
 pub use assets::AssetFiles;
 pub use blend::{BlendMode, MaskMode, TrackMatteMode};
 pub use cache::{CacheStats, FrameCache, FrameKey};

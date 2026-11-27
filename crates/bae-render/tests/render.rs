@@ -492,6 +492,7 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
             source_time: Time::ZERO,
             sequence: None,
             blend: None,
+            proxy_of: None,
         }),
     );
     l.transform = DAffine2::from_translation(DVec2::new(2.0, 1.0));
@@ -537,6 +538,7 @@ fn photoshop_masks_reach_the_frame_cache_and_gpu() {
                 mask,
             }),
             blend: None,
+            proxy_of: None,
         })
     };
     comp.layers.push(RenderLayer::new(
@@ -617,6 +619,7 @@ fn frame_mix_blends_neighbouring_sequence_frames() {
             source_time: fps.frame_to_time(1),
             sequence: Some(fps),
             blend,
+            proxy_of: None,
         })
     };
     comp.layers
