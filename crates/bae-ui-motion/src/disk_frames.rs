@@ -1,5 +1,7 @@
-//! Persistent RGBA preview frames. Filesystem work runs on the playback producer
-//! or the low-priority cache worker. Only a single GPU readback can be pending.
+//! Persistent RGBA preview frames. Like AE's disk cache, only frames that take
+//! clearly longer to render than to read back are kept, and only those are read
+//! back. Reads run on their own low-priority thread, writes on the cache worker;
+//! only a single GPU readback can be pending.
 use bae_gpu::{GpuContext, WarmUp, transfer, wgpu};
 use bae_prefs::{Preferences, PrefsStore};
 use bae_render::{IRect, OutputTarget};
@@ -13,7 +15,16 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
+
+/// A frame is written only when rendering it took this many times longer than
+/// reading it back is expected to take (and longer than the frame lasts).
+const SAVE_MARGIN: f64 = 2.0;
+/// A stored frame is read instead of rendered when its render time exceeds the
+/// expected read time by this factor.
+const READ_MARGIN: f64 = 1.25;
+const MAGIC: &[u8; 4] = b"BPF2";
+const HEADER_LEN: usize = 33;
 
 #[derive(Clone, PartialEq, Eq)]
 struct Config {
@@ -36,20 +47,57 @@ impl Config {
     }
 }
 
+/// What a stored frame's header says.
+#[derive(Clone, Copy)]
+struct Header {
+    w: u32,
+    h: u32,
+    rect: IRect,
+    compressed: bool,
+    /// How long the frame took to render (µs).
+    cost_us: u32,
+}
+
+impl Header {
+    fn pixel_bytes(&self) -> u64 {
+        u64::from(self.w) * u64::from(self.h) * 4
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Entry {
+    date: SystemTime,
+    bytes: u64,
+    pixel_bytes: u64,
+    compressed: bool,
+    cost_us: u32,
+}
+
 #[derive(Default)]
 struct Index {
-    files: HashMap<u64, (SystemTime, u64)>,
+    files: HashMap<u64, Entry>,
     order: BTreeSet<(SystemTime, u64)>,
     bytes: u64,
 }
 impl Index {
-    fn add(&mut self, key: u64, date: SystemTime, bytes: u64) {
-        if let Some((old, size)) = self.files.insert(key, (date, bytes)) {
-            self.order.remove(&(old, key));
-            self.bytes -= size;
+    fn add(&mut self, key: u64, entry: Entry) {
+        self.remove(key);
+        self.bytes += entry.bytes;
+        self.order.insert((entry.date, key));
+        self.files.insert(key, entry);
+    }
+    fn remove(&mut self, key: u64) -> Option<Entry> {
+        let entry = self.files.remove(&key)?;
+        self.order.remove(&(entry.date, key));
+        self.bytes -= entry.bytes;
+        Some(entry)
+    }
+    /// A read: the frame is trimmed last (least recently used first).
+    fn touch(&mut self, key: u64) {
+        if let Some(mut entry) = self.remove(key) {
+            entry.date = SystemTime::now();
+            self.add(key, entry);
         }
-        self.bytes += bytes;
-        self.order.insert((date, key));
     }
     fn scan(dir: &Path) -> io::Result<Self> {
         let mut index = Self::default();
@@ -66,27 +114,42 @@ impl Index {
             else {
                 continue;
             };
-            if entry.file_type().is_ok_and(|t| t.is_file())
-                && let Ok(meta) = entry.metadata()
-            {
-                index.add(
+            if !entry.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            match File::open(&path).and_then(|mut f| read_header(&mut f)) {
+                Ok(h) => index.add(
                     key,
-                    meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                    meta.len(),
-                );
+                    Entry {
+                        date: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                        bytes: meta.len(),
+                        pixel_bytes: h.pixel_bytes(),
+                        compressed: h.compressed,
+                        cost_us: h.cost_us,
+                    },
+                ),
+                // An older format or a damaged frame: rendered again when needed.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::InvalidData | io::ErrorKind::UnexpectedEof
+                    ) =>
+                {
+                    let _ = fs::remove_file(&path);
+                }
+                Err(_) => {}
             }
         }
         Ok(index)
     }
     fn trim(&mut self, dir: &Path, limit: u64) {
         while self.bytes > limit {
-            let Some((_, key)) = self.order.pop_first() else {
+            let Some(&(_, key)) = self.order.first() else {
                 break;
             };
-            if let Some((_, size)) = self.files.remove(&key) {
-                self.bytes -= size;
-                let _ = fs::remove_file(file_path(dir, key));
-            }
+            self.remove(key);
+            let _ = fs::remove_file(file_path(dir, key));
         }
     }
 }
@@ -94,11 +157,38 @@ fn file_path(dir: &Path, key: u64) -> PathBuf {
     dir.join(format!("{key:016x}.bpf"))
 }
 
+/// Measured seconds per pixel byte to read, inflate and upload a stored frame
+/// (uncompressed, compressed); the first reads replace the conservative prior.
+struct ReadSpeed {
+    per_byte: [f64; 2],
+    samples: u32,
+}
+impl Default for ReadSpeed {
+    fn default() -> Self {
+        Self {
+            per_byte: [1.0e-9, 2.5e-9],
+            samples: 0,
+        }
+    }
+}
+impl ReadSpeed {
+    fn estimate(&self, pixel_bytes: u64, compressed: bool) -> f64 {
+        self.per_byte[usize::from(compressed)] * pixel_bytes as f64
+    }
+    fn measured(&mut self, pixel_bytes: u64, compressed: bool, seconds: f64) {
+        let rate = &mut self.per_byte[usize::from(compressed)];
+        let weight = if self.samples == 0 { 1.0 } else { 0.25 };
+        *rate += weight * (seconds / pixel_bytes.max(1) as f64 - *rate);
+        self.samples = self.samples.saturating_add(1);
+    }
+}
+
 struct State {
     cfg: Config,
     epoch: u64,
     ready: bool,
     index: Option<Index>,
+    speed: ReadSpeed,
 }
 
 enum Task {
@@ -109,38 +199,52 @@ enum Task {
         key: u64,
         texture: wgpu::Texture,
         rect: IRect,
+        cost_us: u32,
         hold: Arc<dyn Send + Sync>,
     },
 }
 
+/// Makes the texture a stored frame of this size is uploaded into.
+pub(crate) type TargetFn = Box<dyn FnOnce([u32; 2]) -> OutputTarget + Send>;
+/// Gets the uploaded frame, or `None` when it has to be rendered after all.
+pub(crate) type ReadDone = Box<dyn FnOnce(Option<(OutputTarget, IRect)>) + Send>;
+
+struct ReadTask {
+    key: u64,
+    target: TargetFn,
+    done: ReadDone,
+}
+
 pub struct DiskFrames {
-    #[cfg(test)]
-    pub(crate) restored: std::sync::atomic::AtomicUsize,
     base: PathBuf,
     state: Arc<Mutex<State>>,
     binary_stamp: OnceLock<u64>,
     busy: Arc<AtomicBool>,
     tx: mpsc::Sender<Task>,
     rx: Mutex<Option<mpsc::Receiver<Task>>>,
+    reads: mpsc::Sender<ReadTask>,
+    reads_rx: Mutex<Option<mpsc::Receiver<ReadTask>>>,
 }
 impl DiskFrames {
     /// The configured cache is indexed by the app's background warm-up.
     pub fn new(base: PathBuf, prefs: &PrefsStore) -> Arc<Self> {
         let (tx, rx) = mpsc::channel();
+        let (reads, reads_rx) = mpsc::channel();
         let cache = Arc::new(Self {
-            #[cfg(test)]
-            restored: Default::default(),
             base: base.clone(),
             state: Arc::new(Mutex::new(State {
                 cfg: Config::new(&base, &prefs.current()),
                 epoch: 0,
                 ready: false,
                 index: None,
+                speed: ReadSpeed::default(),
             })),
             binary_stamp: OnceLock::new(),
             busy: Arc::default(),
             tx,
             rx: Mutex::new(Some(rx)),
+            reads,
+            reads_rx: Mutex::new(Some(reads_rx)),
         });
         let weak = Arc::downgrade(&cache);
         prefs.subscribe(move |p| {
@@ -175,79 +279,70 @@ impl DiskFrames {
     pub(crate) fn binary_stamp(&self) -> u64 {
         self.binary_stamp.get().copied().unwrap_or_default()
     }
+    /// Frames are stored and read back (Preview from Disk Cache is on).
     pub(crate) fn enabled(&self) -> bool {
         let state = self.state.lock().unwrap();
-        state.ready && state.cfg.limit > 0 && state.index.is_some()
+        state.ready && state.cfg.preview && state.cfg.limit > 0 && state.index.is_some()
     }
-    pub(crate) fn read(&self, key: u64, gpu: &GpuContext) -> Option<(OutputTarget, IRect)> {
-        let (path, epoch) = {
-            let state = self.state.lock().unwrap();
-            if !state.ready || !state.cfg.preview || !state.index.as_ref()?.files.contains_key(&key)
-            {
-                return None;
-            }
-            (file_path(&state.cfg.dir, key), state.epoch)
-        };
-        let (w, h, rect, data) =
-            match read_file(&path, gpu.device().limits().max_texture_dimension_2d) {
-                Ok(frame) => frame,
-                Err(e) => {
-                    // A partial or old frame can be rendered and saved again.
-                    if matches!(
-                        e.kind(),
-                        io::ErrorKind::InvalidData
-                            | io::ErrorKind::UnexpectedEof
-                            | io::ErrorKind::NotFound
-                    ) {
-                        let _ = fs::remove_file(&path);
-                        let mut s = self.state.lock().unwrap();
-                        if s.epoch == epoch
-                            && let Some(index) = s.index.as_mut()
-                            && let Some((date, size)) = index.files.remove(&key)
-                        {
-                            index.order.remove(&(date, key));
-                            index.bytes -= size;
-                        }
-                    }
-                    return None;
-                }
-            };
-        let target = OutputTarget::new(gpu.device(), [w, h]);
-        let tex = target.view().texture();
-        transfer::upload_texture(gpu, tex, transfer::TextureRegion::full(tex), &data).ok()?;
-        #[cfg(test)]
-        self.restored.fetch_add(1, Ordering::Release);
-        Some((target, rect))
+    /// Whether `key` is stored and reading it back should beat rendering it.
+    pub(crate) fn worth_reading(&self, key: u64) -> bool {
+        let s = self.state.lock().unwrap();
+        s.ready
+            && s.cfg.preview
+            && s.index
+                .as_ref()
+                .and_then(|i| i.files.get(&key))
+                .is_some_and(|e| {
+                    f64::from(e.cost_us) * 1e-6
+                        > READ_MARGIN * s.speed.estimate(e.pixel_bytes, e.compressed)
+                })
     }
+    /// Reads `key` on the reader thread into `target(size)` and hands it to `done`.
+    pub(crate) fn read_async(&self, key: u64, target: TargetFn, done: ReadDone) {
+        if let Err(mpsc::SendError(task)) = self.reads.send(ReadTask { key, target, done }) {
+            (task.done)(None);
+        }
+    }
+    /// Stores a frame that took `cost` to render when that is clearly longer than
+    /// reading it back and than the frame lasts (`frame`). Returns whether it is queued.
     pub(crate) fn save(
         &self,
         key: u64,
         texture: wgpu::Texture,
         rect: IRect,
         hold: Arc<dyn Send + Sync>,
-    ) {
+        cost: Duration,
+        frame: Duration,
+    ) -> bool {
         let state = self.state.lock().unwrap();
-        let Some(index) = &state.index else { return };
+        let Some(index) = &state.index else {
+            return false;
+        };
+        let pixel_bytes = u64::from(texture.width()) * u64::from(texture.height()) * 4;
+        let read = state.speed.estimate(pixel_bytes, state.cfg.compressed);
         if !state.ready
+            || !state.cfg.preview
             || state.cfg.limit == 0
+            || cost <= frame
+            || cost.as_secs_f64() <= SAVE_MARGIN * read
             || index.files.contains_key(&key)
             || self.busy.swap(true, Ordering::AcqRel)
         {
-            return;
+            return false;
         }
-        if self
-            .tx
-            .send(Task::Save {
-                epoch: state.epoch,
-                key,
-                texture,
-                rect,
-                hold,
-            })
-            .is_err()
-        {
+        let task = Task::Save {
+            epoch: state.epoch,
+            key,
+            texture,
+            rect,
+            cost_us: u32::try_from(cost.as_micros()).unwrap_or(u32::MAX),
+            hold,
+        };
+        if self.tx.send(task).is_err() {
             self.busy.store(false, Ordering::Release);
+            return false;
         }
+        true
     }
 }
 
@@ -269,17 +364,24 @@ impl WarmUp for DiskFrames {
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map_or(0, |t| t.as_nanos() as u64);
         let _ = self.binary_stamp.set(stamp);
+        if let Some(reads) = self.reads_rx.lock().unwrap().take() {
+            let (state, gpu) = (self.state.clone(), gpu.clone());
+            std::thread::Builder::new()
+                .name("bae-disk-read".into())
+                .spawn(move || {
+                    bae_gpu::warm_up::lower_priority();
+                    let mut buf = Vec::new();
+                    for task in reads {
+                        (task.done)(load(&state, &gpu, task.key, task.target, &mut buf));
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+        }
         let (state, busy, gpu) = (self.state.clone(), self.busy.clone(), gpu.clone());
         std::thread::Builder::new()
             .name("bae-disk-preview".into())
             .spawn(move || {
                 bae_gpu::warm_up::lower_priority();
-                let mut warm = DeflateEncoder::new(Vec::new(), Compression::fast());
-                if warm.write_all(&[0; 4]).is_ok()
-                    && let Ok(bytes) = warm.finish()
-                {
-                    let _ = DeflateDecoder::new(bytes.as_slice()).read_exact(&mut [0; 4]);
-                }
                 refresh(&state);
                 for task in rx {
                     match task {
@@ -295,9 +397,10 @@ impl WarmUp for DiskFrames {
                             key,
                             texture,
                             rect,
+                            cost_us,
                             hold,
                         } => {
-                            save_frame(&state, &gpu, epoch, key, &texture, rect);
+                            save_frame(&state, &gpu, epoch, key, &texture, rect, cost_us);
                             drop(hold);
                             busy.store(false, Ordering::Release);
                         }
@@ -306,6 +409,59 @@ impl WarmUp for DiskFrames {
             })
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+}
+
+/// Reads, inflates and uploads a stored frame, timing it for later decisions.
+/// A frame that cannot be read leaves the index, so it is rendered instead.
+fn load(
+    state: &Mutex<State>,
+    gpu: &GpuContext,
+    key: u64,
+    target: impl FnOnce([u32; 2]) -> OutputTarget,
+    buf: &mut Vec<u8>,
+) -> Option<(OutputTarget, IRect)> {
+    let (path, epoch) = {
+        let s = state.lock().unwrap();
+        if !s.ready || !s.index.as_ref()?.files.contains_key(&key) {
+            return None;
+        }
+        (file_path(&s.cfg.dir, key), s.epoch)
+    };
+    let start = Instant::now();
+    let max = gpu.device().limits().max_texture_dimension_2d;
+    let result = read_file(&path, max, buf).and_then(|header| {
+        let frame = target([header.w, header.h]);
+        let tex = frame.view().texture();
+        transfer::upload_texture(gpu, tex, transfer::TextureRegion::full(tex), buf)
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        Ok((frame, header))
+    });
+    let mut s = state.lock().unwrap();
+    let current = s.epoch == epoch;
+    match result {
+        Ok((frame, header)) => {
+            let seconds = start.elapsed().as_secs_f64();
+            s.speed
+                .measured(header.pixel_bytes(), header.compressed, seconds);
+            if current && let Some(index) = s.index.as_mut() {
+                index.touch(key);
+            }
+            Some((frame, header.rect))
+        }
+        Err(e) => {
+            if current && let Some(index) = s.index.as_mut() {
+                index.remove(key);
+            }
+            drop(s);
+            if matches!(
+                e.kind(),
+                io::ErrorKind::InvalidData | io::ErrorKind::UnexpectedEof
+            ) {
+                let _ = fs::remove_file(&path);
+            }
+            None
+        }
     }
 }
 
@@ -341,6 +497,7 @@ fn save_frame(
     key: u64,
     texture: &wgpu::Texture,
     rect: IRect,
+    cost_us: u32,
 ) {
     let cfg = {
         let s = state.lock().unwrap();
@@ -355,14 +512,14 @@ fn save_frame(
     let Ok(mut tmp) = tempfile::NamedTempFile::new_in(&cfg.dir) else {
         return;
     };
-    let Ok(()) = write_file(
-        tmp.as_file_mut(),
-        image.width,
-        image.height,
+    let header = Header {
+        w: image.width,
+        h: image.height,
         rect,
-        &image.data,
-        cfg.compressed,
-    ) else {
+        compressed: cfg.compressed,
+        cost_us,
+    };
+    let Ok(()) = write_file(tmp.as_file_mut(), &header, &image.data) else {
         return;
     };
     let Ok(meta) = tmp.as_file().metadata() else {
@@ -391,7 +548,16 @@ fn save_frame(
         let Some(i) = s.index.take() else { return };
         i
     };
-    index.add(key, SystemTime::now(), bytes);
+    index.add(
+        key,
+        Entry {
+            date: SystemTime::now(),
+            bytes,
+            pixel_bytes: header.pixel_bytes(),
+            compressed: header.compressed,
+            cost_us,
+        },
+    );
     index.trim(&cfg.dir, cfg.limit);
     let mut s = state.lock().unwrap();
     if s.epoch == epoch {
@@ -399,28 +565,23 @@ fn save_frame(
     }
 }
 
-fn write_file(
-    file: &mut File,
-    w: u32,
-    h: u32,
-    rect: IRect,
-    data: &[u8],
-    compressed: bool,
-) -> io::Result<()> {
+fn write_file(file: &mut File, header: &Header, data: &[u8]) -> io::Result<()> {
     let mut buf = BufWriter::new(file);
-    buf.write_all(b"BPF1")?;
+    buf.write_all(MAGIC)?;
+    let r = header.rect;
     for field in [
-        w,
-        h,
-        rect.x0 as u32,
-        rect.y0 as u32,
-        rect.x1 as u32,
-        rect.y1 as u32,
+        header.w,
+        header.h,
+        r.x0 as u32,
+        r.y0 as u32,
+        r.x1 as u32,
+        r.y1 as u32,
     ] {
         buf.write_all(&field.to_le_bytes())?;
     }
-    buf.write_all(&[u8::from(compressed)])?;
-    if compressed {
+    buf.write_all(&[u8::from(header.compressed)])?;
+    buf.write_all(&header.cost_us.to_le_bytes())?;
+    if header.compressed {
         let mut enc = DeflateEncoder::new(&mut buf, Compression::fast());
         enc.write_all(data)?;
         enc.finish()?;
@@ -430,14 +591,12 @@ fn write_file(
     buf.flush()
 }
 
-fn read_file(path: &Path, max_dimension: u32) -> io::Result<(u32, u32, IRect, Vec<u8>)> {
-    let mut buf = BufReader::new(File::open(path)?);
-    let mut header = [0_u8; 29];
-    buf.read_exact(&mut header)?;
+fn read_header(r: &mut impl Read) -> io::Result<Header> {
+    let mut header = [0_u8; HEADER_LEN];
+    r.read_exact(&mut header)?;
     let field = |i: usize| u32::from_le_bytes(header[i..i + 4].try_into().unwrap());
-    let (w, h) = (field(4), field(8));
     let invalid = || io::Error::new(io::ErrorKind::InvalidData, "invalid preview frame");
-    if &header[..4] != b"BPF1" || w == 0 || h == 0 || w.max(h) > max_dimension || header[28] > 1 {
+    if &header[..4] != MAGIC || header[28] > 1 {
         return Err(invalid());
     }
     let rect = IRect::new(
@@ -451,25 +610,62 @@ fn read_file(path: &Path, max_dimension: u32) -> io::Result<(u32, u32, IRect, Ve
     if !valid_span(rect.x0, rect.x1) || !valid_span(rect.y0, rect.y1) {
         return Err(invalid());
     }
-    let n = u64::from(w) * u64::from(h) * 4;
-    let mut data = Vec::new();
-    if header[28] == 1 {
-        DeflateDecoder::new(buf)
-            .take(n + 1)
-            .read_to_end(&mut data)?;
+    Ok(Header {
+        w: field(4),
+        h: field(8),
+        rect,
+        compressed: header[28] == 1,
+        cost_us: field(29),
+    })
+}
+
+/// The frame's header; its pixels end up in `data`.
+fn read_file(path: &Path, max_dimension: u32, data: &mut Vec<u8>) -> io::Result<Header> {
+    let mut buf = BufReader::new(File::open(path)?);
+    let header = read_header(&mut buf)?;
+    if header.w == 0 || header.h == 0 || header.w.max(header.h) > max_dimension {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid preview frame",
+        ));
+    }
+    let n = header.pixel_bytes();
+    data.clear();
+    data.reserve(n as usize);
+    if header.compressed {
+        DeflateDecoder::new(buf).take(n + 1).read_to_end(data)?;
     } else {
-        buf.take(n + 1).read_to_end(&mut data)?;
+        buf.take(n + 1).read_to_end(data)?;
     }
     if data.len() as u64 != n {
-        return Err(invalid());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid preview frame",
+        ));
     }
-    Ok((w, h, rect, data))
+    Ok(header)
+}
+
+#[cfg(test)]
+impl DiskFrames {
+    /// Reads `key` on this thread.
+    pub(crate) fn read(&self, key: u64, gpu: &GpuContext) -> Option<(OutputTarget, IRect)> {
+        let target = |size| OutputTarget::new(gpu.device(), size);
+        load(&self.state, gpu, key, target, &mut Vec::new())
+    }
+    /// Reads cost nothing, so every frame that renders slower than it lasts is stored.
+    pub(crate) fn assume_free_reads(&self) {
+        self.state.lock().unwrap().speed.per_byte = [0.0; 2];
+    }
+    /// How many stored frames were read back.
+    pub(crate) fn reads(&self) -> u32 {
+        self.state.lock().unwrap().speed.samples
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
 
     fn wait<T>(mut f: impl FnMut() -> Option<T>) -> T {
         let start = Instant::now();
@@ -484,6 +680,9 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
+
+    const SLOW: Duration = Duration::from_secs(10);
+    const FRAME: Duration = Duration::from_millis(40);
 
     #[test]
     fn gpu_frames_reopen_losslessly_and_purging_preserves_other_files() {
@@ -516,10 +715,11 @@ mod tests {
             )
             .unwrap();
             gpu.queue().submit([]);
-            cache.save(key, texture, rect, Arc::new(target));
+            assert!(cache.save(key, texture, rect, Arc::new(target), SLOW, FRAME));
             wait(|| cache.read(key, &gpu));
             drop(cache);
             cache = setup();
+            assert!(cache.worth_reading(key));
             let (frame, r) = cache.read(key, &gpu).unwrap();
             assert_eq!(r, rect);
             assert_eq!(
@@ -530,32 +730,70 @@ mod tests {
             );
             let mut stored =
                 File::open(file_path(&tmp.path().join("BAE Preview Frames"), key)).unwrap();
-            let mut header = [0; 29];
-            stored.read_exact(&mut header).unwrap();
-            assert_eq!(header[28], u8::from(comp));
+            let header = read_header(&mut stored).unwrap();
+            assert_eq!((header.compressed, header.cost_us), (comp, 10_000_000));
         }
         let keep = tmp.path().join("BAE Preview Frames").join("keep.txt");
         fs::write(&keep, "keep").unwrap();
         let mut prefs = (*store.current()).clone();
         prefs.set("disk.enable_preview_from_disk_cache", false);
         store.set(prefs.clone()).unwrap();
-        wait(|| cache.enabled().then_some(()));
-        assert!(cache.read(1, &gpu).is_none());
+        assert!(!cache.worth_reading(1));
         cache.clear_folder(&prefs);
         wait(|| (!file_path(&tmp.path().join("BAE Preview Frames"), 1).exists()).then_some(()));
         assert_eq!(fs::read_to_string(keep).unwrap(), "keep");
     }
 
+    /// Frames that render in real time, or faster than they read back, are not
+    /// written; a stored frame is read only while that beats rendering it.
     #[test]
-    fn storage_limit_removes_oldest_frames_first() {
+    fn only_frames_slower_to_render_than_to_read_are_kept() {
+        let Some(gpu) = bae_gpu::testing::shared_context() else {
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = DiskFrames::new(tmp.path().to_owned(), &PrefsStore::default());
+        cache.run(&gpu).unwrap();
+        wait(|| cache.enabled().then_some(()));
+        let frame = |size| {
+            let target = OutputTarget::new(gpu.device(), size);
+            (target.view().texture().clone(), Arc::new(target))
+        };
+        let rect = IRect::new(0, 0, 1, 1);
+        // A 4K frame that renders within its frame time, then one that renders
+        // slower than its frame but faster than the prior read estimate.
+        let (t, hold) = frame([3840, 2160]);
+        assert!(!cache.save(1, t, rect, hold, Duration::from_millis(30), FRAME));
+        let (t, hold) = frame([3840, 2160]);
+        assert!(!cache.save(2, t, rect, hold, Duration::from_millis(50), FRAME));
+        let (t, hold) = frame([2, 2]);
+        assert!(cache.save(3, t, rect, hold, SLOW, FRAME));
+        wait(|| cache.read(3, &gpu));
+        assert!(cache.worth_reading(3));
+        cache.state.lock().unwrap().speed.per_byte = [1.0; 2];
+        assert!(!cache.worth_reading(3), "reading got slower than rendering");
+    }
+
+    #[test]
+    fn storage_limit_removes_least_recently_used_frames_first() {
         let dir = tempfile::tempdir().unwrap();
         let mut index = Index::default();
         for n in 1..=3 {
             fs::write(file_path(dir.path(), n), [0; 17]).unwrap();
-            index.add(n, SystemTime::UNIX_EPOCH + Duration::from_secs(n), 17);
+            index.add(
+                n,
+                Entry {
+                    date: SystemTime::UNIX_EPOCH + Duration::from_secs(n),
+                    bytes: 17,
+                    pixel_bytes: 4,
+                    compressed: false,
+                    cost_us: 0,
+                },
+            );
         }
+        index.touch(1);
         index.trim(dir.path(), 34);
-        assert!(!file_path(dir.path(), 1).exists());
-        assert_eq!(Index::scan(dir.path()).unwrap().bytes, 34);
+        assert!(file_path(dir.path(), 1).exists());
+        assert!(!file_path(dir.path(), 2).exists());
     }
 }

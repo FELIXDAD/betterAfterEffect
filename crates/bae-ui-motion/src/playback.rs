@@ -844,6 +844,7 @@ fn render_worker(
     let mut synced: Option<(Option<u64>, Option<u64>)> = None;
     let mut in_flight = false;
     let spares: Arc<Mutex<Spares>> = Arc::default();
+    let last_done = Arc::new(Mutex::new(Instant::now()));
     loop {
         let job = match rx.try_recv() {
             Ok(job) => job,
@@ -887,39 +888,89 @@ fn render_worker(
             .as_ref()
             .filter(|d| d.enabled() && !job.scene.key.scope_source)
             .and_then(|d| disk_key(&job, &engine, d.binary_stamp()));
-        let restored = disk_key.and_then(|k| disk.as_ref()?.read(k, &gpu));
-        let hit = restored.is_some();
-        let rendered = if let Some((target, rect)) = restored {
-            engine.channels = None;
-            Ok((target, Some((rect, None)), true))
-        } else {
-            let spare = spares.lock().unwrap().take();
-            engine
-                .render(
-                    &job.stage,
-                    &job.rc,
-                    job.scene.key.resolution,
-                    bae_render::Display::default(),
-                    None,
-                    spare,
-                )
-                .map(|(target, source, temporal)| {
-                    let info = source
-                        .map(|image| (image.rect, job.scene.key.scope_source.then_some(image)));
-                    (target, info, temporal)
+        let (epoch, time) = (job.epoch, job.time);
+        // What the frame depends on (selective invalidation), unless it reads
+        // other times, nested comps or motion-blur samples.
+        let deps = job.rc.dependencies();
+        let dynamic_rc = job.rc.motion_blur.is_some()
+            || job
+                .rc
+                .layers
+                .iter()
+                .any(|l| matches!(l.content, bae_render::LayerContent::Comp(_)));
+        let scene = job.scene.clone();
+        // A stored frame that reads back faster than it renders: the disk thread
+        // reads it while this one goes on with the next frame.
+        if let (Some(d), Some(key)) = (&disk, disk_key)
+            && d.worth_reading(key)
+        {
+            let target = {
+                let (spares, gpu) = (spares.clone(), gpu.clone());
+                Box::new(move |size: [u32; 2]| {
+                    let mut s = spares.lock().unwrap();
+                    let spare = if s.size == Some(size) { s.take() } else { None };
+                    drop(s);
+                    spare.unwrap_or_else(|| OutputTarget::new(gpu.device(), size))
                 })
-        };
-        let result = rendered
+            };
+            let (shared, registry, spares) = (shared.clone(), registry.clone(), spares.clone());
+            let errors = job.errors;
+            d.read_async(
+                key,
+                target,
+                Box::new(move |frame| {
+                    let Some((target, rect)) = frame else {
+                        // Unreadable: render it after all.
+                        shared.state.lock().unwrap().queued.retain(|t| *t != time);
+                        shared.changed.notify_all();
+                        return;
+                    };
+                    spares.lock().unwrap().size = Some(target.size());
+                    let texture = target.view().texture().clone();
+                    let slot = Arc::new(Slot {
+                        channels: None,
+                        registry: registry.clone(),
+                        id: registry.create("playback frame"),
+                        rect,
+                        time,
+                        errors,
+                        bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+                        source: None,
+                        texture,
+                        target: Some(target),
+                        spares,
+                    });
+                    match registry.publish(slot.id, &slot.texture, wgpu::FilterMode::Linear) {
+                        Ok(()) => deliver(&shared, epoch, &scene, time, slot, deps, true),
+                        Err(e) => failed(&shared, epoch, time, &e.to_string()),
+                    }
+                }),
+            );
+            continue;
+        }
+        let started = Instant::now();
+        let spare = spares.lock().unwrap().take();
+        let result = engine
+            .render(
+                &job.stage,
+                &job.rc,
+                job.scene.key.resolution,
+                bae_render::Display::default(),
+                None,
+                spare,
+            )
             .map_err(|e| e.to_string())
             .and_then(|(target, source, temporal)| {
                 let mut spares_now = spares.lock().unwrap();
                 spares_now.size = Some(target.size());
                 // Not an interactive thread: it waits for the warm-up instead.
-                let Some((rect, source)) = source else {
+                let Some(source) = source else {
                     spares_now.give(target);
                     return Err("incomplete frame".to_owned());
                 };
                 drop(spares_now);
+                let rect = source.rect;
+                let source = job.scene.key.scope_source.then_some(source);
                 let texture = target.view().texture().clone();
                 let channels = engine.channels.clone();
                 let pick_bytes = channels
@@ -940,67 +991,85 @@ fn render_worker(
                     target: Some(target),
                     spares: spares.clone(),
                 });
-                if !hit
-                    && !temporal
-                    && slot.channels.is_none()
-                    && let (Some(disk), Some(key)) = (&disk, disk_key)
-                {
-                    disk.save(key, slot.texture.clone(), rect, slot.clone());
-                }
                 registry
                     .publish(slot.id, &slot.texture, wgpu::FilterMode::Linear)
                     .map_err(|e| e.to_string())?;
                 Ok((slot, temporal))
             });
-        let (epoch, time) = (job.epoch, job.time);
-        // What the frame depends on (selective invalidation), unless it reads
-        // other times, nested comps or motion-blur samples.
-        let deps = job.rc.dependencies();
-        let dynamic_rc = job.rc.motion_blur.is_some()
-            || job
-                .rc
-                .layers
-                .iter()
-                .any(|l| matches!(l.content, bae_render::LayerContent::Comp(_)));
-        let scene = job.scene.clone();
         match result {
             Ok((slot, temporal)) => {
                 let dynamic = job.dynamic || temporal || dynamic_rc;
                 in_flight = true;
                 let shared = shared.clone();
+                let last_done = last_done.clone();
+                let store = disk
+                    .clone()
+                    .zip(disk_key)
+                    .filter(|_| !temporal && slot.channels.is_none());
+                let frame =
+                    Duration::try_from_secs_f64(job.rc.frame_rate.frame_duration().as_seconds())
+                        .unwrap_or_default();
                 gpu.queue().on_submitted_work_done(move || {
-                    let mut state = shared.state.lock().unwrap();
-                    if state.epoch != epoch || state.shutdown {
-                        return;
-                    }
-                    state.queued.retain(|t| *t != time);
-                    let cache = &mut state.cache;
-                    if slot.bytes <= cache.frames.stats().budget {
-                        cache.frames.insert(
-                            scene.key.frame(time),
+                    // How long the frame held the pipeline: from its encoding (or
+                    // the previous frame finishing, if later) until now.
+                    let now = Instant::now();
+                    let cost = {
+                        let mut last = last_done.lock().unwrap();
+                        let cost = now - started.max(*last);
+                        *last = now;
+                        cost
+                    };
+                    if let Some((disk, key)) = store {
+                        disk.save(
+                            key,
+                            slot.texture.clone(),
+                            slot.rect,
                             slot.clone(),
-                            slot.bytes,
-                            deps,
-                            0,
+                            cost,
+                            frame,
                         );
-                        cache.dynamic |= dynamic;
-                        cache.revision += 1;
                     }
-                    state.ready.push_back(slot);
-                    while state.ready.len() > DEPTH {
-                        state.ready.pop_front();
-                    }
-                    let repaint = state.demand.as_ref().map(|d| d.repaint.clone());
-                    drop(state);
-                    if let Some(ctx) = repaint {
-                        ctx.request_repaint();
-                    }
-                    shared.changed.notify_all();
+                    deliver(&shared, epoch, &scene, time, slot, deps, dynamic);
                 });
             }
             Err(error) => failed(&shared, epoch, time, &error),
         }
     }
+}
+
+/// A finished frame goes into the preview cache and the queue the viewer shows from.
+fn deliver(
+    shared: &Shared,
+    epoch: u64,
+    scene: &Scene,
+    time: Time,
+    slot: Arc<Slot>,
+    deps: Vec<bae_render::Dependency>,
+    dynamic: bool,
+) {
+    let mut state = shared.state.lock().unwrap();
+    if state.epoch != epoch || state.shutdown {
+        return;
+    }
+    state.queued.retain(|t| *t != time);
+    let cache = &mut state.cache;
+    if slot.bytes <= cache.frames.stats().budget {
+        cache
+            .frames
+            .insert(scene.key.frame(time), slot.clone(), slot.bytes, deps, 0);
+        cache.dynamic |= dynamic;
+        cache.revision += 1;
+    }
+    state.ready.push_back(slot);
+    while state.ready.len() > DEPTH {
+        state.ready.pop_front();
+    }
+    let repaint = state.demand.as_ref().map(|d| d.repaint.clone());
+    drop(state);
+    if let Some(ctx) = repaint {
+        ctx.request_repaint();
+    }
+    shared.changed.notify_all();
 }
 
 /// The preview cache's byte budget: the GPU Preview Cache setting, never more
