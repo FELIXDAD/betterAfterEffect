@@ -394,7 +394,8 @@ impl DirTransport {
     ///
     /// Takes an advisory lock on `updates/<client>.lock` so two sessions on one
     /// machine cannot share a client ID ([`SyncError::ClientIdInUse`]). File
-    /// systems without locking are accepted as they are.
+    /// systems without locking are accepted as they are. With the lock held,
+    /// removes the temporary files a dead earlier session with this ID left.
     ///
     /// Blocks: besides creating directories on the share, a lock that is held
     /// is retried for up to 2 seconds before `ClientIdInUse` (another client's
@@ -414,8 +415,7 @@ impl DirTransport {
         fs::create_dir_all(&updates).map_err(SyncError::io(&updates))?;
         let presence = root.join(PRESENCE);
         fs::create_dir_all(&presence).map_err(SyncError::io(&presence))?;
-        let lock = lock_client(&updates.join(format!("{client}.{LOCK_EXT}")), &client)?;
-        #[allow(unused_mut)]
+        let (lock, locked) = lock_client(&updates.join(format!("{client}.{LOCK_EXT}")), &client)?;
         let mut t = DirTransport {
             root,
             client,
@@ -443,11 +443,37 @@ impl DirTransport {
             #[cfg(feature = "watch")]
             _watcher: None,
         };
+        if locked {
+            t.remove_leftovers();
+        }
         #[cfg(feature = "watch")]
         if t.config.watch {
             t.start_watcher();
         }
         Ok(t)
+    }
+
+    /// Delete the temporary files an earlier session with our client ID left
+    /// when its process died between writing and renaming them (a compaction,
+    /// a presence heartbeat, a clock probe). Others' cleanup passes only delete
+    /// them once they are `inactive_after` old (§4.7), and only where one runs,
+    /// so until then every crash at the wrong moment would leave one more. Only
+    /// done while we hold the client ID's lock, so no live session of ours is
+    /// writing them.
+    fn remove_leftovers(&mut self) {
+        let prefix = format!("{}{TMP_MARK}", self.client);
+        let mut files = Vec::new();
+        for dir in [UPDATES, PRESENCE] {
+            walk_files(&self.root.join(dir), String::new(), 0, &mut files);
+        }
+        for (_, name, path) in files {
+            if name.starts_with(&prefix) {
+                match fs::remove_file(&path) {
+                    Ok(()) => self.stats.stale_files_removed += 1,
+                    Err(e) => self.note_cleanup_error(&path, e),
+                }
+            }
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -838,8 +864,11 @@ impl DirTransport {
     }
 
     /// The session says what it has. Re-deliver every document it is missing
-    /// something of (e.g. a sublayer the app just added), then answer with our own
-    /// hello so a reset session knows what the folder has.
+    /// something of (e.g. a sublayer the app just added), read the folder again
+    /// (not waiting for the poll interval), then answer with our own hello so a
+    /// reset session knows what the folder has. The hello is queued after
+    /// everything read, so the session learns what the folder has only once it
+    /// has received all of it (`SyncSession::is_caught_up`).
     fn on_hello(&mut self, versions: Vec<(DocKey, VersionVector)>) -> Result<(), SyncError> {
         if !self.scanned {
             // The first scan delivers everything anyway.
@@ -873,9 +902,9 @@ impl DirTransport {
                 }
             }
         }
-        if !missing.is_empty() {
-            self.poll_now = true;
-        }
+        self.poll_now = false;
+        self.last_poll = Some(Instant::now());
+        self.poll();
         self.inbox.push_back(self.hello());
         Ok(())
     }
@@ -1864,8 +1893,8 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
 }
 
 /// Take the advisory lock at `path` for `client`'s session. File systems without
-/// locking are accepted as they are.
-fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
+/// locking are accepted as they are: the flag says whether we hold the lock.
+fn lock_client(path: &Path, client: &ClientId) -> Result<(File, bool), SyncError> {
     let deadline = Instant::now() + LOCK_WAIT;
     loop {
         let opened = OpenOptions::new()
@@ -1891,9 +1920,9 @@ fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
                 // A cleanup pass deleted the file we opened while it held the lock
                 // (§4.7): lock the file that is there now.
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                _ => return Ok(lock),
+                _ => return Ok((lock, true)),
             },
-            Err(fs::TryLockError::Error(_)) => return Ok(lock),
+            Err(fs::TryLockError::Error(_)) => return Ok((lock, false)),
             // Possibly a cleanup pass holding it for a moment.
             Err(fs::TryLockError::WouldBlock) => {}
         }
