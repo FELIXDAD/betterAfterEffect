@@ -1163,3 +1163,59 @@ fn layers_reflect_the_environment_picture() {
     let half = render(&mut r, &scene(50.0)).px(100, 100);
     assert!(half[1] > 60 && half[1] < 200, "half: {half:?}");
 }
+
+/// Advanced 3D Extrusion Depth: a 3D layer whose provider gives outlines is
+/// drawn as a solid that deep — turned away, its sides show beside the face.
+#[test]
+fn extruded_layers_are_solids() {
+    use bae_render::source::{OutlineFill, Outlines, SourceProvider};
+    struct Square;
+    impl SourceProvider for Square {
+        fn id(&self) -> &str {
+            "test.square"
+        }
+        fn source(
+            &self,
+            _: &bae_render::CustomContent,
+        ) -> Result<Arc<dyn bae_render::LayerSource>, bae_render::RenderError> {
+            Err(bae_render::RenderError::Other("drawn as a solid".into()))
+        }
+        fn outlines(&self, _: &bae_render::CustomContent) -> Option<Arc<Outlines>> {
+            Some(Arc::new(Outlines {
+                fills: vec![OutlineFill {
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    contours: vec![vec![[0.0, 0.0], [80.0, 0.0], [80.0, 80.0], [0.0, 80.0]]],
+                }],
+            }))
+        }
+    }
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    r.providers_mut().register(Arc::new(Square));
+    let row = |r: &mut Renderer, depth: f64| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut layer = RenderLayer::new(
+            p("/comps/main/layers/square"),
+            LayerContent::Custom(bae_render::CustomContent {
+                provider: "test.square".into(),
+                prim: p("/comps/main/layers/square"),
+                size: Some([80, 80]),
+                hash: 1,
+                data: Arc::new(()),
+            }),
+        );
+        layer.matrix_3d = Some(
+            DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+                * bae_render::camera::xyz_rotation(DVec3::new(0.0, 60.0, 0.0))
+                * DMat4::from_translation(DVec3::new(-40.0, -40.0, 0.0)),
+        );
+        layer.extrusion = depth;
+        comp.layers = vec![layer];
+        let img = render(r, &comp);
+        (0..200).filter(|&x| img.px(x, 100)[3] > 128).count()
+    };
+    let thin = row(&mut r, 1.0);
+    let deep = row(&mut r, 100.0);
+    assert!(thin > 20, "the face: {thin}");
+    assert!(deep > thin + 40, "the side too: {deep} vs {thin}");
+}

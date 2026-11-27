@@ -69,6 +69,7 @@
 //! (id = command id), from which the application builds its command registry.
 
 pub mod camera;
+pub mod camera_track;
 pub mod cleanup;
 pub mod comp;
 pub mod comp_from_items;
@@ -92,6 +93,7 @@ pub mod precompose;
 pub mod project_settings;
 pub mod puppet;
 pub mod query;
+mod roto;
 pub mod shape;
 pub mod solid;
 pub mod text;
@@ -156,11 +158,13 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
+        r.register(roto::Freeze),
         r.register(puppet::AddPin),
         r.register(puppet::DeletePins),
         r.register(puppet::SetMesh),
         r.register(paint::ExtendStroke),
         r.register(tracker::CreateTracker),
+        r.register(camera_track::Record),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),

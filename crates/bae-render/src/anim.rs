@@ -357,6 +357,30 @@ impl AnimEvaluator {
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         // The render queue renders at Best Settings (every layer, nested
         // ones too, at Best); the Quality switches only change previews.
+        // Advanced 3D extrudes 3D text and shape layers.
+        out.extrusion = match (&l.geometry, ec.advanced_3d, l.switches.three_d) {
+            (Some(g), true, true) => g.extrusion_depth,
+            _ => 0.0,
+        };
+        out.bevel = l
+            .geometry
+            .as_ref()
+            .filter(|_| out.extrusion > 0.0)
+            .and_then(|g| {
+                use crate::model::extrude::{Bevel, BevelStyle};
+                let style = match g.bevel_style {
+                    2 => BevelStyle::Angular,
+                    3 => BevelStyle::Concave,
+                    4 => BevelStyle::Convex,
+                    _ => return None,
+                };
+                (g.bevel_depth > 0.0).then_some(Bevel {
+                    style,
+                    depth: g.bevel_depth,
+                    hole_scale: g.hole_bevel_depth / 100.0,
+                    inward: g.bevel_direction == 2,
+                })
+            });
         out.quality = match self.purpose {
             RenderPurpose::Final => bae_anim::LayerQuality::Best,
             _ => inherited.quality.min(l.switches.quality),

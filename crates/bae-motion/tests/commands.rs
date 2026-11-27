@@ -2432,3 +2432,26 @@ fn locked_markers_cannot_be_moved_edited_or_deleted() {
         Time(2 * SEC)
     );
 }
+
+#[test]
+fn new_item_replaces_footage_and_keeps_its_layers() {
+    let dir = std::env::temp_dir().join(format!("bae-replace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run("item.import", json!({"files": [{"path": clip}]}));
+    let old = p(out["items"][0].as_str().unwrap());
+    let comp = fx.comp();
+    let layer = fx.layer(&comp, "footage", json!({"source": old}));
+    let out = fx.run(
+        "item.new",
+        json!({"kind": "solid", "name": "Backdrop", "width": 640, "height": 360,
+               "color": [1.0, 0.0, 0.0, 1.0], "replace": old}),
+    );
+    let new = p(out["item"].as_str().unwrap());
+    assert!(!fx.stage.has_prim(&old));
+    assert_eq!(new.parent(), old.parent(), "in the replaced item's folder");
+    assert_eq!(fx.value(&layer, "source"), Some(Value::PrimRef(new)));
+    let _ = std::fs::remove_dir_all(dir);
+}
