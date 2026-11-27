@@ -77,10 +77,7 @@ fn set_switch(
             .into(),
         ),
     };
-    cx.invoke_with(
-        "layer.set_attr",
-        json!({"layers": paths, "attr": attr, "value": value}),
-    );
+    crate::actions::set_layer_switch(cx, paths, attr, value);
 }
 
 /// Whether `layer` has the `attr` switch and can change it.

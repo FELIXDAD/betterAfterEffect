@@ -179,7 +179,14 @@ impl Source {
         // SAFETY: synchronous reads; MF seeks to the preceding keyframe. Discard
         // preroll by presentation timestamp, keeping this reader for the next call.
         unsafe {
-            if self.next.take() != Some(index) {
+            // Forward within two seconds: read on (decoding the frames in
+            // between) rather than seek. A seek decodes from the keyframe
+            // before `index`, which with long GOPs is every frame since the
+            // start; playback that falls one frame behind would otherwise
+            // seek on every frame from then on.
+            let ahead = self.next.take().map(|next| index - next);
+            let limit = (2.0 * self.rate.as_f64()).ceil().max(8.0) as i64;
+            if !ahead.is_some_and(|a| (0..=limit).contains(&a)) {
                 self.reader.SetCurrentPosition(
                     &GUID::zeroed(),
                     &(self.start + timestamp(index, self.rate)).into(),

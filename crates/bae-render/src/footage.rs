@@ -159,7 +159,7 @@ mod imp {
         ) -> Result<GpuImage, RenderError> {
             let frame = self
                 .library
-                .frame_at(
+                .frame_at_ahead(
                     &self.path,
                     &self.open,
                     &self.request,
