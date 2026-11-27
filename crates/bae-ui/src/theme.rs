@@ -46,8 +46,6 @@ pub mod color {
     pub const UNDERLINE: Color32 = rgb(0x6a, 0x6a, 0x6a);
     /// Keyframe navigator diamond when the playhead is not on a key.
     pub const KEY_OFF: Color32 = rgb(0x8c, 0x8c, 0x8c);
-    /// Dropdown fields (Parent & Link, viewer resolution).
-    pub const DROPDOWN: Color32 = rgb(0x00, 0x00, 0x00);
     pub const FIELD_HOVER: Color32 = rgb(0x16, 0x16, 0x16);
     /// Empty switch cells in the timeline.
     pub const SWITCH_BG: Color32 = rgb(0x0e, 0x0e, 0x0e);

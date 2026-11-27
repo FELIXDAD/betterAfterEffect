@@ -703,6 +703,30 @@ pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
     resp
 }
 
+/// AE 26's dropdown well (Accessibility Color Contrast off): #0e0e0e with a
+/// 1 pt #303030 border (#8d8d8d with the contrast on), its value and chevron in
+/// body text color. Paints the well; returns the color for the value and the
+/// chevron. Every dropdown-like field draws through this.
+pub fn field_frame(p: &egui::Painter, rect: Rect, hovered: bool, enabled: bool) -> Color32 {
+    let fill = if hovered && enabled {
+        color::FIELD_HOVER
+    } else {
+        color::FIELD
+    };
+    p.rect_filled(rect, 3.0, fill);
+    p.rect_stroke(
+        rect,
+        3.0,
+        Stroke::new(1.0, theme::field_border()),
+        egui::StrokeKind::Inside,
+    );
+    match (enabled, hovered) {
+        (false, _) => color::TEXT_DISABLED,
+        (true, true) => color::TEXT_STRONG,
+        (true, false) => color::TEXT,
+    }
+}
+
 /// Dark rounded field with a chevron, opening a list of choices.
 pub fn dropdown(
     ui: &mut Ui,
@@ -732,25 +756,21 @@ pub(crate) fn dropdown_with_source(
     let id = ui.id().with(id_salt);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
-        let bg = if resp.hovered() {
-            color::FIELD_HOVER
-        } else {
-            color::DROPDOWN
-        };
-        p.rect_filled(rect, 3.0, bg);
+        let ink = field_frame(p, rect, resp.hovered(), ui.is_enabled());
         let text = items.get(*selected).copied().unwrap_or("");
-        p.text(
-            pos2(rect.left() + 7.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            text,
-            theme::body(),
-            color::TEXT_STRONG,
-        );
+        p.with_clip_rect(rect.shrink2(vec2(2.0, 0.0)).with_max_x(rect.right() - 20.0))
+            .text(
+                pos2(rect.left() + 7.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                theme::body(),
+                ink,
+            );
         let chev = Rect::from_center_size(
             pos2(rect.right() - 11.0, rect.center().y),
             Vec2::splat(14.0),
         );
-        icons::paint(p, chev, Icon::ChevronDown, color::TEXT_STRONG);
+        icons::paint(p, chev, Icon::ChevronDown, ink);
     }
     let mut picked = None;
     egui::Popup::menu(&resp).id(id).width(width).show(|ui| {

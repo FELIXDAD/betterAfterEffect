@@ -898,25 +898,20 @@ fn combo(ui: &mut Ui, current: &str, width: f32, label: &str) -> egui::Response 
         .labeled_value(egui::WidgetType::ComboBox, label, current)
         .on_hover_text(label);
     let p = ui.painter();
-    let bg = if resp.hovered() {
-        bae_ui::theme::color::FIELD_HOVER
-    } else {
-        bae_ui::theme::color::DROPDOWN
-    };
-    p.rect_filled(rect, 3.0, bg);
+    let ink = bae_ui::widgets::field_frame(p, rect, resp.hovered(), ui.is_enabled());
     bae_ui::widgets::clipped_text(
         p,
         pos2(rect.left() + 7.0, rect.center().y),
         current,
         bae_ui::theme::body(),
-        bae_ui::theme::color::TEXT_STRONG,
+        ink,
         width - 28.0,
     );
     icons::paint(
         p,
         Rect::from_center_size(pos2(rect.right() - 11.0, rect.center().y), vec2(14.0, 14.0)),
         Icon::ChevronDown,
-        bae_ui::theme::color::TEXT_STRONG,
+        ink,
     );
     resp
 }

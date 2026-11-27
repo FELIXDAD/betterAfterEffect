@@ -1204,18 +1204,7 @@ pub(crate) fn menu_field(
     let resp = resp.labeled_value(egui::WidgetType::ComboBox, label, current);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
-        let enabled = ui.is_enabled();
-        let bg = if resp.hovered() {
-            color::FIELD_HOVER
-        } else {
-            color::DROPDOWN
-        };
-        p.rect_filled(rect, 3.0, bg);
-        let fg = if enabled {
-            color::TEXT_STRONG
-        } else {
-            color::TEXT_DISABLED
-        };
+        let fg = bae_ui::widgets::field_frame(p, rect, resp.hovered(), ui.is_enabled());
         p.with_clip_rect(rect.shrink2(vec2(4.0, 0.0)).with_max_x(rect.right() - 18.0))
             .text(
                 egui::pos2(rect.left() + 7.0, rect.center().y),

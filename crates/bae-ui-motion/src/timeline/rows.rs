@@ -267,9 +267,22 @@ impl TimelinePanel {
                     if resp.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
-                    // An effect dragged from Effects & Presets onto the layer.
-                    if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
-                        crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
+                    // An effect or preset dragged from Effects & Presets onto
+                    // the layer: its row lights up; a drop applies it.
+                    if let Some(fx) = resp.dnd_hover_payload::<crate::effects::EffectDrag>() {
+                        crate::drag_feedback::accept(ui.ctx());
+                        ui.painter().rect_stroke(
+                            rect.shrink(0.5),
+                            0.0,
+                            egui::Stroke::new(2.0, color::ACCENT),
+                            egui::StrokeKind::Inside,
+                        );
+                        if resp
+                            .dnd_release_payload::<crate::effects::EffectDrag>()
+                            .is_some()
+                        {
+                            fx.apply(cx, std::slice::from_ref(layer));
+                        }
                     }
                     if resp.double_clicked() {
                         crate::layer_panel::open_clicked(

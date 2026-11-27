@@ -34,6 +34,7 @@ pub mod demo;
 pub mod dialogs;
 pub mod disk_frames;
 mod display_color;
+mod drag_feedback;
 pub mod effects;
 mod expr;
 mod expr_menu;
