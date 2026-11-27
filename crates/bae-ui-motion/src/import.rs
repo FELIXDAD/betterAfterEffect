@@ -301,6 +301,27 @@ fn probe_dir(
     }
 }
 
+/// Probe a file that the script host has resolved within the user's chosen directory.
+pub(crate) fn script_footage(path: &Path, sequence: bool) -> Result<ImportFile, String> {
+    let mut out = Probed::default();
+    probe_file(
+        path,
+        None,
+        if sequence {
+            SequenceMode::Sequence
+        } else {
+            SequenceMode::Single
+        },
+        &ImportDefaults::default(),
+        &mut HashSet::new(),
+        &mut out,
+    );
+    out.files
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("cannot import {} as footage", path.display()))
+}
+
 /// Probe chosen or dropped paths: files (with their sequences) and folders.
 pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
     probe_selected(paths, defaults, SequenceMode::Sequence)

@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+cap-std.workspace = true
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 bae-interop-psd.workspace = true
 bae-effects.workspace = true
@@ -43,6 +44,7 @@ tracing.workspace = true
 tempfile.workspace = true
 
 [build-dependencies]
+serde_json.workspace = true
 # build.rs deflates the catalog tables into $OUT_DIR/catalog.bin.
 flate2.workspace = true
 

@@ -127,12 +127,42 @@ pub fn run_file_command(
     let prefs = app
         .resource::<std::sync::Arc<bae_prefs::PrefsStore>>()
         .map(|store| store.current());
-    let outcome = files::run(
-        doc,
-        dialogs,
-        inv,
-        prefs.as_deref().and_then(files::template_path),
-    );
+    let script = inv
+        .params
+        .get("script_window")
+        .and_then(|v| v.as_u64())
+        .filter(|_| inv.id == bae_ui::action::ids::SAVE)
+        .and_then(|id| {
+            let requests = app.resource::<bae_ui_motion::script_services::Requests>()?;
+            Some((id, requests.clone(), requests.take_save(id)?))
+        });
+    let outcome = if let Some((_, _, Some(target))) = &script {
+        if files::save_target(target) != *target {
+            Some(FileOutcome::Failed)
+        } else {
+            Some(files::save_picked(doc, dialogs, target.clone(), false))
+        }
+    } else {
+        files::run(
+            doc,
+            dialogs,
+            inv,
+            prefs.as_deref().and_then(files::template_path),
+        )
+    };
+    if let Some((id, requests, _)) = script {
+        requests.finish(
+            id,
+            match outcome {
+                Some(FileOutcome::Saved) => Ok(serde_json::Value::Null),
+                Some(FileOutcome::Cancelled) => Err("save cancelled".into()),
+                _ => Err("could not save the project".into()),
+            },
+        );
+    }
+    if let Some(location) = app.resource::<bae_ui::files::ProjectFile>() {
+        location.set(doc.location().map(std::path::Path::to_owned));
+    }
     if outcome == Some(FileOutcome::Replaced) {
         workspace.dismiss_home();
         restore(app, doc);

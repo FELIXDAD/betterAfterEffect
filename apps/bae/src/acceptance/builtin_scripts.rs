@@ -61,7 +61,13 @@ fn scriptui_panels_folder_opens_a_docked_script_with_live_callbacks() {
     .unwrap();
     let mut builder = AppBuilder::new();
     builder.insert_resource(dirs);
-    let mut h = gui_with(Gui::with_app(crate::assemble_modules(builder).build()));
+    let app = crate::assemble_modules(builder).build();
+    app.resource::<bae_script::ScriptWindows>()
+        .unwrap()
+        .prewarm_panels();
+    // Opening the panel and clicking its controls must use the prepared bytecode.
+    std::fs::remove_file(folder.join("Count comps.jsx")).unwrap();
+    let mut h = gui_with(Gui::with_app(app));
     let id = h
         .state()
         .menu_items()

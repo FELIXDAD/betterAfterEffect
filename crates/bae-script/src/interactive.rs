@@ -34,6 +34,7 @@ pub struct ScriptWindow {
 #[derive(Default)]
 struct Sessions {
     next: u64,
+    programs: BTreeMap<String, Arc<crate::PanelProgram>>,
     pending: BTreeMap<u64, (Worker, ScriptWindow)>,
 }
 
@@ -41,6 +42,18 @@ struct Sessions {
 pub struct ScriptWindows(Arc<Mutex<Sessions>>);
 
 impl ScriptWindows {
+    pub fn register_panel(&self, id: String, program: Arc<crate::PanelProgram>) {
+        self.0.lock().unwrap().programs.insert(id, program);
+    }
+
+    /// Compile installed panel files on the application's warm-up thread.
+    pub fn prewarm_panels(&self) {
+        let programs: Vec<_> = self.0.lock().unwrap().programs.values().cloned().collect();
+        for program in programs {
+            program.prepare();
+        }
+    }
+
     pub fn windows(&self) -> Vec<ScriptWindow> {
         self.0
             .lock()
@@ -65,24 +78,28 @@ impl ScriptWindows {
         source: String,
         panel: Option<String>,
     ) -> Reply {
-        let id = {
+        let (id, source) = {
             let mut s = self.0.lock().unwrap_or_else(|e| e.into_inner());
             if s.pending.len() >= 32 {
                 return Err("close a script window before opening another".into());
             }
             s.next += 1;
-            s.next
+            let source = match &panel {
+                Some(id) => crate::panel_program::InteractiveSource::Panel(
+                    s.programs.get(id).ok_or("unknown ScriptUI panel")?.clone(),
+                ),
+                None => crate::panel_program::InteractiveSource::Text(source),
+            };
+            (s.next, source)
         };
         let (requests, receive) = mpsc::sync_channel(0);
         let (send, events) = mpsc::sync_channel(1);
-        let dock = panel.is_some();
         let limit = state.env.time_limit.unwrap_or(crate::TIME_LIMIT);
         std::thread::Builder::new()
             .name("bae-jsx".into())
             .spawn(move || {
                 let result = crate::engine::interactive_file(
                     source,
-                    dock,
                     Endpoint {
                         requests: requests.clone(),
                         events,

@@ -13,6 +13,8 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 | 方式 | 说明 |
 |---|---|
 | 文件 ▸ 脚本 ▸ 运行脚本文件… | 选一个 `.jsx` 或 `.js` 文件运行 |
+| 文件 ▸ 脚本 ▸ 选择脚本可访问的目录… | 授予桌面脚本读写该目录及子目录的权限，直到重新选择目录或退出应用 |
+| 窗口 ▸ *面板脚本名* | 将 `.jsx` 放入脚本目录的 `ScriptUI Panels` 子目录。重启 BAE 后，应用在后台编译面板脚本，从「窗口」菜单即可打开面板。 |
 | 文件 ▸ 脚本 ▸ *脚本名* | 运行脚本文件夹里的脚本（和 AE 的 Scripts 文件夹一样，启动时列出） |
 | 文件 ▸ 脚本 ▸ 安装脚本文件… | 把选中的脚本复制到脚本文件夹，立即出现在菜单里（AE 要重启，BAE 不用） |
 | MCP 工具 `script.run` | Agent 直接运行一段脚本，见下文 |
@@ -48,6 +50,9 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 | 成员 | 说明 |
 |---|---|
 | `app.project` | 当前工程 |
+| `app.activeItem` | 当前活动项目 |
+| `app.findMenuCommandId(name)`、`app.executeCommand(id)` | 按菜单标题查询 AE 脚本命令编号，或用已知编号执行 BAE 对应菜单动作 |
+| `app.settings.haveSetting(section, key)`、`getSetting`、`saveSetting` | 按分组读写字符串；设置随当前用户保存 |
 | `app.version`、`app.buildName` | BAE 版本 |
 | `app.beginUndoGroup(name)`、`app.endUndoGroup()` | 见“撤销” |
 | `app.beginSuppressDialogs()`、`app.endSuppressDialogs()` | 接受调用，不做任何事 |
@@ -64,6 +69,9 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 | `selection` | 目前总是空数组 |
 | `items.addComp(name, width, height, pixelAspect, duration, frameRate)` | 新建合成（`comp.create`） |
 | `items.addFolder(name)` | 新建文件夹（`folder.create`） |
+| `importFile(new ImportOptions(file))` | 从已授权目录导入素材，返回 `FootageItem`，支持 `sequence` |
+| `file`、`save([file])` | 读取当前工程路径，保存当前工程或另存为 `.bae` / `.baez` |
+| `renderQueue` | 用 `items.add(comp)` 把合成加入队列。`item(i).render` 控制勾选状态，`item(i).numOutputModules` 给出输出模块数。用 `outputModule(j).file` 设置第 j 个输出路径（从 1 开始）。`render()` 等待本批所有输出完成后返回。 |
 
 ### Item、FolderItem、FootageItem、CompItem
 
@@ -155,9 +163,10 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 ## 和 AE 的差别
 
 - `item.id`、`layer.id` 是工程里的路径字符串（例如 `/comps/Comp_1`），不是数字；`app.project.itemByID()` 接受它。
-- 没有 `File`、`Folder`、`Socket`，也不能读写文件系统；ScriptUI 只支持常用控件（按钮、文字、编辑框、复选框、单选按钮、下拉列表、列表框、滑块、进度条、面板和分组）；`app.project.save()`、`importFile()` 等暂不支持。
+- 桌面脚本通过 `Folder.selectDialog()` 或文件菜单选定一个目录。`Folder.current`、`getFiles()`、`create()`、`File.openDialog()` 和文本读写使用该目录。文本采用 UTF-8，单次读取上限为 16 MiB。
+- ScriptUI 支持窗口、面板、分组、按钮、静态和可编辑文本、复选框、单选按钮、下拉框、列表、滑块和进度条。布局使用 `orientation`、`alignChildren`、`margins` 和 `spacing`；控件可绑定 `onClick` 和 `onChange`。
 - ExtendScript 的预处理行（`#target aftereffects`、`#include`、`#targetengine`）会被忽略；可以使用现代 JavaScript 语法（`let`、箭头函数、模板字符串……）。
-- 撤销：见上文，一次运行是一个撤销步骤（等用户回答的 JSX 文件和 ScriptUI 面板除外）。
+- 脚本等待用户输入或应用操作时会结束当前事务。恢复执行后的修改可单独撤销。
 
 ## MCP：`script.run`
 

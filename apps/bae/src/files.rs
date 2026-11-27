@@ -331,6 +331,17 @@ pub fn save_as(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome
     let Some(picked) = dialogs.pick_save_path(&name, dir) else {
         return FileOutcome::Cancelled;
     };
+    let native_confirmed = dialogs.save_dialog_confirms_replace();
+    save_picked(doc, dialogs, picked, native_confirmed)
+}
+
+pub(crate) fn save_picked(
+    doc: &mut Document,
+    dialogs: &mut dyn FileDialogs,
+    picked: PathBuf,
+    native_confirmed: bool,
+) -> FileOutcome {
+    let location = doc.location().map(Path::to_owned);
     let picked = with_project_extension(picked);
     // Issue #126: a path inside an existing `.bae` project folder (Windows save
     // dialogs walk into such folders) means that project — never a project
@@ -340,7 +351,7 @@ pub fn save_as(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome
         .as_deref()
         .is_some_and(|l| crate::document::same_path(l, &path));
     let result = if is_bae_project_dir(&path) && !is_open_project {
-        let native_asked = path == picked && dialogs.save_dialog_confirms_replace();
+        let native_asked = path == picked && native_confirmed;
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())

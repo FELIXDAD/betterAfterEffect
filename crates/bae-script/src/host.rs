@@ -15,6 +15,7 @@ use crate::{ScriptEnv, ScriptReport};
 
 /// State of one run, reachable from the host function.
 pub(crate) struct RunState<'a, 'e, 't> {
+    pub application: Option<&'a dyn crate::ScriptApplication>,
     pub tx: &'a mut Transaction<'t>,
     pub env: &'a ScriptEnv<'e>,
     pub access: crate::ProjectAccess,
@@ -673,6 +674,20 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
         return Err("this plugin has no project access".into());
     }
     match method {
+        "application" => {
+            let desktop = s.application.ok_or("application services are unavailable for this script")?;
+            let op = string(args, "op")?;
+            let value = desktop.call(s.stage(), &op, &args["args"])?;
+            if op != "import" {
+                return Ok(value);
+            }
+            // Only the host can produce this scoped, probed import descriptor.
+            let cmd = (s.env.commands)("item.import").ok_or("item.import unavailable")?;
+            let out = cmd.run_json(s.tx, json!({"files": [value]})).map_err(|e| e.to_string())?;
+            s.generation += 1;
+            s.evaluator.clear();
+            Ok(out["items"][0].clone())
+        }
         "blendModes" => Ok(json!(bae_model::schema::BLEND_MODES)),
         "context" => Ok(json!({
             "activeComp": s.env.active_comp.as_ref().map(PrimPath::as_str),
