@@ -102,9 +102,15 @@ const OM_TEMPLATES: [(&str, Option<OmSettings>); 12] = [
             DEFAULT_BIT_RATE_MBPS,
         )),
     ),
-    ("Lossless with Alpha", Some((ExportFormat::Png, Channels::RgbAlpha, DEFAULT_BIT_RATE_MBPS))),
+    (
+        "Lossless with Alpha",
+        Some((ExportFormat::Png, Channels::RgbAlpha, DEFAULT_BIT_RATE_MBPS)),
+    ),
     ("Alpha Only", None),
-    ("Lossless", Some((ExportFormat::Png, Channels::Rgb, DEFAULT_BIT_RATE_MBPS))),
+    (
+        "Lossless",
+        Some((ExportFormat::Png, Channels::Rgb, DEFAULT_BIT_RATE_MBPS)),
+    ),
     (
         "High Quality",
         Some((ExportFormat::ProRes, Channels::Rgb, DEFAULT_BIT_RATE_MBPS)),
@@ -266,8 +272,13 @@ pub(crate) enum QueueResolution {
 }
 
 impl QueueResolution {
-    pub(crate) const ALL: [Self; 5] =
-        [Self::Current, Self::Full, Self::Half, Self::Third, Self::Quarter];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Current,
+        Self::Full,
+        Self::Half,
+        Self::Third,
+        Self::Quarter,
+    ];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -979,7 +990,9 @@ pub(crate) fn render_job(
     // A `#` run in the name numbers the frames, one frame too (#207);
     // export_frames decides, like `bae render`.
     let request = RenderRequest {
-        resolution: job.resolution.resolve(crate::viewer::comp_resolution(stage, &job.comp)),
+        resolution: job
+            .resolution
+            .resolve(crate::viewer::comp_resolution(stage, &job.comp)),
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
     };
@@ -1848,8 +1861,9 @@ fn item_ui(
                 .or_else(|| {
                     let settings = render.as_ref()?;
                     RS_TEMPLATES.iter().find_map(|(name, resolution)| {
-                        (settings.span == Span::WorkArea && *resolution == Some(settings.resolution))
-                            .then(|| tr(name))
+                        (settings.span == Span::WorkArea
+                            && *resolution == Some(settings.resolution))
+                        .then(|| tr(name))
                     })
                 });
             let render_label = selected.unwrap_or_else(|| tr("Custom")).to_owned();
@@ -1867,10 +1881,15 @@ fn item_ui(
                         if let Some(preset) = library.and_then(|l| l.render.get(&n)) {
                             preset.apply(item, comp);
                             item.render_template = Some(n);
-                        } else if let Some(resolution) = RS_TEMPLATES.iter().find_map(|(label, r)| {
-                            (tr(label) == n).then_some(*r).flatten()
-                        }) {
-                            templates::Render { span: Span::WorkArea, resolution }.apply(item, comp);
+                        } else if let Some(resolution) = RS_TEMPLATES
+                            .iter()
+                            .find_map(|(label, r)| (tr(label) == n).then_some(*r).flatten())
+                        {
+                            templates::Render {
+                                span: Span::WorkArea,
+                                resolution,
+                            }
+                            .apply(item, comp);
                             item.render_template = None;
                         }
                     }
@@ -1942,7 +1961,9 @@ fn item_ui(
                         .filter(|n| {
                             library
                                 .and_then(|l| l.outputs.get(*n))
-                                .filter(|p| !module.format.is_quicktime() || p.pcm_audio == module.pcm_audio)
+                                .filter(|p| {
+                                    !module.format.is_quicktime() || p.pcm_audio == module.pcm_audio
+                                })
                                 .and_then(|p| p.settings())
                                 .is_some_and(|(f, c, b)| {
                                     module.format == f
@@ -1954,7 +1975,9 @@ fn item_ui(
                         .or_else(|| om_template(module).map(tr));
                     let format = tr(format_label(module.format));
                     let output_label = match selected {
-                        Some(name) if module.format == ExportFormat::Png => format!("{name} ({format})"),
+                        Some(name) if module.format == ExportFormat::Png => {
+                            format!("{name} ({format})")
+                        }
                         _ => selected.unwrap_or(format).to_owned(),
                     };
                     let popup_id = egui::Id::new(("rq-om-templates", id, index));
@@ -2516,6 +2539,7 @@ mod tests {
             templates::Output::capture(&item.outputs[0]),
         );
         let restored: Library = serde_json::from_value(serde_json::to_value(lib).unwrap()).unwrap();
+        item.resolution = QueueResolution::Full;
         restored.render["半秒"].apply(item, &target);
         assert_eq!((item.start, item.end), (0, 11));
         assert_eq!(item.resolution, QueueResolution::Third);

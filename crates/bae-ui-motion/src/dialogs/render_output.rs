@@ -120,13 +120,20 @@ impl RenderSettings {
                 let names = QueueResolution::ALL.map(|r| tr(r.label()));
                 let mut selected = self.resolution as usize;
                 if bae_ui::widgets::dropdown(ui, "rq-resolution", &mut selected, &names, 170.0)
-                    .labeled_value(egui::WidgetType::ComboBox, tr("Resolution:"), names[selected])
+                    .labeled_value(
+                        egui::WidgetType::ComboBox,
+                        tr("Resolution:"),
+                        names[selected],
+                    )
                     .changed()
                 {
                     self.resolution = QueueResolution::ALL[selected];
                 }
             });
-            let [w, h] = self.resolution.resolve(comp_factor).scaled_size(info.width, info.height);
+            let [w, h] = self
+                .resolution
+                .resolve(comp_factor)
+                .scaled_size(info.width, info.height);
             dialog::row(ui, LW, "", |ui| {
                 ui.label(format!("{} {w} × {h}", tr("Size:")));
             });

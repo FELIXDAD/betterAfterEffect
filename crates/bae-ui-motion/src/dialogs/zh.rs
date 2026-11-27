@@ -129,7 +129,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Crop", "裁剪"),
     ("Audio Output", "音频输出"),
     ("Audio Output Auto", "自动音频输出"),
-    ("Image sequences do not contain audio.", "图像序列不包含音频。"),
+    (
+        "Image sequences do not contain audio.",
+        "图像序列不包含音频。",
+    ),
     // Dialogs (`dialogs`): Composition Settings. Terms follow the AE 26 Simplified
     // Chinese UI (docs/glossary.md §十).
     ("Composition Settings", "合成设置"),
