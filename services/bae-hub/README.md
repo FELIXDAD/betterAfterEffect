@@ -61,7 +61,7 @@ access = "write"          # write：可编辑、可新建工程；read：只能�
 projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*" 表示全部
 ```
 
-`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。每一项都不能是 0（包括 `max_backlog_mib`：0 会让流量控制只要有一个字节在排队就不发工程数据），填 0 时拒绝启动。几个值要配得上，配不上时拒绝启动：`max_message_mib` 不能超过 256（客户端最多收这么大，超过的消息客户端拒收，重连后又发，永远卡住）；`max_unsent_mib` 不能小于 `max_message_mib + max_backlog_mib`（被流量控制暂停的客户端那里可能合法地排队这么多），不写时跟着另外两个算。`max_message_mib` 调小的话，比它大的工程层就同步不了：Hub 发给客户端时只跳过这个工程层，连接不断，日志里记一条 warn；可写客户端发来时连接被断开，重连后又发。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
+`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。每一项都不能是 0（包括 `max_backlog_mib`：0 会让流量控制只要有一个字节在排队就不发工程数据），填 0 时拒绝启动。几个值要配得上，配不上时拒绝启动：`max_message_mib` 不能超过 256（客户端最多收这么大，超过的消息客户端拒收，重连后又发，永远卡住）；`max_unsent_mib` 不能小于 `max_message_mib + max_backlog_mib`（被流量控制暂停的客户端那里可能合法地排队这么多），不写时跟着另外两个算。`max_message_mib` 调小的话，比它大的工程层就同步不了：Hub 发给客户端时只跳过这个工程层，连接不断，日志里记一条 warn；新版本的客户端从握手知道 Hub 的上限（`x-bae-max-incoming`，见下面的"协议"），也只跳过这个工程层；旧版本的客户端照样发来，连接被断开，重连后又发。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
 
 一个数据目录同时只能被一个 `bae-hub` 使用（靠 `hub.lock` 保证）。
 
@@ -104,6 +104,7 @@ Authorization: Bearer <令牌>
 - **Hub 侧会话**：每个连接一个会话，`hello_interval` 为 5 秒，收到修改立即转发。
 - **在线状态**（`Presence`）由 `Relay` 转发：新连接马上收到所有人的状态；连接断开时，Hub 替它向其他人发"离开"。
 - **权限**：握手成功的响应（101）带 `x-bae-access: read` 或 `x-bae-access: write`，是这个连接按令牌和工程得到的权限。客户端用 `HubTransport::access()` 读出，应用据此在只读时禁用编辑、不发修改。没有这个头的旧 Hub，客户端当作"未知"，照常发送。
+- **接收上限**：握手的请求和响应都带 `x-bae-max-incoming: <字节数>`，是这一端收的单条消息上限（Hub 这边：可写连接是 `max_message_mib`，只读连接是 `read_only_max_message_kib`）。两边发送时都不超过对方说的值：放不下的工程层只跳过，不发出去被断开（spec 3.1）。旧版本没有这个头，照旧按自己的上限发。
 - **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。只读连接发来的单条消息最大 16 MiB（`read_only_max_message_kib`），更大的读到帧头就断开连接，不会先收进内存；发给它们的消息照样可以很大。
   - 客户端用只读令牌连接时（`/v1/status` 返回 `"access": "read"`），会话要设 `SessionConfig::send_data = false`（`bae_sync::Connection` 按握手响应的 `x-bae-access: read` 自动设置）：本地的修改不发出去，只收别人的。不设的话，会话会在 Hub 每个 `Hello`（5 秒一次）之后、每次重连之后把本地修改再发一遍，一个文档里超过上限就每次都被断开。
   - 上限不能设得太小：`Hello` 随文档数和编辑过它们的会话数增长（每个文档、每个编辑过它的会话约 11 字节），超过上限的话这个查看者根本连不上。
@@ -134,7 +135,7 @@ Authorization: Bearer <令牌>
 
 | 文件 | 内容 |
 |---|---|
-| `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept_granting(stream, None, client_limits(权限), 权限)` 完成握手（响应里带 `x-bae-access`），然后挂到工程的 Relay 上。上限是 `hub.toml` 的 `[limits]`（`HubConfig::limits`），只读连接的 `max_incoming` 换成 `read_only_max_incoming`（默认 16 MiB）。 |
+| `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept_granting(stream, None, client_limits(权限), 权限)` 完成握手（响应里带 `x-bae-access` 和 `x-bae-max-incoming`），然后挂到工程的 Relay 上。上限是 `hub.toml` 的 `[limits]`（`HubConfig::limits`），只读连接的 `max_incoming` 换成 `read_only_max_incoming`（默认 16 MiB）。 |
 | `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。目录这个对端单独设置（`Relay::connect_with`）：最多每 300 ms 写一次（`HubConfig::store_send_interval`），拖动时不会每秒追加几十次。最后一个客户端断开时立即 `Relay::flush()` 把还没写的写出去；关闭工程（卸载、退出）前再 `flush` 一次，然后 `Relay::close_peer` 等存盘线程写完，写盘失败记进日志。 |
 | `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒一个字节都没收到就断开；把 WebSocket 的积压报告给会话（流量控制）。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
@@ -162,7 +163,7 @@ Authorization: Bearer <令牌>
   - 不带 WebSocket 升级头访问同步地址：426。
   - `?token=` 可以代替请求头。
   - `/v1/projects` 只列出令牌能看到的工程。
-- **只读**：只读客户端收得到别人的修改，自己的修改不会传出去；状态接口里显示它是只读。只读客户端发来超过上限的消息时连接被断开，它照样收得到 1 MiB 的修改，可写客户端不受影响（`read_only_connections_cannot_send_large_messages`）。本地改了 1.5 MiB 的查看者：默认上限下不设 `send_data` 也不断开；设了 `send_data = false` 时上限只有 64 KiB 也不断开，什么数据都不发（`viewers_with_large_local_edits_stay_connected`）。
+- **只读**：只读客户端收得到别人的修改，自己的修改不会传出去；状态接口里显示它是只读。只读客户端照样收得到 1 MiB 的修改；它从握手知道自己的上限，超过的消息自己不发、连接不断；不知道上限的客户端（手写的握手）发来超过上限的消息时，Hub 读到帧头就断开它；可写客户端不受影响（`read_only_connections_cannot_send_large_messages`）。本地改了 1.5 MiB 的查看者：默认上限下不设 `send_data` 也不断开；设了 `send_data = false` 时上限只有 64 KiB 也不断开，什么数据都不发（`viewers_with_large_local_edits_stay_connected`）。
 - **放不下的工程层**：上限设成 256 KiB，一个客户端分 4 次各写 100 KiB，新加入的客户端缺整段：Hub 只对它跳过这个工程层，另一个工程层的修改照常收到，三个连接都不断（`a_document_too_large_for_one_client_does_not_drop_its_link`；以前新加入的客户端被断开）。
 - **应用的连接管理**（`tests/connection.rs`，客户端是 `bae_sync::Connection`）：两个应用经 Hub 收敛；Hub 停掉后两边离线、重试间隔翻倍，在同一端口重新启动后自动重连、收敛，离线时的修改都在，在线状态立即恢复；错误令牌、没有令牌、令牌不能开这个工程、只读令牌开不存在的工程、工程 ID 不合法时停下等用户处理，不反复重试；只读令牌拿到 `x-bae-access: read`，收得到修改、自己的修改不发；关闭时最后的修改（被 `min_send_interval` 推迟的）和"离开"都送到；Hub 不在时退出的人重连后不再显示，新加入的人马上看到重连的人；连接稳定一段时间后断开，重试间隔从头算；空闲 11 秒链路不断（Hub 的 `Hello` 让客户端知道它还在）。
 - **匿名只读**：打开匿名只读后，不带令牌也能连接，但不能新建工程。

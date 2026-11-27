@@ -24,6 +24,34 @@ use crate::transport::{Access, Transport, check_size};
 /// leave the client at [`Access::Unknown`].
 pub const ACCESS_HEADER: &str = "x-bae-access";
 
+/// Header of both handshake messages (the client's request, the hub's
+/// response) that tells the other side the largest message this side takes
+/// (its [`HubLimits::max_incoming`], in bytes). Each side then sends at most
+/// the smaller of its own `max_message` and that
+/// ([`HubTransport::max_message_size`]): a message the other side would drop
+/// the link over fails to send instead, and only its document is skipped
+/// (a hub configured for smaller messages, the hub's smaller limit for
+/// read-only connections). Peers that do not send it (older builds) are sent
+/// up to `max_message`, as before.
+pub const MAX_INCOMING_HEADER: &str = "x-bae-max-incoming";
+
+/// What a [`MAX_INCOMING_HEADER`] says: a positive number of bytes, else
+/// nothing (missing or garbled: the peer's limit is not known).
+fn max_incoming(headers: &tungstenite::http::HeaderMap) -> Option<usize> {
+    let n: u64 = headers
+        .get(MAX_INCOMING_HEADER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    (n > 0).then(|| usize::try_from(n).unwrap_or(usize::MAX))
+}
+
+fn max_incoming_value(limits: &HubLimits) -> HeaderValue {
+    HeaderValue::from(limits.max_incoming.max(1) as u64)
+}
+
 /// Limits of one hub connection (`docs/spec/sync.md` §3.1).
 ///
 /// tungstenite's defaults (16 MiB per frame, unlimited write queue) do not fit
@@ -45,17 +73,19 @@ pub struct HubLimits {
     /// Largest encoded protocol message this side sends. A whole sublayer
     /// snapshot must fit: a larger one fails to send
     /// ([`SyncError::MessageTooLarge`]) instead of being refused remotely,
-    /// and the session skips only its document. The peer's `max_incoming` must
-    /// not be smaller (except for document data the peer will not take anyway:
-    /// a read-only hub connection, whose session sends none,
-    /// [`crate::SessionConfig::send_data`]), or it drops the link over a
-    /// larger message.
+    /// and the session skips only its document. When the peer said how much
+    /// it takes in the handshake ([`MAX_INCOMING_HEADER`]), the smaller of the
+    /// two applies ([`HubTransport::max_message_size`]); a peer that does not
+    /// say (an older build) must take at least this much, or it drops the link
+    /// over a larger message.
     pub max_message: usize,
     /// Largest message accepted from the peer (also the frame limit, since a
     /// message is one frame): a larger one fails `recv` as soon as its frame
-    /// header arrives, before it is buffered, and the link is dropped. The hub
-    /// takes less from read-only connections (16 MiB by default), whose
-    /// sessions should send no document data.
+    /// header arrives, before it is buffered, and the link is dropped. Told to
+    /// the peer in the handshake ([`MAX_INCOMING_HEADER`]), so peers of this
+    /// version do not send larger ones. The hub takes less from read-only
+    /// connections (16 MiB by default), whose sessions should send no
+    /// document data.
     pub max_incoming: usize,
     /// Flow control: what may wait for a peer that reads slowly before sessions
     /// hold back further document data (see above; sessions have their own
@@ -153,6 +183,8 @@ pub struct HubTransport {
     limits: HubLimits,
     /// Client side: what the hub said we may do. Server side: what we said.
     access: Access,
+    /// The largest message the peer said it takes ([`MAX_INCOMING_HEADER`]).
+    peer_max_incoming: Option<usize>,
     /// About how many bytes wait in tungstenite's write buffer.
     unsent: u64,
     /// `Counted::written` when we last looked.
@@ -367,7 +399,10 @@ impl HubTransport {
         timeout: Duration,
         limits: HubLimits,
     ) -> Result<Self, SyncError> {
-        let (request, host, port) = client_request(url, token)?;
+        let (mut request, host, port) = client_request(url, token)?;
+        request
+            .headers_mut()
+            .insert(MAX_INCOMING_HEADER, max_incoming_value(&limits));
         let addrs: Vec<SocketAddr> = (host.as_str(), port)
             .to_socket_addrs()
             .map_err(hub_err)?
@@ -389,7 +424,8 @@ impl HubTransport {
             .get(ACCESS_HEADER)
             .and_then(|v| v.to_str().ok())
             .map_or(Access::Unknown, Access::parse);
-        Self::ready(ws, limits, access)
+        let peer_max_incoming = max_incoming(response.headers());
+        Self::ready(ws, limits, access, peer_max_incoming)
     }
 
     /// Server side of an accepted TCP connection (tests and simple tools; the
@@ -411,7 +447,9 @@ impl HubTransport {
     /// [`accept_with`](Self::accept_with), telling the client what it may do
     /// in the handshake response ([`ACCESS_HEADER`]; nothing for
     /// [`Access::Unknown`]). The hub checks access itself: a read-only client
-    /// that sends edits anyway gets them dropped.
+    /// that sends edits anyway gets them dropped. Every `accept` also tells
+    /// the client `limits.max_incoming` ([`MAX_INCOMING_HEADER`]) and sends
+    /// at most what the client said it takes.
     pub fn accept_granting(
         stream: TcpStream,
         token: Option<&str>,
@@ -424,6 +462,7 @@ impl HubTransport {
             .map_err(hub_err)?;
         stream.set_nodelay(true).map_err(hub_err)?;
         let expected = token.map(|t| format!("Bearer {t}"));
+        let mut peer_max_incoming = None;
         // The callback signature (and its large error type) is tungstenite's.
         #[allow(clippy::result_large_err)]
         let check = |req: &Request, mut resp: Response| -> Result<Response, ErrorResponse> {
@@ -442,15 +481,23 @@ impl HubTransport {
                         resp.headers_mut()
                             .insert(ACCESS_HEADER, HeaderValue::from_static(access.as_str()));
                     }
+                    resp.headers_mut()
+                        .insert(MAX_INCOMING_HEADER, max_incoming_value(&limits));
+                    peer_max_incoming = max_incoming(req.headers());
                     Ok(resp)
                 }
             }
         };
         let ws = tungstenite::accept_hdr(Counted::new(stream), check).map_err(hub_err)?;
-        Self::ready(ws, limits, access)
+        Self::ready(ws, limits, access, peer_max_incoming)
     }
 
-    fn ready(ws: WebSocket<Counted>, limits: HubLimits, access: Access) -> Result<Self, SyncError> {
+    fn ready(
+        ws: WebSocket<Counted>,
+        limits: HubLimits,
+        access: Access,
+        peer_max_incoming: Option<usize>,
+    ) -> Result<Self, SyncError> {
         let s = &ws.get_ref().stream;
         s.set_read_timeout(None).map_err(hub_err)?;
         s.set_write_timeout(None).map_err(hub_err)?;
@@ -461,6 +508,7 @@ impl HubTransport {
             ws,
             limits,
             access,
+            peer_max_incoming,
             unsent: 0,
             written,
             progress: Instant::now(),
@@ -475,7 +523,9 @@ impl HubTransport {
         Ok(transport)
     }
 
-    /// Change the limits of an open connection.
+    /// Change the limits of an open connection. The peer was told
+    /// `max_incoming` in the handshake ([`MAX_INCOMING_HEADER`]); a smaller
+    /// one set here is not told, and the peer may send up to the old one.
     pub fn set_limits(&mut self, limits: HubLimits) {
         self.limits = limits;
         let max_incoming = limits.max_incoming.max(1);
@@ -491,6 +541,12 @@ impl HubTransport {
     /// The connection's limits.
     pub fn limits(&self) -> HubLimits {
         self.limits
+    }
+
+    /// The largest message the peer said it takes in the handshake
+    /// ([`MAX_INCOMING_HEADER`]); `None` if it did not say (an older build).
+    pub fn peer_max_incoming(&self) -> Option<usize> {
+        self.peer_max_incoming
     }
 
     /// Fail [`recv`](Transport::recv) once not a byte arrived for `timeout`
@@ -711,9 +767,12 @@ impl Transport for HubTransport {
         usize::try_from(self.unsent).unwrap_or(usize::MAX)
     }
 
-    /// [`HubLimits::max_message`].
+    /// [`HubLimits::max_message`], or what the peer said it takes
+    /// ([`peer_max_incoming`](HubTransport::peer_max_incoming)) if that is
+    /// less.
     fn max_message_size(&self) -> Option<usize> {
-        Some(self.limits.max_message)
+        let own = self.limits.max_message;
+        Some(self.peer_max_incoming.map_or(own, |peer| own.min(peer)))
     }
 }
 

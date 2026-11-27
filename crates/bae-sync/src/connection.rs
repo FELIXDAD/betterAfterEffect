@@ -239,7 +239,9 @@ pub struct ConnectionConfig {
     #[cfg(feature = "hub")]
     pub hub_timeout: Duration,
     /// Hubs: message size, write-buffer and stall limits of the link
-    /// ([`HubLimits::default`]: 256 MiB messages both ways). The session's
+    /// ([`HubLimits::default`]: 256 MiB messages both ways; a hub that says
+    /// in the handshake it takes less is sent at most that,
+    /// [`HubTransport::max_message_size`]). The session's
     /// flow control is its own `max_backlog`, counted over the link's whole
     /// backlog (its I/O thread's queue and the WebSocket's write buffer).
     #[cfg(feature = "hub")]

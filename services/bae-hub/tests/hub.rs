@@ -255,13 +255,41 @@ fn a_document_too_large_for_one_client_does_not_drop_its_link() {
     assert_eq!(peers.len(), 3, "{peers:?}");
 }
 
+/// A WebSocket handshake for the test project written by hand, as a client
+/// of another or an older build would: the socket, and the response head.
+fn raw_websocket(addr: SocketAddr, token: &str) -> (std::net::TcpStream, String) {
+    use std::io::{Read, Write};
+    let mut tcp = std::net::TcpStream::connect(addr).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    write!(
+        tcp,
+        "GET {}{PROJECT} HTTP/1.1\r\nHost: hub\r\nUpgrade: websocket\r\n\
+         Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+         Sec-WebSocket-Version: 13\r\nAuthorization: Bearer {token}\r\n\r\n",
+        bae_hub::SYNC_PREFIX
+    )
+    .unwrap();
+    let mut response = Vec::new();
+    while !response.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        tcp.read_exact(&mut byte).unwrap();
+        response.push(byte[0]);
+    }
+    let response = String::from_utf8_lossy(&response).into_owned();
+    assert!(response.starts_with("HTTP/1.1 101"), "{response}");
+    (tcp, response)
+}
+
 /// The hub takes at most `read_only_max_incoming` from read-only connections:
 /// a read-only token cannot make it take in messages as large as writers may
 /// send (it used to take 256 MiB from anyone and drop the edits only once
-/// decoded). They are still sent large ones.
+/// decoded). They are still sent large ones. The handshake tells the client
+/// the limit, so this build's client does not send larger ones; one that
+/// does not know it (another or an older build) is dropped.
 #[test]
 fn read_only_connections_cannot_send_large_messages() {
-    use bae_sync::{Message, Transport};
+    use bae_sync::{Message, SyncError, Transport};
+    use std::io::{Read, Write};
     let data = tempfile::tempdir().unwrap();
     let mut cfg = config(data.path());
     cfg.read_only_max_incoming = 256 << 10;
@@ -293,31 +321,46 @@ fn read_only_connections_cannot_send_large_messages() {
     let viewer = &mut clients[1];
     assert!(viewer.session.stats().bytes_received >= 1 << 20);
 
-    // The viewer sends one over its limit: the hub drops the connection as
-    // soon as the frame header arrives.
-    viewer
-        .link
-        .send(Message::Updates {
-            doc: DocKey::sublayer(&SublayerId::root()),
-            version: Default::default(),
-            data: vec![0; 512 << 10],
-        })
-        .unwrap();
+    // The viewer's client knows its limit from the handshake: it refuses a
+    // larger message itself, and the link stays.
+    assert_eq!(viewer.link.max_message_size(), Some(256 << 10));
+    let refused = viewer.link.send(Message::Updates {
+        doc: DocKey::sublayer(&SublayerId::root()),
+        version: Default::default(),
+        data: vec![0; 512 << 10],
+    });
+    assert!(
+        matches!(refused, Err(SyncError::MessageTooLarge { max, .. }) if max == 256 << 10),
+        "{refused:?}"
+    );
+    pump_for(&mut clients, Duration::from_millis(100));
+    // A client that does not know sends one anyway: the hub drops the
+    // connection as soon as the frame header arrives.
+    let (mut tcp, response) = raw_websocket(addr, READ);
+    assert!(
+        response
+            .to_ascii_lowercase()
+            .contains(&format!("x-bae-max-incoming: {}", 256 << 10)),
+        "{response}"
+    );
+    let len: u64 = 512 << 10;
+    let mut header = vec![0x82, 0x80 | 127];
+    header.extend_from_slice(&len.to_be_bytes());
+    header.extend_from_slice(&[0; 4]);
+    tcp.write_all(&header).unwrap();
+    let _ = tcp.write_all(&[0; 4096]);
     let start = Instant::now();
+    let mut buf = vec![0; 1 << 16];
     loop {
-        if viewer
-            .session
-            .pump(&mut viewer.stage, &mut viewer.link)
-            .is_err()
-        {
-            break;
+        match tcp.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "the hub took a large message from a read-only connection"
+            ),
         }
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "the hub took a large message from a read-only connection"
-        );
-        std::thread::sleep(Duration::from_millis(5));
     }
+    assert!(start.elapsed() < Duration::from_secs(10));
     // Writers are not affected.
     let mut editor = clients.remove(0);
     for _ in 0..3 {
@@ -835,24 +878,7 @@ fn a_slow_upload_of_one_large_message_is_not_cut_off() {
     let mut cfg = config(data.path());
     cfg.peer_timeout = Duration::from_millis(500);
     let hub = start(cfg);
-    let mut tcp = std::net::TcpStream::connect(hub.local_addr()).unwrap();
-    tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    write!(
-        tcp,
-        "GET {}{PROJECT} HTTP/1.1\r\nHost: hub\r\nUpgrade: websocket\r\n\
-         Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
-         Sec-WebSocket-Version: 13\r\nAuthorization: Bearer {WRITE}\r\n\r\n",
-        bae_hub::SYNC_PREFIX
-    )
-    .unwrap();
-    let mut response = Vec::new();
-    while !response.ends_with(b"\r\n\r\n") {
-        let mut byte = [0];
-        tcp.read_exact(&mut byte).unwrap();
-        response.push(byte[0]);
-    }
-    let response = String::from_utf8_lossy(&response);
-    assert!(response.starts_with("HTTP/1.1 101"), "{response}");
+    let (mut tcp, _) = raw_websocket(hub.local_addr(), WRITE);
 
     // One masked binary frame of 1 MiB, sent at about 40 KB/s for 2 s (four
     // peer timeouts); the hub's own messages are not read meanwhile.

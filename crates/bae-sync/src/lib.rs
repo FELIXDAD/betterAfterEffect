@@ -62,7 +62,7 @@ pub use history::{
     RevertScope, VersionJson, VersionView,
 };
 #[cfg(feature = "hub")]
-pub use hub::{ACCESS_HEADER, HubLimits, HubTransport};
+pub use hub::{ACCESS_HEADER, HubLimits, HubTransport, MAX_INCOMING_HEADER};
 pub use presence::{PeerPresence, Playhead, PresenceState};
 pub use protocol::{DocKey, Message, PROTOCOL_VERSION};
 pub use relay::{PeerHandle, Relay, RelayOutcome};

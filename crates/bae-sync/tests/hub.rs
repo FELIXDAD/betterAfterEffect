@@ -26,6 +26,11 @@ struct TestHub {
 
 impl TestHub {
     fn start(token: Option<&'static str>) -> Self {
+        Self::start_with(token, bae_sync::HubLimits::default())
+    }
+
+    /// A hub whose connections have `limits`.
+    fn start_with(token: Option<&'static str>, limits: bae_sync::HubLimits) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let addr = listener.local_addr().unwrap();
@@ -36,7 +41,7 @@ impl TestHub {
             relay.set_hello_interval(Some(Duration::from_millis(500)));
             while !flag.load(Ordering::Relaxed) {
                 if let Ok((stream, _)) = listener.accept()
-                    && let Ok(t) = HubTransport::accept(stream, token)
+                    && let Ok(t) = HubTransport::accept_with(stream, token, limits)
                 {
                     relay.connect(Box::new(t));
                 }
@@ -810,4 +815,173 @@ fn a_slow_reader_is_not_flooded_by_its_own_hellos() {
     // drained (1.4 times the project on Linux, more where loopback buffers
     // are larger).
     assert!(data < DOCS * SIZE * 5 / 4, "{data}");
+}
+
+/// Each side of the handshake says how much it takes
+/// ([`bae_sync::MAX_INCOMING_HEADER`]: its `max_incoming`), and sends at
+/// most that: a hub configured for smaller messages than a client's default
+/// (or an older hub default) is not sent a message it would drop the link
+/// over. Both ways: the hub learns the client's limit from the request.
+#[test]
+fn each_side_sends_at_most_what_the_other_takes() {
+    use bae_sync::{HubLimits, Transport};
+    let small = HubLimits {
+        max_message: 64 << 10,
+        max_incoming: 64 << 10,
+        ..HubLimits::default()
+    };
+    let (client, server) = raw_pair(small);
+    assert_eq!(client.peer_max_incoming(), Some(64 << 10));
+    assert_eq!(client.max_message_size(), Some(64 << 10));
+    assert_eq!(client.limits(), HubLimits::default());
+    assert_eq!(
+        server.peer_max_incoming(),
+        Some(HubLimits::default().max_incoming)
+    );
+    assert_eq!(server.max_message_size(), Some(64 << 10));
+
+    // A client that takes less than the hub sends.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hub = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        HubTransport::accept(stream, None).unwrap()
+    });
+    let client = HubTransport::connect_with(
+        &format!("ws://{addr}/projects/film"),
+        None,
+        Duration::from_secs(5),
+        HubLimits {
+            max_incoming: 32 << 10,
+            ..HubLimits::default()
+        },
+    )
+    .unwrap();
+    let hub = hub.join().unwrap();
+    assert_eq!(hub.peer_max_incoming(), Some(32 << 10));
+    assert_eq!(hub.max_message_size(), Some(32 << 10));
+    assert_eq!(
+        client.max_message_size(),
+        Some(HubLimits::default().max_message)
+    );
+}
+
+/// A hub configured for smaller messages than the client sends (here
+/// 64 KiB against the default 256 MiB): the client learns the hub's limit in
+/// the handshake and skips the document that does not fit itself, reported
+/// once; the other document syncs and the link stays up. It used to send the
+/// message, the hub dropped the link over it, and the client reconnected and
+/// sent it again, forever.
+#[test]
+fn a_client_skips_what_a_hub_with_a_smaller_limit_would_not_take() {
+    use bae_sync::{DocKey, HubLimits, Transport};
+    let small = HubLimits {
+        max_message: 64 << 10,
+        max_incoming: 64 << 10,
+        ..HubLimits::default()
+    };
+    let hub = TestHub::start_with(Some("team-secret"), small);
+    let base = base_snapshots();
+    let mut a = Client::new(0, &hub.url(), &base);
+    let mut b = Client::new(1, &hub.url(), &base);
+    assert_eq!(a.link.max_message_size(), Some(64 << 10));
+    let root = SublayerId::root();
+    let anim = sl("anim/a");
+    wait_until("the hub has the base", Duration::from_secs(10), || {
+        a.pump().unwrap();
+        b.pump().unwrap();
+        [&a, &b].iter().all(|c| {
+            c.session.unsynced(&c.stage).is_empty()
+                && c.session
+                    .remote_versions()
+                    .is_some_and(|r| r.contains_key(&DocKey::sublayer(&root)))
+        })
+    });
+    note(&mut a, &root, 256 << 10);
+    let mut too_large = 0;
+    for _ in 0..5 {
+        note(&mut a, &anim, 100);
+        wait_until("the small edit", Duration::from_secs(10), || {
+            too_large += a.pump().unwrap().errors.len();
+            b.pump().unwrap();
+            has_all(&a, &b, &anim)
+        });
+    }
+    assert_eq!(too_large, 1);
+    assert!(!has_all(&a, &b, &root));
+    assert_eq!(a.session.too_large(&a.stage), [DocKey::sublayer(&root)]);
+}
+
+/// A hub that does not say how much it takes (an older build; here plain
+/// tungstenite with a 64 KiB limit): the client sends up to its own
+/// `max_message`, as before, and such a hub drops the link over a larger
+/// message. A client that does not say (an older build) is sent up to the
+/// hub's own `max_message`.
+#[test]
+fn peers_that_do_not_say_keep_the_old_limits() {
+    use bae_sync::{DocKey, HubLimits, Message, Transport};
+    use tungstenite::protocol::WebSocketConfig;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let old_hub = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(64 << 10))
+            .max_frame_size(Some(64 << 10));
+        let mut ws = tungstenite::accept_with_config(stream, Some(config)).unwrap();
+        // Over its limit: the read fails.
+        ws.read().unwrap_err().to_string()
+    });
+    let mut client = HubTransport::connect(
+        &format!("ws://{addr}/projects/film"),
+        None,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(client.peer_max_incoming(), None);
+    assert_eq!(
+        client.max_message_size(),
+        Some(HubLimits::default().max_message)
+    );
+    client
+        .send(Message::Updates {
+            doc: DocKey::sublayer(&SublayerId::root()),
+            version: Default::default(),
+            data: vec![0; 128 << 10],
+        })
+        .unwrap();
+    wait_until("the old hub to read", Duration::from_secs(10), || {
+        let _ = client.recv();
+        old_hub.is_finished()
+    });
+    let e = old_hub.join().unwrap();
+    assert!(
+        e.to_lowercase().contains("too long") || e.contains("size"),
+        "{e}"
+    );
+
+    // An old client: the hub sends up to its own `max_message`.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hub = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        HubTransport::accept(stream, None).unwrap()
+    });
+    let stream = std::net::TcpStream::connect(addr).unwrap();
+    let (_old_client, response) =
+        tungstenite::client::client(format!("ws://{addr}/projects/film"), stream).unwrap();
+    // The hub says its limit; the old client does not look.
+    assert_eq!(
+        response
+            .headers()
+            .get(bae_sync::MAX_INCOMING_HEADER)
+            .and_then(|v| v.to_str().ok()),
+        Some(HubLimits::default().max_incoming.to_string().as_str())
+    );
+    let hub = hub.join().unwrap();
+    assert_eq!(hub.peer_max_incoming(), None);
+    assert_eq!(
+        hub.max_message_size(),
+        Some(HubLimits::default().max_message)
+    );
 }
