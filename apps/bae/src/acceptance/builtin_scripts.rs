@@ -5,6 +5,49 @@ use egui_kittest::kittest::Queryable as _;
 use serde_json::json;
 
 #[test]
+fn recent_script_menu_disables_missing_files_and_runs_installed_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let dirs = bae_platform::AppDirs::under_root(dir.path());
+    let scripts = dirs.data.join("Scripts");
+    std::fs::create_dir_all(&scripts).unwrap();
+    let installed = scripts.join("Caption.jsx");
+    std::fs::write(
+        &installed,
+        include_str!("../../../../crates/bae-script/tests/compat/editor-title.jsx"),
+    )
+    .unwrap();
+    let missing = scripts.join("Removed.jsx");
+    let config = dirs.config_file("recent-scripts.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(config, serde_json::to_vec(&[&missing, &installed]).unwrap()).unwrap();
+    let mut builder = AppBuilder::new();
+    builder.insert_resource(dirs);
+    let mut h = gui_with(Gui::with_app(crate::assemble_modules(builder).build()));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.state().menu_item("motion.file.recent_script.0").enabled {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "missing script remained enabled"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        h.state()
+            .menu_item("motion.file.recent_script.0")
+            .invocation
+            .params["path"],
+        json!(missing)
+    );
+    assert!(!h.state_mut().menu("motion.file.recent_script.0"));
+    assert!(h.state_mut().menu("motion.file.recent_script.1"));
+    settle(&mut h);
+    assert!(h.state_mut().menu("motion.file.script.Caption.jsx"));
+    settle(&mut h);
+    assert_eq!(query::comps(h.state().stage()).len(), 2);
+    assert!(!h.state().menu_item("motion.file.recent_script.1").enabled);
+}
+
+#[test]
 fn script_editor_runs_typed_jsx_through_the_file_menu() {
     let mut h = gui();
     assert!(h.state_mut().menu("motion.file.script_editor"));

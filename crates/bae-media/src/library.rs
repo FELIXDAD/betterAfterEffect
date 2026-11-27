@@ -80,7 +80,16 @@ struct OpenSource {
     id: u64,
     info: MediaInfo,
     source: Box<dyn MediaSource>,
+    /// The frame last asked for (forward playback: the previous one).
+    last_asked: Option<i64>,
+    /// A read-ahead job runs for this file.
+    reading_ahead: bool,
 }
+
+/// Bytes of decoded frames a read-ahead job keeps ahead of playback.
+const READ_AHEAD_BYTES: u64 = 256 << 20;
+/// Largest step between two asked frames that still counts as playing on.
+const READ_AHEAD_SKIP: i64 = 8;
 
 struct Slot {
     source: Arc<Mutex<OpenSource>>,
@@ -213,6 +222,8 @@ impl MediaLibrary {
             id: hasher.finish(),
             info: source.info().clone(),
             source,
+            last_asked: None,
+            reading_ahead: false,
         }));
         let mut sources = self.sources.lock();
         sources.tick += 1;
@@ -295,6 +306,58 @@ impl MediaLibrary {
         }
         let frame = source.source.decode_gpu(&request, gpu)?;
         self.cache.insert(key, frame.clone());
+        Ok(frame)
+    }
+
+    /// [`Self::frame_at`] for playback: when the frames are asked for in
+    /// order (each a little after the last), a background job decodes the
+    /// next ones into the cache meanwhile (continuous decoding, no seeks),
+    /// so playback finds them ready instead of waiting for the decoder.
+    pub fn frame_at_ahead(
+        &self,
+        path: &Path,
+        options: &OpenOptions,
+        request: &FrameRequest,
+        time: Time,
+        gpu: &Arc<MediaGpu>,
+    ) -> Result<GpuFrame, MediaError> {
+        let source = self.source(path, options)?;
+        let mut open = source.lock();
+        let index = clamp_index(&open.info, open.source.frame_at(time));
+        // Forward playback, also when it skips frames to keep up with the
+        // clock (the decoder reads on through those).
+        let forward = open
+            .last_asked
+            .is_some_and(|last| (1..=READ_AHEAD_SKIP).contains(&(index - last)));
+        open.last_asked = Some(index);
+        let request = FrameRequest { index, ..*request };
+        let key = FrameKey::new(open.id, &request);
+        let frame = match self.cache.get(&key) {
+            Some(frame) => frame,
+            None => {
+                let frame = open.source.decode_gpu(&request, gpu)?;
+                self.cache.insert(key, frame.clone());
+                frame
+            }
+        };
+        let movie = open.info.kind == crate::meta::MediaKind::Movie;
+        if forward && movie && !open.reading_ahead {
+            open.reading_ahead = true;
+            let video = open.info.video.as_ref();
+            let bytes = video.map_or(1, |v| u64::from(v.width) * u64::from(v.height) * 8);
+            let count = (READ_AHEAD_BYTES / bytes.max(1)).clamp(2, 8) as i64;
+            let last = video
+                .and_then(|v| v.frame_count)
+                .map_or(i64::MAX, |n| n as i64 - 1);
+            let (job, cache, gpu) = (source.clone(), self.cache.clone(), gpu.clone());
+            drop(open);
+            let spawned = std::thread::Builder::new()
+                .name("bae-media-read-ahead".into())
+                .spawn(move || read_ahead(&job, &cache, &gpu, request, index, count, last));
+            if spawned.is_err() {
+                source.lock().reading_ahead = false;
+            }
+        }
         Ok(frame)
     }
 
@@ -454,6 +517,39 @@ fn clamp_index(info: &MediaInfo, index: i64) -> i64 {
         Some(count) if count > 0 => index.clamp(0, count as i64 - 1),
         _ => index.max(0),
     }
+}
+
+/// Decodes the `count` frames after `from` (not past `last`) into `cache`,
+/// one at a time under the file's lock, while playback stays near them.
+fn read_ahead(
+    source: &Arc<Mutex<OpenSource>>,
+    cache: &Arc<FrameCache>,
+    gpu: &Arc<MediaGpu>,
+    request: FrameRequest,
+    from: i64,
+    count: i64,
+    last: i64,
+) {
+    for index in (from + 1)..=(from + count).min(last) {
+        let mut open = source.lock();
+        // Playback moved away (a seek, a loop): stop.
+        if open
+            .last_asked
+            .is_none_or(|asked| index <= asked || index > asked + count + 1)
+        {
+            break;
+        }
+        let request = FrameRequest { index, ..request };
+        let key = FrameKey::new(open.id, &request);
+        if cache.contains(&key) {
+            continue;
+        }
+        match open.source.decode_gpu(&request, gpu) {
+            Ok(frame) => cache.insert(key, frame),
+            Err(_) => break,
+        }
+    }
+    source.lock().reading_ahead = false;
 }
 
 #[cfg(test)]

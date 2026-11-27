@@ -143,8 +143,11 @@ impl Writer {
                     .map_err(|_| MediaError::Unsupported("MP4 bitrate exceeds UINT32".into()))?,
             )?;
             let params = platform.attributes()?;
-            if let Some(interval) = settings.keyframe_interval {
+            if let Some(interval) = settings.effective_keyframe_interval() {
+                // Hardware encoders read the codec API value, Microsoft's
+                // software encoder the media type's.
                 params.SetUINT32(&CODECAPI_AVEncMPVGOPSize, interval)?;
+                output.SetUINT32(&MF_MT_MAX_KEYFRAME_SPACING, interval)?;
             }
             if let Some(q) = settings.quality {
                 params.SetUINT32(
