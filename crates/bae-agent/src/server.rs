@@ -28,8 +28,8 @@ pub const GUIDE_INSTRUCTIONS_ZH: &str =
 
 /// Server-specific notes appended to the guide text: the actual tool naming and the
 /// guide tools this server does not offer yet.
-const SERVER_NOTE_EN: &str = "\n\nServer notes (bae mcp)\n- Tool names use _ instead of . (stage.describe -> stage_describe, attr.set -> attr_set).\n- Instead of transaction.begin / transaction.commit, send the steps of one change in a single command_batch call: one undo step, all or nothing.\n- Not available yet: attribute.evaluate (read keyframes with prim_get), proposal.describe and comment.add (summarize your proposal in your reply instead).\n- schema_get lists attribute names, value types and defaults; sublayer_diff shows your whole proposal.\n- Times: wherever a command takes a time, you may pass a frame number {\"frame\": 12} or \"12f\", or timecode \"0:00:00:12\"; integers are flicks. Frames count at the comp's frame rate, in the parameter's own time base (layer time for keyframes on layers, the same frames prim_get reports).\n- Commands with a project parameter (package_*, asset_relink) get the open project filled in.\n- Named versions: history_checkpoint saves one, history_list / history_diff compare, stage_describe and prim_get take a checkpoint to look at an old version, history_revert goes back (with own-layer permission, give sublayer agent/<you>).\n";
-const SERVER_NOTE_ZH: &str = "\n\n本服务器说明（bae mcp）\n- 工具名用 _ 代替 .（stage.describe -> stage_describe，attr.set -> attr_set）。\n- 不用 transaction.begin / transaction.commit：一个修改的所有步骤放进一次 command_batch 调用，是一个撤销单元，要么全部生效，要么全部不生效。\n- 暂未提供：attribute.evaluate（用 prim_get 读关键帧）、proposal.describe 和 comment.add（在回复里写提案说明）。\n- schema_get 列出属性名、值类型和默认值；sublayer_diff 显示你的完整提案。\n- 时间参数可以直接写帧号 {\"frame\": 12} 或 \"12f\"，或者时码 \"0:00:00:12\"；整数仍是 flicks。帧号按合成帧速率计算，时间基准跟参数本身一致（图层上的关键帧用图层时间，和 prim_get 返回的帧号一致）。\n- 带 project 参数的命令（package_*、asset_relink）由服务器自动填入当前工程。\n- 命名版本：history_checkpoint 保存一个版本，history_list / history_diff 列出和比较，stage_describe 和 prim_get 传 checkpoint 可以查看旧版本，history_revert 回到某个版本（只写自己层的权限下请指定 sublayer agent/<你>）。\n";
+const SERVER_NOTE_EN: &str = "\n\nServer notes (bae mcp)\n- Tool names use _ instead of . (stage.describe -> stage_describe, attr.set -> attr_set).\n- Instead of transaction.begin / transaction.commit, send the steps of one change in a single command_batch call: one undo step, all or nothing.\n- Not available yet: attribute.evaluate (read keyframes with prim_get), proposal.describe and comment.add (summarize your proposal in your reply instead).\n- schema_get lists attribute names, value types and defaults; sublayer_diff shows your whole proposal.\n- Times: wherever a command takes a time, you may pass a frame number {\"frame\": 12} or \"12f\", or timecode \"0:00:00:12\"; integers are flicks. Frames count at the comp's frame rate, in the parameter's own time base (layer time for keyframes on layers, the same frames prim_get reports).\n- Commands with a project parameter (package_*, asset_relink) get the open project filled in.\n- Named versions: history_checkpoint saves one, history_list / history_diff compare (history_list with kind auto or all also lists the automatic snapshots), stage_describe and prim_get take a checkpoint to look at an old version, history_revert goes back (with own-layer permission, give sublayer agent/<you>).\n";
+const SERVER_NOTE_ZH: &str = "\n\n本服务器说明（bae mcp）\n- 工具名用 _ 代替 .（stage.describe -> stage_describe，attr.set -> attr_set）。\n- 不用 transaction.begin / transaction.commit：一个修改的所有步骤放进一次 command_batch 调用，是一个撤销单元，要么全部生效，要么全部不生效。\n- 暂未提供：attribute.evaluate（用 prim_get 读关键帧）、proposal.describe 和 comment.add（在回复里写提案说明）。\n- schema_get 列出属性名、值类型和默认值；sublayer_diff 显示你的完整提案。\n- 时间参数可以直接写帧号 {\"frame\": 12} 或 \"12f\"，或者时码 \"0:00:00:12\"；整数仍是 flicks。帧号按合成帧速率计算，时间基准跟参数本身一致（图层上的关键帧用图层时间，和 prim_get 返回的帧号一致）。\n- 带 project 参数的命令（package_*、asset_relink）由服务器自动填入当前工程。\n- 命名版本：history_checkpoint 保存一个版本，history_list / history_diff 列出和比较（history_list 的 kind 为 auto 或 all 时也列出自动快照），stage_describe 和 prim_get 传 checkpoint 可以查看旧版本，history_revert 回到某个版本（只写自己层的权限下请指定 sublayer agent/<你>）。\n";
 
 /// Language of the built-in instructions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -439,9 +439,14 @@ impl BaeMcpServer {
                     );
                 };
                 let (cp, view) = checkpoint_view(&ws, id)?;
+                let what = if cp.is_auto() {
+                    format!("Automatic snapshot (created_ms {})", cp.created_ms)
+                } else {
+                    format!("Named version {:?}", cp.name)
+                };
                 let mut text = format!(
-                    "Named version {:?} ({}), saved by {} — read-only view; edits always go to the current project.\n",
-                    cp.name, cp.id.0, cp.author
+                    "{what} ({}), saved by {} — read-only view; edits always go to the current project.\n",
+                    cp.id.0, cp.author
                 );
                 if !view.missing().is_empty() {
                     text.push_str(&format!(
@@ -466,10 +471,15 @@ impl BaeMcpServer {
                 }
             }
             tools::HISTORY_LIST => {
+                let p: tools::HistoryListParams = parse(tool, args)?;
                 let ws = self.workspace.lock();
                 let list: Vec<Json> = ws
                     .history
-                    .checkpoints()
+                    .checkpoints_where(|c| match p.kind {
+                        tools::HistoryKind::Named => !c.is_auto(),
+                        tools::HistoryKind::Auto => c.is_auto(),
+                        tools::HistoryKind::All => true,
+                    })
                     .iter()
                     .map(checkpoint_json)
                     .collect();
@@ -520,18 +530,18 @@ impl BaeMcpServer {
             }
             tools::HISTORY_REVERT => {
                 let p: tools::HistoryRevertParams = parse(tool, args)?;
-                let (name, version) = {
+                let (label, version) = {
                     let ws = self.workspace.lock();
                     let cp = ws
                         .history
                         .checkpoint(&bae_sync::CheckpointId(p.checkpoint.clone()))
                         .ok_or_else(|| {
                             AgentError::Invalid(format!(
-                                "no named version {}; see history_list",
+                                "no version or snapshot {}; see history_list",
                                 p.checkpoint
                             ))
                         })?;
-                    (cp.name, cp.version.to_json())
+                    (cp.revert_label(), cp.version.to_json())
                 };
                 let mut params = json!({ "version": version });
                 if let Some(s) = p.sublayer {
@@ -541,7 +551,7 @@ impl BaeMcpServer {
                     params["prim"] = json!(prim);
                 }
                 self.run_steps(
-                    Some(&format!("revert to {name}")),
+                    Some(&label),
                     vec![Step {
                         command: "version.revert".into(),
                         params,
@@ -838,7 +848,7 @@ fn checkpoint_view(
 ) -> Result<(bae_sync::Checkpoint, bae_sync::VersionView), AgentError> {
     let id = bae_sync::CheckpointId(id.to_owned());
     let cp = ws.history.checkpoint(&id).ok_or_else(|| {
-        AgentError::Invalid(format!("no named version {}; see history_list", id.0))
+        AgentError::Invalid(format!("no version or snapshot {}; see history_list", id.0))
     })?;
     let view = ws.history.view(&ws.project.stage, &id)?;
     Ok((cp, view))

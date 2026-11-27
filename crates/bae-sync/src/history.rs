@@ -177,13 +177,28 @@ impl Checkpoint {
     pub fn is_auto(&self) -> bool {
         self.kind == CheckpointKind::Auto
     }
+
+    /// Undo label for going back to this checkpoint: `revert to <name>`, and
+    /// for an automatic snapshot `revert to automatic snapshot <UTC time>`
+    /// rather than its fallback name, which is only for older clients.
+    pub fn revert_label(&self) -> String {
+        match self.kind {
+            CheckpointKind::Auto => format!(
+                "revert to automatic snapshot {} UTC",
+                auto::format_minutes(self.created_ms, 0)
+            ),
+            _ => format!("revert to {}", self.name),
+        }
+    }
 }
 
 /// Project history: named versions, stored in one Loro document that syncs like
 /// a sublayer ([`DocKey::History`]) and is saved as `history.loro`.
 ///
 /// Concurrent checkpoints from several people never conflict (each has its own
-/// ID); concurrent renames of the same checkpoint are last-writer-wins.
+/// ID); concurrent renames of the same named version are last-writer-wins.
+/// Keeping an automatic snapshot (renaming it) writes a new named version, so
+/// two people keeping the same snapshot concurrently get two.
 #[derive(Debug)]
 pub struct History {
     doc: LoroDoc,
@@ -400,36 +415,55 @@ impl History {
         parse_entry(&id.0, &c.into_map().ok()?.get_deep_value()).map(|(cp, _)| cp)
     }
 
-    /// Rename a checkpoint and optionally change its note. Renaming an
-    /// automatic snapshot keeps it: it becomes a named version.
+    /// Rename a checkpoint and optionally change its note; returns its ID,
+    /// which changes when it was an automatic snapshot.
+    ///
+    /// Renaming an automatic snapshot keeps it (the history panel's "keep this
+    /// snapshot"): it is written again as a named version under a new ID, with
+    /// the same fields (author, time, layer stack, version), and the automatic
+    /// snapshot is deleted in the same commit. A client pruning the automatic
+    /// snapshot concurrently cannot delete the copy, which it has never seen;
+    /// edits inside the old entry would be lost, because deleting a key wins
+    /// over concurrent edits inside it. Renames by clients that predate kinds
+    /// edit the entry in place, so they are still lost to a concurrent prune.
     pub fn rename_checkpoint(
         &mut self,
         id: &CheckpointId,
         author: &AuthorId,
         name: &str,
         note: Option<&str>,
-    ) -> Result<(), SyncError> {
-        let Some(ValueOrContainer::Container(c)) = self.checkpoints_map().get(&id.0) else {
-            return Err(SyncError::UnknownCheckpoint(id.0.clone()));
+    ) -> Result<CheckpointId, SyncError> {
+        let unknown = || SyncError::UnknownCheckpoint(id.0.clone());
+        let checkpoints = self.checkpoints_map();
+        let Some(ValueOrContainer::Container(c)) = checkpoints.get(&id.0) else {
+            return Err(unknown());
         };
-        let map = c
-            .into_map()
-            .map_err(|_| SyncError::UnknownCheckpoint(id.0.clone()))?;
-        map.insert(K_NAME, name)?;
-        if let Some(note) = note {
-            map.insert(K_NOTE, note)?;
-        }
+        let mut map = c.into_map().map_err(|_| unknown())?;
+        let mut new_id = id.clone();
         let auto = matches!(
             map.get(K_KIND),
             Some(ValueOrContainer::Value(LoroValue::String(k))) if k.as_str() == KIND_AUTO
         );
         if auto {
-            for key in [K_KIND, K_AUTO_NAME, K_PREV] {
-                map.delete(key)?;
+            let LoroValue::Map(fields) = map.get_deep_value() else {
+                return Err(unknown());
+            };
+            new_id = CheckpointId::new();
+            let copy = checkpoints.insert_container(&new_id.0, LoroMap::new())?;
+            for (key, value) in fields.iter() {
+                if ![K_KIND, K_AUTO_NAME, K_PREV].contains(&key.as_str()) {
+                    copy_value(&copy, key, value)?;
+                }
             }
+            checkpoints.delete(&id.0)?;
+            map = copy;
+        }
+        map.insert(K_NAME, name)?;
+        if let Some(note) = note {
+            map.insert(K_NOTE, note)?;
         }
         self.commit(author, "checkpoint.rename");
-        Ok(())
+        Ok(new_id)
     }
 
     /// Remove a checkpoint (the project history itself is untouched).
@@ -467,13 +501,7 @@ impl History {
         let cp = self
             .checkpoint(id)
             .ok_or_else(|| SyncError::UnknownCheckpoint(id.0.clone()))?;
-        revert(
-            stage,
-            author,
-            &format!("revert to {}", cp.name),
-            &cp.version,
-            scope,
-        )
+        revert(stage, author, &cp.revert_label(), &cp.version, scope)
     }
 
     /// Per-prim differences from one named version to another (`None`: to the
@@ -496,6 +524,23 @@ impl History {
         };
         diff(stage, &from, &to)
     }
+}
+
+/// Write `value` (as read with `get_deep_value`) under `key`, maps as map
+/// containers.
+fn copy_value(map: &LoroMap, key: &str, value: &LoroValue) -> Result<(), SyncError> {
+    match value {
+        LoroValue::Map(fields) => {
+            let child = map.insert_container(key, LoroMap::new())?;
+            for (k, v) in fields.iter() {
+                copy_value(&child, k, v)?;
+            }
+        }
+        other => {
+            map.insert(key, other.clone())?;
+        }
+    }
+    Ok(())
 }
 
 fn now_ms() -> i64 {

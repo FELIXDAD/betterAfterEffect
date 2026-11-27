@@ -10,7 +10,8 @@ use bae_model::loro::{LoroMap, LoroValue, ValueOrContainer, VersionVector};
 use bae_model::{AuthorId, Op, Stage, SublayerId, Value};
 use bae_sync::{
     AutoSnapshots, Checkpoint, CheckpointId, CheckpointKind, ClientId, History, MemoryTransport,
-    ProjectDocs, ProjectVersion, Relay, Retention, RetentionTier, SessionConfig, SyncSession,
+    ProjectDocs, ProjectVersion, Relay, Retention, RetentionTier, RevertScope, SessionConfig,
+    SyncSession,
 };
 use common::*;
 
@@ -250,11 +251,19 @@ fn retention_keeps_recent_hourly_and_daily_snapshots_and_never_named_ones() {
         c.advance(10 * MIN);
         tick(&mut auto, &mut history, &stage, &alice, &c).expect("every interval");
         if step == 24 * 6 {
-            // Renaming an automatic snapshot keeps it.
-            let id = history.auto_snapshots().last().unwrap().id.clone();
-            history
-                .rename_checkpoint(&id, &alice, "留着", None)
+            // Renaming an automatic snapshot keeps it, as a named version with
+            // a new ID.
+            let auto = history.auto_snapshots().last().unwrap().clone();
+            let id = history
+                .rename_checkpoint(&auto.id, &alice, "留着", None)
                 .unwrap();
+            assert_ne!(id, auto.id);
+            assert!(history.checkpoint(&auto.id).is_none());
+            let named = history.checkpoint(&id).unwrap();
+            assert_eq!(
+                (named.created_ms, &named.version, &named.author),
+                (auto.created_ms, &auto.version, &auto.author)
+            );
             kept = Some(id);
         }
     }
@@ -425,9 +434,13 @@ fn collaborators_make_one_snapshot_per_interval_and_agree_on_pruning() {
         .collect();
     assert_eq!(after, [0, 10, 20, 30, 40]);
 
-    // Back together, both prune with the same clock: the same deletions.
+    // Back together, both see each other's snapshots and prune with the same
+    // clock: the same deletions.
     net.sync(&both);
     assert_eq!(net.ids(0), net.ids(1));
+    for i in both {
+        net.tick(i, &c);
+    }
     let later = c.wall + 2 * DAY;
     let mut copies: Vec<History> = net
         .histories
@@ -437,7 +450,9 @@ fn collaborators_make_one_snapshot_per_interval_and_agree_on_pruning() {
     let plans: Vec<Vec<CheckpointId>> = (0..2)
         .map(|i| {
             let who = net.who[i].clone();
-            net.autos[i].prune(&mut copies[i], &who, later).unwrap()
+            net.autos[i]
+                .prune(&mut copies[i], &who, later, c.mono + 2 * DAY)
+                .unwrap()
         })
         .collect();
     assert!(!plans[0].is_empty());
@@ -495,7 +510,7 @@ fn concurrent_snapshots_are_deduplicated_but_never_both_dropped() {
     for i in all {
         let who = net.who[i].clone();
         net.autos[i]
-            .prune(&mut net.histories[i], &who, c.wall)
+            .prune(&mut net.histories[i], &who, c.wall, c.mono)
             .unwrap();
     }
     net.sync(&all);
@@ -520,7 +535,7 @@ fn concurrent_snapshots_are_deduplicated_but_never_both_dropped() {
     for i in [0, 1] {
         let who = net.who[i].clone();
         net.autos[i]
-            .prune(&mut net.histories[i], &who, c.wall)
+            .prune(&mut net.histories[i], &who, c.wall, c.mono)
             .unwrap();
     }
     net.sync(&[0, 1]);
@@ -635,7 +650,7 @@ fn older_clients_see_automatic_snapshots_as_named_versions() {
     assert_eq!(kind("0000future"), CheckpointKind::Other("merge".into()));
     assert!(history.auto_snapshots().is_empty());
     // None of them is ever pruned, however old.
-    auto.prune(&mut history, &alice, c.wall + 365 * DAY)
+    auto.prune(&mut history, &alice, c.wall + 365 * DAY, c.mono + 365 * DAY)
         .unwrap();
     assert_eq!(history.checkpoints().len(), 3);
     assert_eq!(history.named_checkpoints().len(), 3);
@@ -680,13 +695,383 @@ fn a_wrong_clock_neither_stops_nor_floods_snapshots() {
             for w in made.windows(2) {
                 assert_eq!(w[1] - w[0], 10, "skew {skew:?} ahead {ahead}: {made:?}");
             }
-            // Ahead, the wrong clock's snapshot is the newest by time and is
-            // kept; a year behind, it has expired.
+            // The wrong clock's snapshot is kept: ahead, it is the newest by
+            // time; behind, client 0 takes it to be only as old as the time
+            // since it saw it arrive, two hours.
             let wrong = net.histories[0]
                 .auto_snapshots()
                 .iter()
                 .any(|s| s.author == net.who[1]);
-            assert_eq!(wrong, ahead || skew == DAY, "skew {skew:?} ahead {ahead}");
+            assert!(wrong, "skew {skew:?} ahead {ahead}");
         }
     }
+}
+
+/// Exchange everything between two histories.
+fn merge(a: &mut History, b: &mut History) {
+    let (va, vb) = (a.version(), b.version());
+    a.import(&b.export_updates(&va).unwrap()).unwrap();
+    b.import(&a.export_updates(&vb).unwrap()).unwrap();
+}
+
+#[test]
+fn keeping_a_snapshot_survives_a_concurrent_prune() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut alices = History::new();
+    let (alice, bob) = (author("user:alice"), author("user:bob"));
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    let mut c = Clock::new();
+    tick(&mut auto, &mut alices, &stage, &alice, &c);
+    let mut made = Vec::new();
+    for minute in 1..=55u32 {
+        touch(&mut stage, &alice, minute);
+        c.advance(MIN);
+        made.extend(tick(&mut auto, &mut alices, &stage, &alice, &c));
+    }
+    assert_eq!(made.len(), 5);
+
+    // Bob has the history and, offline, keeps the second snapshot.
+    let mut bobs = History::from_snapshot(&alices.export_snapshot().unwrap()).unwrap();
+    let before = bobs.checkpoint(&made[1]).unwrap();
+    let kept = bobs
+        .rename_checkpoint(&made[1], &bob, "客户确认的版本", Some("keep"))
+        .unwrap();
+    assert_eq!(bobs.checkpoint(&kept).unwrap().kind, CheckpointKind::Named);
+    assert!(bobs.checkpoint(&made[1]).is_none());
+    assert_eq!(last_label(&bobs), "checkpoint.rename");
+
+    // Meanwhile Alice keeps working; her snapshots thin out that hour, which
+    // deletes the one Bob kept.
+    for minute in 56..=200u32 {
+        touch(&mut stage, &alice, minute);
+        c.advance(MIN);
+        tick(&mut auto, &mut alices, &stage, &alice, &c);
+    }
+    assert!(alices.checkpoint(&made[1]).is_none(), "pruned by Alice");
+
+    merge(&mut alices, &mut bobs);
+    tick(&mut auto, &mut alices, &stage, &alice, &c);
+    auto.prune(&mut alices, &alice, c.wall + 365 * DAY, c.mono + 365 * DAY)
+        .unwrap();
+    merge(&mut alices, &mut bobs);
+    for h in [&alices, &bobs] {
+        let cp = h.checkpoint(&kept).expect("the kept version survives");
+        assert_eq!(
+            (cp.kind, cp.name.as_str(), cp.note.as_str()),
+            (CheckpointKind::Named, "客户确认的版本", "keep")
+        );
+        assert_eq!(
+            (cp.created_ms, &cp.version, &cp.layer_stack, &cp.author),
+            (
+                before.created_ms,
+                &before.version,
+                &before.layer_stack,
+                &alice
+            )
+        );
+        assert!(h.checkpoint(&made[1]).is_none());
+    }
+}
+
+#[test]
+fn a_clock_that_runs_ahead_does_not_prune_other_peoples_snapshots_early() {
+    for skew in [30 * MIN, 3 * HOUR, 8 * HOUR, 40 * DAY, 365 * DAY] {
+        let mut net = Net::new(2);
+        let mut c = Clock::new();
+        let bobs_clock = |c: &Clock| Clock {
+            wall: c.wall + skew,
+            mono: c.mono,
+        };
+        // Alice (right clock) works alone for 55 minutes.
+        net.tick(0, &c);
+        let mut alices = Vec::new();
+        for minute in 1..=55u32 {
+            let who = net.who[0].clone();
+            touch(&mut net.stages[0], &who, minute);
+            c.advance(MIN);
+            alices.extend(net.tick(0, &c));
+        }
+        assert_eq!(alices.len(), 5);
+
+        // Bob joins and edits. His clock makes her snapshots look old, so he
+        // makes one at once, and prunes.
+        net.sync(&[0, 1]);
+        let who = net.who[1].clone();
+        touch(&mut net.stages[1], &who, 100);
+        net.sync(&[0, 1]);
+        assert!(net.tick(1, &bobs_clock(&c)).is_some(), "skew {skew:?}");
+        net.sync(&[0, 1]);
+        let left = |net: &Net, ids: &[CheckpointId]| -> Vec<CheckpointId> {
+            ids.iter()
+                .filter(|id| net.histories[0].checkpoint(id).is_some())
+                .cloned()
+                .collect()
+        };
+        assert_eq!(
+            left(&net, &alices),
+            alices,
+            "skew {skew:?}: Bob deleted Alice's snapshots of the last hour"
+        );
+
+        // They work together for 2.5 hours; Bob keeps making the snapshots.
+        for minute in 0..150u32 {
+            let who = net.who[0].clone();
+            touch(&mut net.stages[0], &who, minute);
+            net.sync(&[0, 1]);
+            c.advance(MIN);
+            net.tick(0, &c);
+            net.tick(1, &bobs_clock(&c));
+            net.sync(&[0, 1]);
+        }
+        assert_eq!(net.ids(0), net.ids(1));
+        assert_eq!(net.autos[0].stats().created, 5, "skew {skew:?}");
+        // Her snapshots age by the time that really passed: two hours later,
+        // only the newest of that hour is left.
+        assert_eq!(left(&net, &alices), [alices[4].clone()], "skew {skew:?}");
+    }
+}
+
+#[test]
+fn thinning_keeps_each_persons_offline_work() {
+    let mut net = Net::new(2);
+    let mut c = Clock::new();
+    let both = [0, 1];
+    // Two people work apart for three hours; Alice's snapshots come two
+    // minutes after Bob's.
+    net.tick(1, &c);
+    c.advance(2 * MIN);
+    net.tick(0, &c);
+    let mut offline: [Vec<ProjectVersion>; 2] = Default::default();
+    for minute in 0..180u32 {
+        for i in both {
+            let who = net.who[i].clone();
+            touch(&mut net.stages[i], &who, minute + 100 * i as u32);
+            if let Some(id) = net.tick(i, &c) {
+                let cp = net.histories[i].checkpoint(&id).unwrap();
+                offline[i].push(cp.version);
+            }
+        }
+        c.advance(MIN);
+    }
+    assert!(offline.iter().all(|v| v.len() >= 17));
+
+    // Back together for an hour and a half.
+    for minute in 0..90u32 {
+        net.sync(&both);
+        let i = (minute % 2) as usize;
+        let who = net.who[i].clone();
+        touch(&mut net.stages[i], &who, minute);
+        for i in both {
+            net.tick(i, &c);
+        }
+        c.advance(MIN);
+    }
+    net.sync(&both);
+    assert_eq!(net.ids(0), net.ids(1));
+    let kept = net.histories[0].auto_snapshots();
+    for (i, versions) in offline.iter().enumerate() {
+        // Each hour apart keeps the newest state of each person's own work,
+        // which no snapshot of the other person's includes.
+        let restore_points = kept
+            .iter()
+            .filter(|s| versions.contains(&s.version))
+            .count();
+        assert_eq!(restore_points, 3, "client {i}");
+    }
+}
+
+#[test]
+fn deleting_the_newest_snapshot_does_not_bring_it_back() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    let mut c = Clock::new();
+    tick(&mut auto, &mut history, &stage, &alice, &c);
+    touch(&mut stage, &alice, 1);
+    c.advance(10 * MIN);
+    let first = tick(&mut auto, &mut history, &stage, &alice, &c).expect("due");
+    touch(&mut stage, &alice, 2);
+    c.advance(10 * MIN);
+    let second = tick(&mut auto, &mut history, &stage, &alice, &c).expect("due");
+
+    assert!(history.delete_checkpoint(&second, &alice).unwrap());
+    for _ in 0..60 {
+        c.advance(Duration::from_secs(5));
+        assert_eq!(tick(&mut auto, &mut history, &stage, &alice, &c), None);
+    }
+    let ids: Vec<CheckpointId> = history.checkpoints().into_iter().map(|c| c.id).collect();
+    assert_eq!(ids, [first]);
+    // A change is snapshotted at once (the remaining one is old enough).
+    touch(&mut stage, &alice, 3);
+    c.advance(Duration::from_secs(5));
+    assert!(tick(&mut auto, &mut history, &stage, &alice, &c).is_some());
+
+    // Deleted by a collaborator: neither client makes it again.
+    let mut net = Net::new(2);
+    let mut c = Clock::new();
+    net.tick(0, &c);
+    net.tick(1, &c);
+    let who = net.who[0].clone();
+    touch(&mut net.stages[0], &who, 1);
+    net.sync(&[0, 1]);
+    c.advance(10 * MIN);
+    let made = net.tick(0, &c).expect("due");
+    net.sync(&[0, 1]);
+    assert_eq!(net.tick(1, &c), None, "client 1 has it");
+    c.advance(MIN);
+    let who = net.who[1].clone();
+    assert!(net.histories[1].delete_checkpoint(&made, &who).unwrap());
+    for _ in 0..60 {
+        net.sync(&[0, 1]);
+        c.advance(MIN);
+        assert_eq!((net.tick(0, &c), net.tick(1, &c)), (None, None));
+    }
+    assert!(net.histories[0].checkpoints().is_empty());
+}
+
+#[test]
+fn layer_stack_changes_are_snapshotted() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    let mut c = Clock::new();
+    tick(&mut auto, &mut history, &stage, &alice, &c);
+    touch(&mut stage, &alice, 1);
+    c.advance(10 * MIN);
+    tick(&mut auto, &mut history, &stage, &alice, &c).expect("due");
+    let original = stage.layer_stack().to_vec();
+    let mut snapshot = |stage: &Stage, c: &mut Clock| {
+        c.advance(10 * MIN);
+        let id = tick(&mut auto, &mut history, stage, &alice, c)?;
+        Some(history.checkpoint(&id).unwrap().layer_stack)
+    };
+
+    stage.move_sublayer(&sl("anim/a"), 1).unwrap();
+    let reordered = stage.layer_stack().to_vec();
+    assert_ne!(reordered, original);
+    assert_eq!(snapshot(&stage, &mut c), Some(reordered));
+    // Back to an arrangement a checkpoint already has: nothing new.
+    stage.move_sublayer(&sl("anim/a"), 0).unwrap();
+    assert_eq!(snapshot(&stage, &mut c), None);
+
+    stage.remove_sublayer(&sl("anim/a")).unwrap();
+    assert_eq!(snapshot(&stage, &mut c), Some(vec![SublayerId::root()]));
+    // A sublayer added (for example a collaborator's, once the app puts it in
+    // the stack) is a change too.
+    stage.create_sublayer(sl("anim/b"), 0).unwrap();
+    assert_eq!(
+        snapshot(&stage, &mut c),
+        Some(vec![sl("anim/b"), SublayerId::root()])
+    );
+}
+
+#[test]
+fn a_project_nobody_changes_gets_no_snapshot() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    let mut c = Clock::new();
+    for _ in 0..360 {
+        assert_eq!(tick(&mut auto, &mut history, &stage, &alice, &c), None);
+        c.advance(MIN);
+    }
+    assert!(history.checkpoints().is_empty());
+    assert!(history.version().is_empty(), "nothing was written");
+    touch(&mut stage, &alice, 1);
+    assert!(tick(&mut auto, &mut history, &stage, &alice, &c).is_some());
+}
+
+#[test]
+fn a_note_from_an_older_client_keeps_a_snapshot() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    auto.retention = Retention {
+        tiers: vec![RetentionTier {
+            until: MIN,
+            every: None,
+        }],
+    };
+    let mut c = Clock::new();
+    tick(&mut auto, &mut history, &stage, &alice, &c);
+    touch(&mut stage, &alice, 1);
+    c.advance(10 * MIN);
+    let noted = tick(&mut auto, &mut history, &stage, &alice, &c).unwrap();
+
+    // An older client gives it a note and keeps the name.
+    let old = History::from_snapshot(&history.export_snapshot().unwrap()).unwrap();
+    raw_checkpoint(&old, &noted)
+        .insert("note", "客户确认")
+        .unwrap();
+    old.doc().commit();
+    history
+        .import(&old.export_updates(&history.version()).unwrap())
+        .unwrap();
+    let cp = history.checkpoint(&noted).unwrap();
+    assert_eq!(
+        (cp.kind, cp.note.as_str()),
+        (CheckpointKind::Named, "客户确认")
+    );
+
+    touch(&mut stage, &alice, 2);
+    c.advance(10 * MIN);
+    let newer = tick(&mut auto, &mut history, &stage, &alice, &c).unwrap();
+    touch(&mut stage, &alice, 3);
+    c.advance(10 * MIN);
+    tick(&mut auto, &mut history, &stage, &alice, &c).unwrap();
+    assert!(history.checkpoint(&newer).is_none(), "expired");
+    auto.prune(&mut history, &alice, c.wall + 365 * DAY, c.mono + 365 * DAY)
+        .unwrap();
+    assert!(history.checkpoint(&noted).is_some(), "never pruned");
+}
+
+#[test]
+fn versions_include_sublayers_they_do_not_list_only_when_empty() {
+    let vv = |n: i32| {
+        let mut v = VersionVector::new();
+        if n > 0 {
+            v.insert(7, n);
+        }
+        v
+    };
+    let version = |layers: &[(&str, i32)]| ProjectVersion {
+        sublayers: layers.iter().map(|(id, n)| (sl(id), vv(*n))).collect(),
+    };
+    let checkpoint = version(&[("root", 3)]);
+    // A collaborator's new sublayer with ops: not included.
+    assert!(!checkpoint.includes(&version(&[("root", 3), ("anim/b", 1)])));
+    assert!(version(&[("root", 3), ("anim/b", 1)]).includes(&checkpoint));
+    // An empty one is.
+    assert!(checkpoint.includes(&version(&[("root", 3), ("anim/b", 0)])));
+    assert!(!checkpoint.includes(&version(&[("root", 4)])));
+}
+
+#[test]
+fn reverting_to_an_automatic_snapshot_names_it_in_the_undo_label() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    auto.utc_offset_minutes = 8 * 60;
+    let mut c = Clock::new();
+    tick(&mut auto, &mut history, &stage, &alice, &c);
+    touch(&mut stage, &alice, 1);
+    c.advance(10 * MIN);
+    let id = tick(&mut auto, &mut history, &stage, &alice, &c).unwrap();
+    touch(&mut stage, &alice, 2);
+    history
+        .revert_to(&mut stage, &alice, &id, &RevertScope::Project)
+        .unwrap();
+    assert_eq!(
+        stage.undo_label(&alice),
+        Some("revert to automatic snapshot 2026-11-27 00:10 UTC")
+    );
+    let named = history
+        .create_checkpoint(&stage, &alice, "给客户的第 1 版", "")
+        .unwrap();
+    assert_eq!(named.revert_label(), "revert to 给客户的第 1 版");
 }

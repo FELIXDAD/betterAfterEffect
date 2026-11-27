@@ -134,11 +134,31 @@ pub struct CheckpointParams {
     pub note: String,
 }
 
+/// Which checkpoints history_list lists.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryKind {
+    /// Named versions (also kinds written by newer clients).
+    #[default]
+    Named,
+    /// Automatic snapshots.
+    Auto,
+    /// Both.
+    All,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+pub struct HistoryListParams {
+    /// named (default) | auto (automatic snapshots, made every few minutes while the project changes) | all.
+    #[serde(default)]
+    pub kind: HistoryKind,
+}
+
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct HistoryDiffParams {
-    /// Named version to compare from (ID from history_list).
+    /// Named version or automatic snapshot to compare from (ID from history_list).
     pub from: String,
-    /// Named version to compare to; omitted compares to the current project.
+    /// Named version or automatic snapshot to compare to; omitted compares to the current project.
     #[serde(default)]
     pub to: Option<String>,
     /// Maximum number of changed prims listed (default 200).
@@ -148,7 +168,7 @@ pub struct HistoryDiffParams {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct HistoryRevertParams {
-    /// Named version to go back to (ID from history_list).
+    /// Named version or automatic snapshot to go back to (ID from history_list).
     pub checkpoint: String,
     /// Only put back this sublayer (e.g. your own agent/<you>).
     #[serde(default)]
@@ -306,14 +326,14 @@ pub fn builtin_tools() -> Vec<ToolEntry> {
         builtin(
             HISTORY_LIST,
             "List Versions",
-            "Named versions and automatic snapshots of the project (oldest first): id, kind (named or auto), name, note, author, time, layer stack. Pass an id as checkpoint to stage_describe or prim_get to look at that version.",
+            "Named versions of the project, or with kind auto / all its automatic snapshots (oldest first): id, kind (named, auto, or a kind from a newer client, treated like named), name, note, author, time, layer stack, version. Pass an id as checkpoint to stage_describe or prim_get to look at that version.",
             true,
-            schema_of::<NoParams>(),
+            schema_of::<HistoryListParams>(),
         ),
         builtin(
             HISTORY_DIFF,
             "Compare Versions",
-            "Which prims changed between a named version and another one (or now): per sublayer and prim, added / removed / modified / moved, the attributes and fields that differ, who changed them and when.",
+            "Which prims changed between a named version or automatic snapshot and another one (or now): per sublayer and prim, added / removed / modified / moved, the attributes and fields that differ, who changed them and when.",
             true,
             schema_of::<HistoryDiffParams>(),
         ),
@@ -327,7 +347,7 @@ pub fn builtin_tools() -> Vec<ToolEntry> {
         builtin(
             HISTORY_REVERT,
             "Revert to Version",
-            "Put the project, one sublayer or one prim back to a named version, as one new undoable step (runs version.revert; your permission applies, so with own-layer permission give sublayer agent/<you>).",
+            "Put the project, one sublayer or one prim back to a named version or automatic snapshot, as one new undoable step (runs version.revert; your permission applies, so with own-layer permission give sublayer agent/<you>).",
             false,
             schema_of::<HistoryRevertParams>(),
         ),
