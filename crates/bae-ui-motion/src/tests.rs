@@ -1982,7 +1982,7 @@ fn precompose_dialog_options() {
 }
 
 /// A valid 1×1 RGBA PNG.
-const PNG_1X1: &[u8] = &[
+pub(super) const PNG_1X1: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
     0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15, 0, 2,
     135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
@@ -3066,6 +3066,51 @@ fn new_comp_from_selection() {
         json!({"items": [solid_item, comp], "multiple": true}),
     );
     assert_eq!(query::comps(&h.stage).len(), before + 3);
+}
+
+/// File ▸ Import ▸ Solid… and Placeholder…: items in the Project panel, no
+/// layer, one undo step each (AE).
+#[test]
+fn import_solid_and_placeholder_make_items() {
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let assets = |h: &Harness, kind: &str| -> Vec<PrimPath> {
+        h.stage
+            .traverse()
+            .into_iter()
+            .filter(|p| {
+                h.stage.prim(p).is_some_and(|v| {
+                    matches!(query::static_value(&v, "kind"), Some(Value::Enum(k)) if k == kind)
+                })
+            })
+            .collect()
+    };
+    // No comp open: Import ▸ Solid… still works.
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_SOLID),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "item.new");
+    h.apply(r);
+    assert_eq!(assets(&h, "solid").len(), 1);
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_PLACEHOLDER),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    h.apply(r);
+    let p = assets(&h, "placeholder");
+    assert_eq!(p.len(), 1);
+    let v = h.stage.prim(&p[0]).unwrap();
+    assert_eq!(query::static_value(&v, "width"), Some(Value::Int(1920)));
+    assert_eq!(
+        query::static_value(&v, "duration"),
+        Some(Value::Time(Time::from_seconds(60.0)))
+    );
+    assert_eq!(query::display_name_of(&h.stage, &p[0]), "Missing Name");
 }
 
 /// #460: the Window menu names what the viewers show (AE: "Composition: Comp 1").

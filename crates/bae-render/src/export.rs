@@ -559,10 +559,39 @@ struct MovieAudio {
     times: Vec<Time>,
     frame_duration: Time,
     scratch: Vec<[f32; 2]>,
+    /// The next frame whose audio goes to the encoder.
+    next: usize,
 }
 
 #[cfg(feature = "media")]
 impl MovieAudio {
+    /// Audio goes to the encoder this far ahead of the video it accompanies:
+    /// a movie writer interleaves and, with uncompressed audio, takes the next
+    /// frame only once audio past it has arrived (#793).
+    const LEAD_SECONDS: f64 = 1.0;
+
+    /// Hands over the audio of every frame up to `index` plus the lead.
+    fn push_ahead_of(
+        &mut self,
+        index: usize,
+        encoder: &mut dyn bae_media::Encoder,
+    ) -> Result<(), RenderError> {
+        let lead =
+            (Self::LEAD_SECONDS / self.frame_duration.as_seconds().max(1e-6)).ceil() as usize;
+        let end = (index + lead.max(1)).min(self.times.len());
+        if self.next >= end {
+            return Ok(());
+        }
+        while self.next < end {
+            self.push(self.next, encoder)?;
+            self.next += 1;
+        }
+        if self.next == self.times.len() {
+            encoder.end_audio().map_err(media_error)?;
+        }
+        Ok(())
+    }
+
     fn new(job: &ExportJob<'_>) -> Option<Self> {
         let mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
         if mix.is_empty() {
@@ -573,6 +602,7 @@ impl MovieAudio {
             times: job.times.iter().map(|&(_, t)| t).collect(),
             frame_duration: job.rate.frame_duration(),
             scratch: Vec::new(),
+            next: 0,
         })
     }
     fn push(
@@ -621,13 +651,13 @@ impl EncoderThread {
             .spawn(move || {
                 let mut copy = Duration::ZERO;
                 for (index, mapped) in receiver.iter().enumerate() {
-                    let pushed = mapped.write_to(&mut *encoder).and_then(|elapsed| {
-                        copy += elapsed;
-                        if let Some(track) = &mut audio {
-                            track.push(index, &mut *encoder)?;
-                        }
-                        Ok(())
-                    });
+                    // The audio leads the video it accompanies (#793).
+                    let pushed = match &mut audio {
+                        Some(track) => track.push_ahead_of(index, &mut *encoder),
+                        None => Ok(()),
+                    }
+                    .and_then(|()| mapped.write_to(&mut *encoder))
+                    .map(|elapsed| copy += elapsed);
                     if let Err(error) = pushed {
                         // Wait for the frames before this one; keep them.
                         let _ = encoder.finish();
