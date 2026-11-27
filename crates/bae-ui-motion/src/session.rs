@@ -446,6 +446,9 @@ pub struct Session {
     pub selected_effects: Vec<PrimPath>,
     /// Latest request to re-evaluate a generated source without editing project data.
     pub(crate) solid_reload: Option<(u64, PrimPath)>,
+    /// Edit ▸ Purge generation: viewers drop their rendered frames when it
+    /// changes.
+    pub(crate) purge: u64,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
@@ -1285,7 +1288,11 @@ impl Session {
         {
             return false;
         }
-        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path);
+        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path).with_cache(
+            cx.resources
+                .get::<Arc<bae_media::conform::ConformedAudio>>()
+                .cloned(),
+        );
         self.mix_has_audio = !mix.is_empty();
         output.prepare(mix);
         self.mix_revision = Some((info.path.clone(), revision));

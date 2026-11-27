@@ -864,8 +864,11 @@ impl DirTransport {
     }
 
     /// The session says what it has. Re-deliver every document it is missing
-    /// something of (e.g. a sublayer the app just added), then answer with our own
-    /// hello so a reset session knows what the folder has.
+    /// something of (e.g. a sublayer the app just added), read the folder again
+    /// (not waiting for the poll interval), then answer with our own hello so a
+    /// reset session knows what the folder has. The hello is queued after
+    /// everything read, so the session learns what the folder has only once it
+    /// has received all of it (`SyncSession::is_caught_up`).
     fn on_hello(&mut self, versions: Vec<(DocKey, VersionVector)>) -> Result<(), SyncError> {
         if !self.scanned {
             // The first scan delivers everything anyway.
@@ -899,9 +902,9 @@ impl DirTransport {
                 }
             }
         }
-        if !missing.is_empty() {
-            self.poll_now = true;
-        }
+        self.poll_now = false;
+        self.last_poll = Some(Instant::now());
+        self.poll();
         self.inbox.push_back(self.hello());
         Ok(())
     }
