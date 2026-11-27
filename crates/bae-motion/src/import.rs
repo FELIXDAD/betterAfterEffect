@@ -170,7 +170,11 @@ impl Command for ImportItems {
             let path = Path::new(&f.path);
             let file = AssetFile::from_path(path, None, false)
                 .map_err(|e| fail(format!("cannot import {}: {e}", f.path)))?;
-            if let Some(bad) = f.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
+            if let Some((bad, _)) = f.attrs.iter().find(|(k, v)| {
+                !(ATTRS.contains(&k.as_str())
+                    || (crate::project_settings::is_metadata_field(k)
+                        && matches!(v, Value::String(_))))
+            }) {
                 return Err(fail(format!("{bad} is not a footage attribute")));
             }
             let folder = match f.folder.as_deref() {
