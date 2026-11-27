@@ -77,6 +77,7 @@ mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
 mod type_preferences;
+mod vision;
 mod window_workspaces;
 
 use std::collections::VecDeque;
