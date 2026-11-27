@@ -6,6 +6,7 @@
 //! the slower stage instead of their sum. The UI thread only shows frames the
 //! GPU has finished.
 
+use crate::disk_frames::DiskFrames;
 use crate::gpu_preview::{PreviewEffects, PreviewImage, PreviewSources, RenderEngine};
 use crate::preview_snapshot::PreviewSnapshot;
 use bae_anim::{AttrError, Evaluator};
@@ -360,7 +361,7 @@ impl PlaybackPreview {
         rate: FrameRate,
         frame_bytes: u64,
     ) -> bool {
-        let state = self.shared.state.lock().unwrap();
+        let mut state = self.shared.state.lock().unwrap();
         let Some(scene) = state.cache.scene.as_ref() else {
             return false;
         };
@@ -385,13 +386,19 @@ impl PlaybackPreview {
         if pass.next >= limit {
             return true;
         }
-        let times: Vec<_> = (pass.next..limit)
-            .step_by(pass.step as usize)
-            .take(16)
-            .map(|f| rate.frame_to_time(pass.frame(f)))
-            .collect();
-        drop(state);
-        self.prefetch(times);
+        if let Some(demand) = state.demand.as_mut() {
+            // Keep the displayed frame first while the worker fills this batch.
+            let displayed = demand.times.first().copied();
+            demand.times.truncate(1);
+            demand.times.extend(
+                (pass.next..limit)
+                    .step_by(pass.step as usize)
+                    .take(16)
+                    .map(|f| rate.frame_to_time(pass.frame(f)))
+                    .filter(|t| Some(*t) != displayed),
+            );
+            self.shared.changed.notify_one();
+        }
         false
     }
 
@@ -437,9 +444,10 @@ impl PlaybackPreview {
         if !self.running {
             let (gpu, registry, shared) =
                 (self.gpu.clone(), self.registry.clone(), self.shared.clone());
+            let disk = resources.get::<Arc<DiskFrames>>().cloned();
             std::thread::Builder::new()
                 .name("bae-playback".into())
-                .spawn(move || worker(gpu, registry, shared))
+                .spawn(move || worker(gpu, registry, shared, disk))
                 .expect("spawn playback worker");
             self.running = true;
         }
@@ -595,6 +603,7 @@ impl Drop for PlaybackPreview {
 
 /// A frame evaluated and converted, waiting to be rendered.
 struct Job {
+    disk_revision: u64,
     epoch: u64,
     scene: Arc<Scene>,
     stage: Arc<Stage>,
@@ -616,6 +625,7 @@ fn time_arithmetic(source: &str) -> bool {
 
 /// The pipeline's first stage: evaluates and converts frames ahead.
 struct Evaluate {
+    disk_revision: u64,
     scene: Arc<Scene>,
     stage: Arc<Stage>,
     eval: Evaluator,
@@ -654,6 +664,7 @@ impl Evaluate {
         let mut anim = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
         anim.set_nested_switches(scene.key.nested_switches);
         Ok(Self {
+            disk_revision: scene.snapshot.disk_revision(),
             dynamic,
             stage: Arc::new(stage),
             eval,
@@ -703,6 +714,7 @@ impl Evaluate {
             (comp, rc) = self.evaluate(time)?;
         }
         Ok(Job {
+            disk_revision: self.disk_revision,
             epoch,
             scene: self.scene.clone(),
             stage: self.stage.clone(),
@@ -732,13 +744,18 @@ fn sync_engine(engine: &mut RenderEngine, scene: &Scene) {
 
 /// Evaluates frame N+1 while the render thread encodes and submits frame N:
 /// playback runs at the slower of the two stages, not their sum.
-fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: Arc<Shared>) {
+fn worker(
+    gpu: Arc<GpuContext>,
+    registry: Arc<ViewportTextureRegistry>,
+    shared: Arc<Shared>,
+    disk: Option<Arc<DiskFrames>>,
+) {
     let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(1);
     {
         let (gpu, shared) = (gpu.clone(), shared.clone());
         std::thread::Builder::new()
             .name("bae-playback-render".into())
-            .spawn(move || render_worker(gpu, registry, shared, rx))
+            .spawn(move || render_worker(gpu, registry, shared, rx, disk))
             .expect("spawn playback render thread");
     }
     let mut current: Option<Evaluate> = None;
@@ -809,11 +826,69 @@ fn idle(shared: &Shared) -> bool {
         .is_none_or(|d| d.range.duration() <= d.rate.frame_duration())
 }
 
+/// File versions, evaluated content and project versions determine whether a
+/// stored image can be reused. Auxiliary EXR picking data needs a fresh render.
+fn disk_key(job: &Job, engine: &RenderEngine, binary_stamp: u64) -> Option<u64> {
+    use bae_render::{LayerContent, RenderComp};
+    use std::hash::{Hash, Hasher};
+    fn media_versions(comp: &RenderComp, state: &mut impl Hasher) -> Option<()> {
+        for l in &comp.layers {
+            if l.effects.iter().any(|e| {
+                matches!(
+                    e.effect.as_str(),
+                    "Cryptomatte" | "EXtractoR" | "IDentifier"
+                )
+            }) {
+                return None;
+            }
+            match &l.content {
+                LayerContent::Comp(c) => media_versions(c, state)?,
+                LayerContent::Footage(f) => {
+                    let mut path = f.file.clone()?;
+                    if let Some(rate) = f.sequence {
+                        if f.blend.is_some() {
+                            return None;
+                        }
+                        let n =
+                            bae_media::sequence::parse_numbered_name(path.file_name()?.to_str()?)?;
+                        let index = n
+                            .number
+                            .checked_add(rate.time_to_frame(f.source_time).max(0))?;
+                        path.set_file_name(format!(
+                            "{}{:0width$}{}",
+                            n.prefix,
+                            index,
+                            n.suffix,
+                            width = n.digits
+                        ));
+                    }
+                    let meta = std::fs::metadata(&path).ok()?;
+                    meta.len().hash(state);
+                    meta.modified().ok()?.hash(state);
+                }
+                _ => {}
+            }
+        }
+        Some(())
+    }
+    let mut state = std::collections::hash_map::DefaultHasher::new();
+    binary_stamp.hash(&mut state);
+    job.disk_revision.hash(&mut state);
+    job.scene.key.resolution.hash(&mut state);
+    job.scene.key.sources.hash(&mut state);
+    job.scene.key.effects.hash(&mut state);
+    job.time.hash(&mut state);
+    engine.renderer.content_hash(&job.rc).hash(&mut state);
+    media_versions(&job.rc, &mut state)?;
+    Some(state.finish())
+}
+
 fn render_worker(
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
     shared: Arc<Shared>,
     rx: std::sync::mpsc::Receiver<Job>,
+    disk: Option<Arc<DiskFrames>>,
 ) {
     use std::sync::mpsc::TryRecvError;
     // One renderer for the whole playback (its pipelines, texture pool and
@@ -823,6 +898,7 @@ fn render_worker(
     let mut synced: Option<(Option<u64>, Option<u64>)> = None;
     let mut in_flight = false;
     let spares: Arc<Mutex<Spares>> = Arc::default();
+    let last_done = Arc::new(Mutex::new(Instant::now()));
     loop {
         let job = match rx.try_recv() {
             Ok(job) => job,
@@ -862,6 +938,71 @@ fn render_worker(
             sync_engine(&mut engine, &job.scene);
             synced = Some(generations);
         }
+        let disk_key = disk
+            .as_ref()
+            .filter(|d| d.enabled() && !job.scene.key.scope_source)
+            .and_then(|d| disk_key(&job, &engine, d.binary_stamp()));
+        let (epoch, time) = (job.epoch, job.time);
+        // What the frame depends on (selective invalidation), unless it reads
+        // other times, nested comps or motion-blur samples.
+        let deps = job.rc.dependencies();
+        let dynamic_rc = job.rc.motion_blur.is_some()
+            || job
+                .rc
+                .layers
+                .iter()
+                .any(|l| matches!(l.content, bae_render::LayerContent::Comp(_)));
+        let scene = job.scene.clone();
+        // A stored frame that reads back faster than it renders: the disk thread
+        // reads it while this one goes on with the next frame.
+        if let (Some(d), Some(key)) = (&disk, disk_key)
+            && d.worth_reading(key)
+        {
+            let target = {
+                let (spares, gpu) = (spares.clone(), gpu.clone());
+                Box::new(move |size: [u32; 2]| {
+                    let mut s = spares.lock().unwrap();
+                    let spare = if s.size == Some(size) { s.take() } else { None };
+                    drop(s);
+                    spare.unwrap_or_else(|| OutputTarget::new(gpu.device(), size))
+                })
+            };
+            let (shared, registry, spares) = (shared.clone(), registry.clone(), spares.clone());
+            let errors = job.errors;
+            d.read_async(
+                key,
+                target,
+                Box::new(move |frame| {
+                    let Some((target, rect)) = frame else {
+                        // Unreadable: render it after all.
+                        shared.state.lock().unwrap().queued.retain(|t| *t != time);
+                        shared.changed.notify_all();
+                        return;
+                    };
+                    spares.lock().unwrap().size = Some(target.size());
+                    let texture = target.view().texture().clone();
+                    let slot = Arc::new(Slot {
+                        channels: None,
+                        registry: registry.clone(),
+                        id: registry.create("playback frame"),
+                        rect,
+                        time,
+                        errors,
+                        bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+                        source: None,
+                        texture,
+                        target: Some(target),
+                        spares,
+                    });
+                    match registry.publish(slot.id, &slot.texture, wgpu::FilterMode::Linear) {
+                        Ok(()) => deliver(&shared, epoch, &scene, time, slot, deps, true),
+                        Err(e) => failed(&shared, epoch, time, &e.to_string()),
+                    }
+                }),
+            );
+            continue;
+        }
+        let started = Instant::now();
         let spare = spares.lock().unwrap().take();
         let result = engine
             .render(
@@ -909,55 +1050,80 @@ fn render_worker(
                     .map_err(|e| e.to_string())?;
                 Ok((slot, temporal))
             });
-        let (epoch, time) = (job.epoch, job.time);
-        // What the frame depends on (selective invalidation), unless it reads
-        // other times, nested comps or motion-blur samples.
-        let deps = job.rc.dependencies();
-        let dynamic_rc = job.rc.motion_blur.is_some()
-            || job
-                .rc
-                .layers
-                .iter()
-                .any(|l| matches!(l.content, bae_render::LayerContent::Comp(_)));
-        let scene = job.scene.clone();
         match result {
             Ok((slot, temporal)) => {
                 let dynamic = job.dynamic || temporal || dynamic_rc;
                 in_flight = true;
                 let shared = shared.clone();
+                let last_done = last_done.clone();
+                let store = disk
+                    .clone()
+                    .zip(disk_key)
+                    .filter(|_| !temporal && slot.channels.is_none());
+                let frame =
+                    Duration::try_from_secs_f64(job.rc.frame_rate.frame_duration().as_seconds())
+                        .unwrap_or_default();
                 gpu.queue().on_submitted_work_done(move || {
-                    let mut state = shared.state.lock().unwrap();
-                    if state.epoch != epoch || state.shutdown {
-                        return;
-                    }
-                    state.queued.retain(|t| *t != time);
-                    let cache = &mut state.cache;
-                    if slot.bytes <= cache.frames.stats().budget {
-                        cache.frames.insert(
-                            scene.key.frame(time),
+                    // How long the frame held the pipeline: from its encoding (or
+                    // the previous frame finishing, if later) until now.
+                    let now = Instant::now();
+                    let cost = {
+                        let mut last = last_done.lock().unwrap();
+                        let cost = now - started.max(*last);
+                        *last = now;
+                        cost
+                    };
+                    if let Some((disk, key)) = store {
+                        disk.save(
+                            key,
+                            slot.texture.clone(),
+                            slot.rect,
                             slot.clone(),
-                            slot.bytes,
-                            deps,
-                            0,
+                            cost,
+                            frame,
                         );
-                        cache.dynamic |= dynamic;
-                        cache.revision += 1;
                     }
-                    state.ready.push_back(slot);
-                    while state.ready.len() > DEPTH {
-                        state.ready.pop_front();
-                    }
-                    let repaint = state.demand.as_ref().map(|d| d.repaint.clone());
-                    drop(state);
-                    if let Some(ctx) = repaint {
-                        ctx.request_repaint();
-                    }
-                    shared.changed.notify_all();
+                    deliver(&shared, epoch, &scene, time, slot, deps, dynamic);
                 });
             }
             Err(error) => failed(&shared, epoch, time, &error),
         }
     }
+}
+
+/// A finished frame goes into the preview cache and the queue the viewer shows from.
+fn deliver(
+    shared: &Shared,
+    epoch: u64,
+    scene: &Scene,
+    time: Time,
+    slot: Arc<Slot>,
+    deps: Vec<bae_render::Dependency>,
+    dynamic: bool,
+) {
+    let mut state = shared.state.lock().unwrap();
+    if state.epoch != epoch || state.shutdown {
+        return;
+    }
+    state.queued.retain(|t| *t != time);
+    let cache = &mut state.cache;
+    if slot.bytes <= cache.frames.stats().budget {
+        cache
+            .frames
+            .insert(scene.key.frame(time), slot.clone(), slot.bytes, deps, 0);
+        cache.dynamic |= dynamic;
+        cache.revision += 1;
+    }
+    state.ready.push_back(slot);
+    while state.ready.len() > DEPTH {
+        state.ready.pop_front();
+    }
+    let repaint = state.demand.as_ref().map(|d| d.repaint.clone());
+    drop(state);
+    if let Some(ctx) = repaint {
+        ctx.request_repaint();
+    }
+    shared.changed.notify_all();
 }
 
 /// The preview cache's byte budget: the GPU Preview Cache setting, never more

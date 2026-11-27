@@ -10,6 +10,14 @@ use crate::transport::Transport;
 
 type Notify = Box<dyn Fn() + Send>;
 
+/// What the stage thread hands the worker.
+enum Out {
+    Msg(Message),
+    /// [`Transport::close`] the inner transport once everything before this
+    /// was sent.
+    Close,
+}
+
 /// Moves a transport with slow I/O (the shared folder on a NAS, a socket) to a
 /// background thread. `send` and `recv` only touch in-memory queues, so
 /// [`crate::SyncSession::pump`] never waits for the disk or the network.
@@ -17,8 +25,16 @@ type Notify = Box<dyn Fn() + Send>;
 /// The worker polls the inner transport every `tick`, and calls `on_receive`
 /// after queuing new messages: hook it to "request a repaint" or "pump soon" so the
 /// stage thread picks them up.
+///
+/// A failed `send` of the inner transport surfaces through a later `recv`.
+/// [`Transport::close`] waits until everything queued was handed to the inner
+/// transport, then closes that (which may wait until the messages arrived, see
+/// its `close`), and returns the first error that `recv` did not report yet, so
+/// a last write that failed is not lost silently. Dropping also waits until
+/// everything queued was handed over, but does not close the inner transport
+/// (it is dropped) and reports nothing.
 pub struct ThreadedTransport {
-    tx: Option<Sender<Message>>,
+    tx: Option<Sender<Out>>,
     rx: Receiver<Result<Message, SyncError>>,
     worker: Option<JoinHandle<()>>,
 }
@@ -34,7 +50,7 @@ impl ThreadedTransport {
     where
         T: Transport + Send + 'static,
     {
-        let (out_tx, out_rx) = mpsc::channel::<Message>();
+        let (out_tx, out_rx) = mpsc::channel::<Out>();
         let (in_tx, in_rx) = mpsc::channel();
         let on_receive: Notify = Box::new(on_receive);
         let worker = std::thread::Builder::new()
@@ -47,12 +63,39 @@ impl ThreadedTransport {
             worker: Some(worker),
         }
     }
+
+    /// Stop the worker once it handled everything queued (`close`: and closed
+    /// the inner transport); the first error it reported that `recv` has not
+    /// returned yet.
+    fn finish(&mut self, close: bool) -> Result<(), SyncError> {
+        // Dropping the sender ends the worker after it sent what was queued.
+        if let Some(tx) = self.tx.take()
+            && close
+        {
+            let _ = tx.send(Out::Close);
+        }
+        let Some(worker) = self.worker.take() else {
+            return Ok(());
+        };
+        let panicked = worker.join().is_err();
+        let mut first = None;
+        while let Ok(r) = self.rx.try_recv() {
+            if let Err(e) = r {
+                first.get_or_insert(e);
+            }
+        }
+        match first {
+            Some(e) => Err(e),
+            None if panicked => Err(SyncError::Closed),
+            None => Ok(()),
+        }
+    }
 }
 
 fn run<T: Transport>(
     mut inner: T,
     tick: Duration,
-    out_rx: Receiver<Message>,
+    out_rx: Receiver<Out>,
     in_tx: Sender<Result<Message, SyncError>>,
     on_receive: Notify,
 ) {
@@ -66,7 +109,16 @@ fn run<T: Transport>(
         }
         outgoing.extend(out_rx.try_iter());
         for m in outgoing {
-            if let Err(e) = inner.send(m) {
+            let r = match m {
+                Out::Msg(m) => inner.send(m),
+                Out::Close => {
+                    if let Err(e) = inner.close() {
+                        let _ = in_tx.send(Err(e));
+                    }
+                    return;
+                }
+            };
+            if let Err(e) = r {
                 if in_tx.send(Err(e)).is_err() {
                     return;
                 }
@@ -105,7 +157,7 @@ impl Transport for ThreadedTransport {
         self.tx
             .as_ref()
             .ok_or(SyncError::Closed)?
-            .send(msg)
+            .send(Out::Msg(msg))
             .map_err(|_| SyncError::Closed)
     }
 
@@ -116,14 +168,14 @@ impl Transport for ThreadedTransport {
             Err(TryRecvError::Disconnected) => Err(SyncError::Closed),
         }
     }
+
+    fn close(&mut self) -> Result<(), SyncError> {
+        self.finish(true)
+    }
 }
 
 impl Drop for ThreadedTransport {
     fn drop(&mut self) {
-        // Dropping the sender ends the worker after it flushed what was queued.
-        self.tx = None;
-        if let Some(w) = self.worker.take() {
-            let _ = w.join();
-        }
+        let _ = self.finish(false);
     }
 }

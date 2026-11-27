@@ -188,3 +188,77 @@ fn text_follows_a_mask_path() {
             .is_err()
     );
 }
+
+#[test]
+fn convert_orientation_preserves_source_text_keys_and_undo() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = p(&fx.run(
+        "text.create",
+        json!({"comp":comp,"text":"中12","position":[0,0]}),
+    )["path"]);
+    fx.run(
+        "attr.set_animated",
+        json!({"path":layer,"attr":"text:source","animated":true,"time":0}),
+    );
+    fx.run(
+        "text.set_text",
+        json!({"layer":layer,"text":"日12","time":100}),
+    );
+    fx.run("text.set_style",json!({"layers":[layer],"time":100,"range":{"start":1,"end":3},"style":{"baseline_direction":"tate_chu_yoko"}}));
+    let before = query::attr_spec(&fx.stage, &layer, "text:source")
+        .unwrap()
+        .clone();
+    fx.run(
+        "text.convert_orientation",
+        json!({"layers":[layer],"orientation":"vertical"}),
+    );
+    let after = query::attr_spec(&fx.stage, &layer, "text:source").unwrap();
+    assert_eq!(before.keyframes.len(), 2);
+    for (time, key) in &before.keyframes {
+        let Value::TextDocument(mut expected) = key.value.clone() else {
+            panic!("text key")
+        };
+        expected.line_orientation = bae_model::LineOrientation::Vertical;
+        assert_eq!(after.keyframes[time].value, Value::TextDocument(expected));
+    }
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        query::attr_spec(&fx.stage, &layer, "text:source"),
+        Some(&before)
+    );
+}
+
+/// New text takes the Character and Paragraph panels' settings; Reset
+/// Character keeps the paragraph settings (AE).
+#[test]
+fn new_text_takes_the_panel_settings_and_reset_character_keeps_paragraphs() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let mut defaults = TextDocument::new("", "Arial", 48.0);
+    defaults.style.hindi_digits = true;
+    defaults.style.baseline_direction = bae_model::BaselineDirection::TateChuYoko;
+    defaults.paragraph.every_line = true;
+    defaults.paragraph.justification = "right".into();
+    let layer = p(&fx.run(
+        "text.create",
+        json!({"comp":comp,"text":"12","position":[0.,0.],
+            "style":defaults.style,"paragraph":defaults.paragraph}),
+    )["path"]);
+    let doc = fx.doc(&layer);
+    assert!(doc.style.hindi_digits && doc.paragraph.every_line);
+    assert_eq!(
+        doc.style.baseline_direction,
+        bae_model::BaselineDirection::TateChuYoko
+    );
+    assert_eq!((doc.text.as_str(), doc.style.font_size), ("12", 48.));
+    fx.run(
+        "text.set_style",
+        json!({"layers":[layer],"style":{"reset_character":true}}),
+    );
+    let doc = fx.doc(&layer);
+    assert!(!doc.style.hindi_digits);
+    assert!(doc.paragraph.every_line);
+    assert_eq!(doc.paragraph.justification, "right");
+    assert_eq!(doc.text, "12");
+}

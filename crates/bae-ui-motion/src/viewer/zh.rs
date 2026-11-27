@@ -6,12 +6,21 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Viewer
     ("Magnification", "放大率"),
     ("Fit", "适合"),
+    // The text menu (AE's MenuID 0296).
+    ("Edit Text...", "编辑文本..."),
+    ("Show Text Panels", "显示文字面板"),
+    ("Reveal Source Text in Timeline", "在时间轴中显示源文字"),
     ("Resolution", "分辨率"),
     ("Full", "完整"),
     ("Half", "二分之一"),
     ("Third", "三分之一"),
     ("Quarter", "四分之一"),
     ("Title/Action Safe", "标题/动作安全"),
+    // View ▸ Import / Export Guides (AE 2026 zh_CN).
+    ("Import Guides...", "导入参考..."),
+    ("Export Guides...", "导出参考..."),
+    ("Import Guides", "导入参考"),
+    ("Export Guides", "导出参考"),
     ("Grid", "网格"),
     ("Transparency Grid", "透明网格"),
     ("Pixel Aspect Ratio Correction", "像素长宽比校正"),

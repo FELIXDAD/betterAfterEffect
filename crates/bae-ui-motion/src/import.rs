@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+pub(crate) mod auto_reload;
 mod verify;
 pub(crate) use verify::FrameChecks;
 
@@ -25,7 +26,7 @@ use serde_json::json;
 
 use crate::session::SharedSession;
 
-fn formats() -> &'static MediaFormats {
+pub(crate) fn formats() -> &'static MediaFormats {
     static FORMATS: OnceLock<MediaFormats> = OnceLock::new();
     FORMATS.get_or_init(MediaFormats::builtin)
 }
@@ -131,6 +132,30 @@ fn probe_file(
     seen: &mut HashSet<PathBuf>,
     out: &mut Probed,
 ) {
+    // 3D models (glTF / GLB / OBJ): read in the background from now on.
+    if bae_render::model::is_model_file(path) {
+        if !seen.insert(path.to_path_buf()) {
+            return;
+        }
+        let _ = bae_render::model::get(path, false);
+        let mut attrs = std::collections::BTreeMap::new();
+        attrs.insert("kind".to_owned(), bae_model::Value::Enum("model".into()));
+        attrs.insert("width".to_owned(), bae_model::Value::Int(1000));
+        attrs.insert("height".to_owned(), bae_model::Value::Int(1000));
+        if let Some(d) = defaults.still_duration {
+            attrs.insert("duration".into(), bae_model::Value::Time(d));
+        }
+        if let Some([still, _, _]) = defaults.labels {
+            attrs.insert("label".into(), bae_model::Value::Int(still));
+        }
+        out.files.push(ImportFile {
+            path: path.to_string_lossy().into_owned(),
+            name: Some(file_name(path)),
+            attrs,
+            folder: folder.map(str::to_owned),
+        });
+        return;
+    }
     if is_photoshop(path) {
         if seen.insert(path.to_owned()) {
             out.photoshop
@@ -177,6 +202,7 @@ fn probe_file(
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v))
                 .collect();
+            crate::progress_metadata::import_xmp(path, &mut attrs);
             use bae_media::MediaKind;
             if info.timecode.is_none() && info.video.as_ref().and_then(|v| v.frame_rate).is_some_and(bae_media::time::is_ntsc) {
                 attrs.insert("timecode:drop_frame".into(), bae_model::Value::Bool(defaults.ntsc_drop_frame));
@@ -312,15 +338,7 @@ pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
             .resources
             .get::<crate::SharedSession>()
             .and_then(|s| s.lock().active_comp.clone());
-        import_into(
-            cx,
-            &paths,
-            None,
-            comp,
-            SequenceMode::Sequence,
-            false,
-            Default::default(),
-        );
+        drop_paths(cx, &paths, None, comp);
     }
 }
 
@@ -336,6 +354,25 @@ pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent:
         false,
         Default::default(),
     );
+}
+
+pub(crate) fn drop_paths(
+    cx: &mut PanelContext<'_>,
+    paths: &[PathBuf],
+    parent: Option<PrimPath>,
+    comp: Option<PrimPath>,
+) {
+    use bae_motion::photoshop::ImportKind;
+    let kind = if paths.len() > 1 {
+        match crate::prefs::current(cx.resources).str("import.drag_import_multiple_items_as") {
+            "composition" => ImportKind::Composition,
+            "composition_retain_layer_sizes" => ImportKind::RetainSize,
+            _ => ImportKind::Footage,
+        }
+    } else {
+        ImportKind::Footage
+    };
+    import_into(cx, paths, parent, comp, SequenceMode::Sequence, false, kind);
 }
 
 fn import_into(
@@ -375,6 +412,7 @@ fn import_into(
         }
         if let Some(c) = comp {
             params["comp"] = json!(c);
+            params["precompose"] = json!(photoshop_kind != bae_model::psd::ImportKind::Footage);
         }
         cx.invoke_with("item.import", params);
     }
@@ -494,10 +532,37 @@ fn selected_footage(cx: &PanelContext<'_>, session: &SharedSession) -> Vec<PrimP
         .collect()
 }
 
+/// How a footage item's file is read again.
+fn sequence_mode(item: &bae_model::PrimView<'_>) -> SequenceMode {
+    if item.value("kind").and_then(|v| v.as_str()) != Some("sequence") {
+        SequenceMode::Single
+    } else if item
+        .value("sequence:pattern")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s.starts_with("*."))
+    {
+        SequenceMode::Alphabetical
+    } else {
+        SequenceMode::Sequence
+    }
+}
+
+/// The items read their files again, as one undo step.
+fn apply_reloads(cx: &mut PanelContext<'_>, items: Vec<bae_motion::ReloadItem>) {
+    if items.is_empty() {
+        return;
+    }
+    for r in &items {
+        auto_reload::invalidate(cx.resources, &r.file.path);
+    }
+    cx.invoke_with("item.reload_files", json!({ "items": items }));
+}
+
 /// File > Reload Footage (Cmd/Ctrl+Alt+L): the selected items read their
 /// files again (a file changed on disk); they keep their names.
 pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    let mut reloads = Vec::new();
     for item in selected_footage(cx, session) {
         let Some(path) = footage_file(cx.stage, &item) else {
             continue;
@@ -508,26 +573,14 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         let Some(view) = cx.stage.prim(&item) else {
             continue;
         };
-        let sequence = if view.value("kind").and_then(|v| v.as_str()) != Some("sequence") {
-            SequenceMode::Single
-        } else if view
-            .value("sequence:pattern")
-            .and_then(|v| v.as_str())
-            .is_some_and(|s| s.starts_with("*."))
-        {
-            SequenceMode::Alphabetical
-        } else {
-            SequenceMode::Sequence
-        };
+        let sequence = sequence_mode(&view);
         let mut probed = probe_selected(&[path], &defaults, sequence);
         if let Some(file) = probed.files.pop() {
-            cx.invoke_with(
-                "item.replace_file",
-                json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }),
-            );
+            reloads.push(bae_motion::ReloadItem { item, file });
         }
         verify::report(cx, tr("Reload Footage"), probed);
     }
+    apply_reloads(cx, reloads);
 }
 
 /// File / Layer ▸ Reveal in Explorer (Finder on macOS): the file of the
@@ -569,6 +622,7 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
     }
     let mut probed = probe(&[path], &defaults);
     if let Some(file) = probed.files.pop() {
+        auto_reload::invalidate(cx.resources, &file.path);
         let keep = crate::prefs::current(cx.resources)
             .str("import.footage_interpretation_on_replace")
             == "remember";
@@ -652,6 +706,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    let watcher = Arc::new(auto_reload::FocusReload::default());
+    app.insert_resource(watcher.clone());
+    let _ = app.register_arc::<dyn bae_gpu::WarmUp>("bae.media/focus-reload", watcher);
     let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
         "bae.media/import-formats",
         Arc::new(verify::FormatWarmUp),
