@@ -1107,7 +1107,8 @@ impl Session {
                 s.selected_effects.len(),
             ]
         };
-        if self.pending.is_empty() && self.validated == Some((stage.revision(), fingerprint(self))) {
+        if self.pending.is_empty() && self.validated == Some((stage.revision(), fingerprint(self)))
+        {
             return;
         }
         self.selected_layers
