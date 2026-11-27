@@ -5,7 +5,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use super::*;
-use bae_media::{FileAudio, Waveform, source_id_for};
+use bae_media::{Waveform, conform::ConformedAudio, source_id_for};
+use std::sync::Arc;
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(2);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
@@ -22,12 +23,12 @@ enum PeakUpdate {
     Unavailable,
 }
 
-fn check_file(path: &Path, previous: Option<u64>) -> PeakUpdate {
+fn check_file(path: &Path, previous: Option<u64>, cache: Option<&ConformedAudio>) -> PeakUpdate {
     let id = source_id_for(path);
     if previous == Some(id) {
         return PeakUpdate::Unchanged;
     }
-    let Ok(mut audio) = FileAudio::open(path) else {
+    let Ok(mut audio) = ConformedAudio::open_source(cache, path) else {
         return PeakUpdate::Unavailable;
     };
     let Ok(wave) = Waveform::from_source(&mut audio, 128) else {
@@ -46,12 +47,12 @@ struct Worker {
 }
 
 impl Worker {
-    fn start(ctx: egui::Context) -> Self {
+    fn start(ctx: egui::Context, cache: Option<Arc<ConformedAudio>>) -> Self {
         let (requests, jobs) = mpsc::channel::<(PathBuf, Option<u64>)>();
         let (complete, results) = mpsc::channel();
         std::thread::spawn(move || {
             for (path, previous) in jobs {
-                let update = check_file(&path, previous);
+                let update = check_file(&path, previous, cache.as_deref());
                 if complete.send((path, update)).is_err() {
                     break;
                 }
@@ -80,6 +81,7 @@ impl Cached {
 
 #[derive(Default)]
 pub(crate) struct Waveforms {
+    pub(super) cache: Option<Arc<ConformedAudio>>,
     files: HashMap<PathBuf, Cached>,
     worker: Option<Worker>,
 }
@@ -88,7 +90,7 @@ impl Waveforms {
     fn levels(&mut self, ctx: &egui::Context, file: PathBuf, now: Instant) -> &[Waveform] {
         let worker = self
             .worker
-            .get_or_insert_with(|| Worker::start(ctx.clone()));
+            .get_or_insert_with(|| Worker::start(ctx.clone(), self.cache.clone()));
         for (path, result) in worker.results.try_iter() {
             if let Some(entry) = self.files.get_mut(&path) {
                 entry.finish(result, now);

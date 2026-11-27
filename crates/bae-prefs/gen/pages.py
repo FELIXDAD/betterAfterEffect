@@ -166,6 +166,9 @@ def item(page, c):
     cid = c["id"]
     label = c.get("labelEn", "")
     tr(label, c.get("labelZh", ""))
+    if cid in {"media_cache_database_choose", "media_cache_choose"}:
+        key = "disk." + cid.removesuffix("_choose") + "_folder"
+        return f'Item::Row(&[Item::Button({s("choose:" + key)}, {s(label)}), Item::P(path({s(key)}, {s(label)}).quiet())])'
     if cid in PATHS:
         key = PATHS[cid][0]
         e = f"path({s(key)}, {s(label)}).quiet()"
