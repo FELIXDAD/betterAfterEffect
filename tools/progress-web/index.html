@@ -104,6 +104,8 @@ details[open]>summary .chev{transform:rotate(45deg)}
 .fold>summary .chev{width:6px;height:6px}
 .fold .item:first-child{border-top:1px solid var(--line)}
 .empty{color:var(--mute);text-align:center;padding:48px 0;font-size:14px}
+.rel-head{margin:4px 0 12px;font-size:15px;font-weight:600;color:var(--sub)}
+.release+.release{margin-top:24px}
 .note{color:var(--mute);font-size:12.5px;margin:0 0 14px}
 
 /* feed */
@@ -153,7 +155,7 @@ details[open]>summary .chev{transform:rotate(45deg)}
 <script>
 const $=id=>document.getElementById(id);
 const REPO='https://github.com/FELIXDAD/betterAfterEffects';
-const TABS=[{id:'ms',name:'里程碑'},{id:'fx',name:'效果矩阵'},{id:'feed',name:'实时动态'},{id:'parity',name:'AE 交互对齐'}];
+const TABS=[{id:'ms',name:'里程碑'},{id:'history',name:'历史版本'},{id:'fx',name:'效果矩阵'},{id:'feed',name:'实时动态'},{id:'parity',name:'AE 交互对齐'}];
 const ORDER=['doing','ready','todo','done'];
 const LABEL={done:'完成',ready:'待合并',doing:'进行中',todo:'未开始'};
 const FX_LABEL={done:'已实现',ready:'待合并',doing:'进行中',todo:'未做'};
@@ -190,8 +192,12 @@ function details(key,def,summary,body,cls){
 const nav=document.querySelector('.tabs');
 for(const t of TABS){const b=document.createElement('button');b.role='tab';b.textContent=t.name;b.dataset.tab=t.id;b.onclick=()=>{tab=t.id;store.set('tab',tab);history.replaceState(null,'','#'+tab);$('query').value='';render();scrollTo({top:0})};nav.append(b)}
 
+/* Items belong to a release; the overview and 里程碑 count the current one. */
+function releaseOf(x){return x.release||'0.1.0'}
+function milesOf(r){return data.items.filter(x=>x.kind==='milestone'&&releaseOf(x)===r)}
+
 function overview(){
- const miles=data.items.filter(x=>x.kind==='milestone'),c=countBy(miles);
+ const miles=milesOf(data.milestone),c=countBy(miles);
  $('version').textContent=data.milestone?'v'+data.milestone:'';
  $('overview').innerHTML=
   '<div><div class="ov-head"><div><div class="ov-label">'+esc(data.milestone?data.milestone+' 总体完成度':'总体完成度')+'</div><div class="ov-pct num">'+pct(c.done,miles.length)+'<small>%</small></div></div>'+
@@ -298,6 +304,16 @@ function parityView(){
  return '<p class="note">'+open+' 项待修 · 共 '+total+' 项</p><div class="grid cols">'+groups.join('')+'</div>';
 }
 
+/* Earlier releases, each with its own completion. */
+function historyView(){
+ const out=[];
+ for(const r of data.history||[]){
+  const rows=milesOf(r),c=countBy(rows);
+  out.push('<section class="release"><h2 class="rel-head">'+esc(r)+' · '+pct(c.done,rows.length)+'% · '+c.done+' / '+rows.length+' 项完成</h2>'+groupsView(rows,false)+'</section>');
+ }
+ return out.join('')||'<p class="empty">没有历史版本</p>';
+}
+
 function chips(rows){
  const c=countBy(rows);
  const labels=tab==='fx'?FX_LABEL:tab==='parity'?PARITY_LABEL:LABEL;
@@ -309,7 +325,8 @@ function render(){
  overview();
  nav.querySelectorAll('button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===tab));
  $('toolbar').hidden=tab==='feed';
- if(tab==='ms'){const rows=data.items.filter(x=>x.kind==='milestone');chips(rows);$('content').innerHTML=groupsView(rows,false)}
+ if(tab==='ms'){const rows=milesOf(data.milestone);chips(rows);$('content').innerHTML=groupsView(rows,false)}
+ else if(tab==='history'){const rows=(data.history||[]).flatMap(milesOf);chips(rows);$('content').innerHTML=historyView()}
  else if(tab==='fx'){const rows=data.items.filter(x=>x.kind==='effect');chips(rows);$('content').innerHTML=groupsView(rows,true)}
  else if(tab==='parity'){const rows=(data.parity||[]).flatMap(i=>i.tasks).map(t=>({status:parityState(t)}));chips(rows);$('content').innerHTML=parityView()}
  else $('content').innerHTML=feedView();
