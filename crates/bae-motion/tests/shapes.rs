@@ -117,19 +117,14 @@ fn rectangle_into_a_new_shape_layer() {
     );
     assert_eq!(
         fx.value(&group, "transform:position"),
-        Some(Value::Vec2([100.0, -100.0]))
+        Some(Value::Vec2([0.0, 0.0]))
     );
-    // Anchor at the shape center (AE preference on): the layer's anchor and
-    // position follow the drawn center, the shape stays where it was drawn.
-    assert_eq!(
-        fx.value(&layer, "transform:anchor_point"),
-        Some(Value::Vec3([100.0, -100.0, 0.0]))
-    );
+    // AE's centered primitive has both the group and anchor at the layer origin.
     assert_eq!(
         fx.value(&layer, "transform:position"),
         Some(Value::Vec3([1060.0, 440.0, 0.0]))
     );
-    let c = fx.to_comp(&comp, &layer, 100.0, -100.0);
+    let c = fx.to_comp(&comp, &layer, 0.0, 0.0);
     assert!((c - DVec3::new(1060.0, 440.0, 0.0)).length() < 1e-9, "{c}");
     let f = fx.contents(&group).child("Fill_1").unwrap();
     assert_eq!(

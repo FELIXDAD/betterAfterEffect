@@ -383,6 +383,7 @@ fn shadow_worst(img: &Image, comp: &RenderComp) -> u8 {
         opacity: 1.0,
         transmission: caster.material.light_transmission,
         pixels: CasterPixels::Solid(color),
+        footprints: Arc::new([]),
     }];
     let cam = comp.view_camera();
     let size = DVec2::splat(200.0);
@@ -498,4 +499,74 @@ fn shadow_only_modes() {
     let shadow = only_shadows.px(185, 185);
     assert!(shadow[3] > 240 && shadow[0] < 8, "the shadow: {shadow:?}");
     assert!(only_shadows.px(10, 190)[3] < 8, "no receiver where lit");
+}
+
+/// Shadows that hold still are drawn into a receiver-space map once (the
+/// second frame with the same layers and lights) and sampled from then on;
+/// the map matches the per-pixel shadows closely.
+#[test]
+fn still_shadows_come_from_a_cached_map() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::with_config(
+        gpu,
+        bae_render::RendererConfig {
+            frame_cache_bytes: 0,
+            ..bae_render::RendererConfig::default()
+        },
+    );
+    let comp = shadow_scene(10.0, 80.0, 0.0);
+    let frame = |r: &mut Renderer| {
+        let f = r.render_frame(&comp, &RenderRequest::full()).unwrap();
+        let img = r.read_rgba8(&f, OutputAlpha::Straight).unwrap();
+        (f.stats.passes, img)
+    };
+    let (per_pixel_passes, per_pixel) = frame(&mut r);
+    let (map_passes, mapped) = frame(&mut r);
+    assert_eq!(map_passes, per_pixel_passes + 1, "the map is drawn");
+    let (cached_passes, cached) = frame(&mut r);
+    assert_eq!(cached_passes, per_pixel_passes, "then reused");
+    assert_eq!(cached.data, mapped.data);
+    let worst = per_pixel
+        .data
+        .iter()
+        .zip(&mapped.data)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap();
+    assert!(worst <= 24, "map vs per pixel: {worst}");
+}
+
+/// The render queue renders at Best Settings: a Draft layer is drawn at Best
+/// in final renders; previews honour the switch.
+#[test]
+fn final_renders_ignore_the_quality_switch() {
+    let mut b = SceneBuilder::new();
+    let comp = b
+        .comp(
+            "main",
+            100,
+            100,
+            bae_model::FrameRate::FPS_30,
+            Time::ONE_SECOND,
+        )
+        .unwrap();
+    let layer = b
+        .solid_layer(&comp, "a", [1.0, 1.0, 1.0, 1.0], [50, 50], [0.0, 0.0])
+        .unwrap();
+    b.set(&layer, "quality", Value::Enum("draft".into()))
+        .unwrap();
+    let stage = b.into_stage();
+    let quality = |purpose| {
+        let mut eval = AnimEvaluator::new(None).with_purpose(purpose);
+        let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
+        rc.layers[0].quality
+    };
+    assert_eq!(
+        quality(bae_render::RenderPurpose::Final),
+        bae_anim::LayerQuality::Best
+    );
+    assert_eq!(
+        quality(bae_render::RenderPurpose::Preview),
+        bae_anim::LayerQuality::Draft
+    );
 }

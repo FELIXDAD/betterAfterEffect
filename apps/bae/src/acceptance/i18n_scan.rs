@@ -5,12 +5,14 @@
 
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
-use egui_kittest::kittest::{AccessKitNode, NodeT as _, Queryable as _};
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::*;
 
 /// Proper nouns and key legends that stay in Latin letters in a Chinese UI.
 pub(super) const ALLOWED: &[&str] = &[
+    // The Project panel's color depth button ("8 bpc", as in AE's Chinese UI).
+    "bpc",
     // Product, formats, color models, codecs.
     "BAE",
     "PNG",
@@ -114,30 +116,10 @@ pub(super) const ALLOWED: &[&str] = &[
     "Insert",
 ];
 
-/// Visible texts with English words, as `(role, text)`.
+/// UI-owned accessibility text containing English words.
 fn english(h: &Ui, allowed: &[String]) -> Vec<String> {
-    fn walk(n: AccessKitNode<'_>, out: &mut Vec<(Role, String)>) {
-        // What the user typed is theirs.
-        let typed = matches!(
-            n.role(),
-            Role::TextInput | Role::MultilineTextInput | Role::SearchInput
-        );
-        if let Some(l) = n.label() {
-            out.push((n.role(), l));
-        }
-        if !typed {
-            if let Some(v) = n.value() {
-                out.push((n.role(), v));
-            }
-            for c in n.children() {
-                walk(c, out);
-            }
-        }
-    }
-    let mut texts = Vec::new();
-    walk(h.root().accesskit_node(), &mut texts);
     let mut found = Vec::new();
-    for (role, text) in texts {
+    for text in super::i18n_retest::a11y_texts(h) {
         let words: Vec<&str> = text
             .split(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '_')
             .filter(|w| !w.is_empty())
@@ -148,7 +130,7 @@ fn english(h: &Ui, allowed: &[String]) -> Vec<String> {
             .filter(|w| !allowed.iter().any(|a| a == w))
             .collect();
         if !words.is_empty() {
-            let line = format!("{role:?} “{text}”: {}", words.join(", "));
+            let line = format!("“{text}”: {}", words.join(", "));
             if !found.contains(&line) {
                 found.push(line);
             }

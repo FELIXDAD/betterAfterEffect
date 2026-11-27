@@ -4,6 +4,14 @@
 //! table (`<module>::ZH` / `<module>/zh.rs`); only common words stay here.
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Project Columns", "项目面板列"),
+    ("Scroll Project Columns", "滚动项目面板列"),
+    ("Timeline Layer Pane Width", "时间轴图层列表宽度"),
+    ("Scroll Timeline Columns", "滚动时间轴列"),
+    ("Timeline Columns", "时间轴列"),
+    ("Column Width", "列宽"),
+    ("Timeline Layer List", "时间轴图层列表"),
+    ("Label and Layer Number", "标签和图层编号"),
     // Command title (`layer.auto_orient`).
     ("Auto-Orient", "自动定向"),
     // Command title (`project.set_settings`).
@@ -23,6 +31,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "The composition has no enabled audio layers.",
         "合成中没有开启声音的图层。",
     ),
+    ("Cache Frames When Idle", "空闲时缓存帧"),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
     ("Set Frame", "设置帧"),
     ("Track Motion", "跟踪运动"),
@@ -48,6 +57,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Composition viewer: an effect or the text renderer still warming up.
     ("Preparing…", "正在准备…"),
     ("Time Stretch", "时间伸缩"),
+    ("New Item", "新建项"),
     // Panel-scoped zoom shortcuts (timeline: = / -, viewer: . / , / ?)
     ("Zoom In Time", "放大时间"),
     ("Zoom Out Time", "缩小时间"),

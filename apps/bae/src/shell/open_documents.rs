@@ -46,6 +46,24 @@ pub fn install(sink: impl Fn(Vec<PathBuf>) + Send + 'static) -> bool {
     }
 }
 
+/// Open the first project in a Finder request, or import the entire footage selection.
+pub fn invocation(paths: &[PathBuf]) -> Option<bae_ui::Invocation> {
+    if let Some(project) = paths.iter().find(|p| {
+        p.extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("bae") || ext.eq_ignore_ascii_case("baez"))
+            || p.file_name().is_some_and(|n| n == "project.json")
+    }) {
+        super::open_files_invocation(std::slice::from_ref(project))
+    } else if paths.is_empty() {
+        None
+    } else {
+        Some(bae_ui::Invocation::with_params(
+            bae_ui_motion::actions::ids::IMPORT_FILE,
+            serde_json::json!({"paths": paths}),
+        ))
+    }
+}
+
 /// Winit reports paths but no cursor motion while Finder owns a drag. Convert
 /// the current location from AppKit window coordinates to the flipped winit view.
 pub fn pointer_in_view(window: &winit::window::Window) -> Option<egui::Pos2> {
@@ -153,6 +171,18 @@ mod tests {
     use objc2_foundation::NSString;
 
     use super::*;
+
+    #[test]
+    fn dock_footage_drop_preserves_all_paths() {
+        let paths = [
+            PathBuf::from("/media/静帧.png"),
+            PathBuf::from("/media/clip.mov"),
+        ];
+        let inv = invocation(&paths).unwrap();
+        assert_eq!(inv.id, bae_ui_motion::actions::ids::IMPORT_FILE);
+        assert_eq!(inv.params["paths"], serde_json::json!(paths));
+        assert!(invocation(&[]).is_none());
+    }
 
     /// The added method receives Finder's URL array and hands the file paths (with
     /// spaces and non-ASCII characters intact) to the sink.

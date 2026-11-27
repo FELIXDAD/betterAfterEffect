@@ -68,7 +68,11 @@ impl AssetFiles {
         let Some(reference) = AssetFile::from_prim(asset) else {
             return Ok(None);
         };
-        match self.locator.locate(&reference) {
+        self.resolve_file(&reference)
+    }
+
+    pub(crate) fn resolve_file(&self, reference: &AssetFile) -> Result<Option<PathBuf>, String> {
+        match self.locator.locate(reference) {
             AssetLocation::File { path, .. } => Ok(Some(path)),
             AssetLocation::Missing => Ok(None),
             AssetLocation::Packaged { entry } => self.materialize(&entry).map(Some),

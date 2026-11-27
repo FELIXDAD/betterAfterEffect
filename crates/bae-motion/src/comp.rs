@@ -640,6 +640,9 @@ pub struct CreateFolderParams {
     /// Parent folder (default the project root).
     #[serde(default)]
     pub parent: Option<PrimPath>,
+    /// Project panel label, 0 to 16.
+    #[serde(default)]
+    pub label: Option<i64>,
 }
 
 /// Output of commands that create one prim.
@@ -661,12 +664,22 @@ impl Command for CreateFolder {
         let name = p.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| {
             query::next_numbered_name(tx.stage(), &parent, crate::names::localized("Untitled"))
         });
-        let path = child(
-            &parent,
-            &query::unique_child_name(tx.stage(), &parent, &name),
-        )?;
-        create(tx, &path, PrimType::FOLDER, None)?;
-        set(tx, &path, "name", Value::String(name))?;
+        let path = create_project_folder(tx, &parent, name, p.label)?;
         Ok(PathOutput { path })
     }
+}
+
+pub(crate) fn create_project_folder(
+    tx: &mut Transaction<'_>,
+    parent: &PrimPath,
+    name: String,
+    label: Option<i64>,
+) -> Result<PrimPath, CommandError> {
+    let path = child(parent, &query::unique_child_name(tx.stage(), parent, &name))?;
+    create(tx, &path, PrimType::FOLDER, None)?;
+    set(tx, &path, "name", Value::String(name))?;
+    if let Some(label) = label.filter(|n| (0..=16).contains(n)) {
+        set(tx, &path, "label", Value::Int(label))?;
+    }
+    Ok(path)
 }

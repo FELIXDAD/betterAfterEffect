@@ -559,10 +559,39 @@ struct MovieAudio {
     times: Vec<Time>,
     frame_duration: Time,
     scratch: Vec<[f32; 2]>,
+    /// The next frame whose audio goes to the encoder.
+    next: usize,
 }
 
 #[cfg(feature = "media")]
 impl MovieAudio {
+    /// Audio goes to the encoder this far ahead of the video it accompanies:
+    /// a movie writer interleaves and, with uncompressed audio, takes the next
+    /// frame only once audio past it has arrived (#793).
+    const LEAD_SECONDS: f64 = 1.0;
+
+    /// Hands over the audio of every frame up to `index` plus the lead.
+    fn push_ahead_of(
+        &mut self,
+        index: usize,
+        encoder: &mut dyn bae_media::Encoder,
+    ) -> Result<(), RenderError> {
+        let lead =
+            (Self::LEAD_SECONDS / self.frame_duration.as_seconds().max(1e-6)).ceil() as usize;
+        let end = (index + lead.max(1)).min(self.times.len());
+        if self.next >= end {
+            return Ok(());
+        }
+        while self.next < end {
+            self.push(self.next, encoder)?;
+            self.next += 1;
+        }
+        if self.next == self.times.len() {
+            encoder.end_audio().map_err(media_error)?;
+        }
+        Ok(())
+    }
+
     fn new(job: &ExportJob<'_>) -> Option<Self> {
         let mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
         if mix.is_empty() {
@@ -573,6 +602,7 @@ impl MovieAudio {
             times: job.times.iter().map(|&(_, t)| t).collect(),
             frame_duration: job.rate.frame_duration(),
             scratch: Vec::new(),
+            next: 0,
         })
     }
     fn push(
@@ -621,13 +651,13 @@ impl EncoderThread {
             .spawn(move || {
                 let mut copy = Duration::ZERO;
                 for (index, mapped) in receiver.iter().enumerate() {
-                    let pushed = mapped.write_to(&mut *encoder).and_then(|elapsed| {
-                        copy += elapsed;
-                        if let Some(track) = &mut audio {
-                            track.push(index, &mut *encoder)?;
-                        }
-                        Ok(())
-                    });
+                    // The audio leads the video it accompanies (#793).
+                    let pushed = match &mut audio {
+                        Some(track) => track.push_ahead_of(index, &mut *encoder),
+                        None => Ok(()),
+                    }
+                    .and_then(|()| mapped.write_to(&mut *encoder))
+                    .map(|elapsed| copy += elapsed);
                     if let Err(error) = pushed {
                         // Wait for the frames before this one; keep them.
                         let _ = encoder.finish();
@@ -861,6 +891,8 @@ pub struct ExportSettings {
     pub bits: Option<u8>,
     /// Encoder threads for image sequences; `None`: one per core.
     pub threads: Option<usize>,
+    /// Maximum number of GPU frames awaiting readback.
+    pub frames_in_flight: usize,
     /// Alpha.
     pub alpha: ExportAlpha,
     /// Movies: average bit rate in bits per second (AE's H.264 "target
@@ -879,6 +911,7 @@ impl ExportSettings {
             compression: None,
             bits: None,
             threads: None,
+            frames_in_flight: READBACK_DEPTH,
             alpha: ExportAlpha::default(),
             bit_rate: None,
             pcm_audio: format.is_quicktime(),
@@ -1648,10 +1681,11 @@ pub fn export_frames(
             && has_frame_run(&job.settings.path)
             && job.times.first().is_some_and(|(frame, _)| frame.is_some()));
     let float_work = renderer.work_format(job.request) == wgpu::TextureFormat::Rgba32Float;
+    let depth = job.settings.frames_in_flight.clamp(1, READBACK_DEPTH);
     let mut run = Run {
-        readback: ExportReadback::new(renderer.gpu().clone(), READBACK_DEPTH),
+        readback: ExportReadback::new(renderer.gpu().clone(), depth),
         sink: None,
-        pending: VecDeque::with_capacity(READBACK_DEPTH + 1),
+        pending: VecDeque::with_capacity(depth + 1),
         stats: ExportStats::default(),
         frames: Vec::with_capacity(job.times.len()),
         on_frame,
@@ -1738,7 +1772,11 @@ pub fn export_frames(
                 draw_calls: rendered.stats.draw_calls,
             });
             drop(rendered);
-            run.collect_ready()?;
+            if depth == 1 {
+                run.wait_one()?;
+            } else {
+                run.collect_ready()?;
+            }
         }
         // Frames already rendered (in flight on the GPU) are written too.
         while run.wait_one()? {}

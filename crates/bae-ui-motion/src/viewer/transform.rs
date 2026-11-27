@@ -17,9 +17,10 @@ use bae_render::Camera;
 use crate::render::{self, Affine, View};
 use crate::session::SharedSession;
 
-/// Snapping distance on screen (points): AE 26 snaps at 13.3 DIP, not at 16
-/// (R1, transform-tools.md §4).
-pub(super) const SNAP_DISTANCE: f32 = 14.0;
+/// Snapping distance on screen (points): AE 26 snaps within 20 physical
+/// pixels at 150 % (13.3 DIP) and not at 24 (16 DIP) (R1, transform-tools.md
+/// §4).
+pub(super) const SNAP_DISTANCE: f32 = 20.0 / 1.5;
 /// Pick radius of bounding-box handles and the anchor point (points).
 pub(super) const HANDLE_PICK: f32 = 5.0;
 pub(super) const ANCHOR_PICK: f32 = 8.0;
@@ -172,8 +173,27 @@ struct Snapping {
 /// The 9 snap features of a layer: bounds corners, edge midpoints and center
 /// (comp space).
 /// A layer's snapping features (AE): its 9 bound points, its anchor point
-/// (`anchor`), and the vertices of its masks and shape paths.
-fn features(l: &EvaluatedLayer, anchor: bool, out: &mut Vec<DVec2>) {
+/// (`anchor`), the vertices of its masks and shape paths and, with `inner`,
+/// the features of the layers inside a collapsed pre-comp.
+fn features(l: &EvaluatedLayer, anchor: bool, inner: bool, out: &mut Vec<DVec2>) {
+    if inner
+        && l.switches.collapse_transformation
+        && let bae_anim::LayerSource::Comp {
+            nested: Some(nested),
+            ..
+        } = &l.source
+    {
+        let m = Affine::new(l.world_matrix);
+        for n in nested
+            .layers
+            .iter()
+            .filter(|n| n.visible && !matches!(n.kind, LayerKind::Camera | LayerKind::Light))
+        {
+            let mut own = Vec::new();
+            features(n, true, true, &mut own);
+            out.extend(own.into_iter().map(|p| m.apply(p)));
+        }
+    }
     if anchor {
         let a = l.world_matrix.transform_point3(l.transform.anchor_point);
         out.push(DVec2::new(a.x, a.y));
@@ -226,6 +246,9 @@ pub(crate) struct TransformDrag {
     snapping: Option<Snapping>,
     /// The point snapped to in the last frame (comp space).
     guide: Option<DVec2>,
+    /// The grabbed feature where it is now, while snapping is on (AE
+    /// highlights it).
+    feature_now: Option<DVec2>,
     /// Guides and grid lines the snapping point snaps to (View ▸ Snap to
     /// Guides / Grid): `(vertical, at)` comp pixels, within `line_snap`.
     lines: Vec<(bool, f64)>,
@@ -248,6 +271,7 @@ impl TransformDrag {
             kind,
             snapping: None,
             guide: None,
+            feature_now: None,
             lines: Vec::new(),
             line_snap: 0.0,
             plane: None,
@@ -273,7 +297,13 @@ impl TransformDrag {
     /// of the other visible layers (and, dragging the anchor, of its own
     /// layer). A layer's features are its 9 bound points, its anchor point and
     /// its mask and shape path vertices (AE). The comp frame is not a target.
-    pub fn with_snapping(mut self, comp: &EvaluatedComp, primary: &PrimPath, grab: DVec2) -> Self {
+    pub fn with_snapping(
+        mut self,
+        comp: &EvaluatedComp,
+        primary: &PrimPath,
+        grab: DVec2,
+        inner: bool,
+    ) -> Self {
         let anchor = matches!(
             self.kind,
             Kind::Anchor {
@@ -291,10 +321,10 @@ impl TransformDrag {
             if moving.contains(&&l.path) {
                 // Dragging the anchor: not to itself.
                 if &l.path == primary {
-                    features(l, !anchor, &mut own);
+                    features(l, !anchor, inner, &mut own);
                 }
             } else if l.visible && !matches!(l.kind, LayerKind::Camera | LayerKind::Light) {
-                features(l, true, &mut targets);
+                features(l, true, inner, &mut targets);
             }
         }
         let feature = if anchor {
@@ -317,6 +347,7 @@ impl TransformDrag {
     /// pixels, when snapping is on for this frame.
     pub fn update(&mut self, p: DVec2, shift: bool, snap: Option<f64>) {
         self.guide = None;
+        self.feature_now = None;
         // Move and anchor drags: the pointer offset, axis-locked with Shift
         // (moves), then snapped.
         let offset = match self.kind {
@@ -353,6 +384,9 @@ impl TransformDrag {
                     if let Some(y) = near(false, f.y) {
                         d.y += y - f.y;
                     }
+                }
+                if snap.is_some() {
+                    self.feature_now = self.snapping.as_ref().map(|s| s.feature + d);
                 }
                 d
             }
@@ -557,9 +591,20 @@ impl TransformDrag {
             .copied()
     }
 
-    /// The snapped-to point: a small target mark.
+    /// Snapping as AE shows it: the grabbed feature as a small square while
+    /// snapping is on, filled once it snaps, with a target mark on the point
+    /// snapped to.
     pub fn paint_guides(&self, painter: &Painter, view: &View, _info: &CompInfo) {
-        let stroke = Stroke::new(1.0, Color32::from_rgb(0x52, 0xb8, 0xff));
+        let color = Color32::from_rgb(0x52, 0xb8, 0xff);
+        let stroke = Stroke::new(1.0, color);
+        if let Some(f) = self.feature_now {
+            let r = Rect::from_center_size(view.to_screen(f), egui::vec2(7.0, 7.0));
+            if self.guide.is_some() {
+                painter.rect_filled(r, 0.0, color);
+            } else {
+                painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
+            }
+        }
         if let Some(t) = self.guide {
             let c = view.to_screen(t);
             painter.circle_stroke(c, 5.0, stroke);

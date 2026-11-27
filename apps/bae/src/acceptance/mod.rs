@@ -21,8 +21,12 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_preferences;
+mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
+mod camera_preferences;
+mod classic_effects;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
@@ -34,19 +38,29 @@ mod files_flow;
 mod i18n_retest;
 #[cfg(target_os = "macos")]
 mod i18n_scan;
+mod import_preferences;
+mod layer_creation_preferences;
 #[cfg(target_os = "macos")]
 mod layers;
 #[cfg(target_os = "macos")]
 mod layout;
+mod liquify;
+mod marker_label_preferences;
+mod media_panels;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
+mod panel_parity;
+mod preference_controls;
+mod preview_preferences;
+mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
+mod render_autosave;
 #[cfg(target_os = "macos")]
 mod render_queue;
-#[cfg(target_os = "macos")]
 mod settings;
+mod shape_anchor;
 mod shortcut_sweep;
 #[cfg(target_os = "macos")]
 mod shortcuts_dialog;
@@ -58,6 +72,7 @@ mod stress;
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod window_workspaces;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -97,7 +112,7 @@ pub(crate) fn build_app() -> App {
     );
     let _ = builder.register_arc::<dyn bae_render::SourceProvider>(
         bae_text::TEXT_PROVIDER,
-        Arc::new(bae_text::render::TextProvider::new()),
+        bae_text::render::TextProvider::shared(),
     );
     builder.build()
 }
@@ -178,6 +193,7 @@ pub(crate) struct Gui {
     /// Preferences (in memory) and the generation last applied.
     pub prefs: Arc<bae_prefs::PrefsStore>,
     prefs_generation: u64,
+    autosave: crate::autosave::AutoSave,
 }
 
 impl Gui {
@@ -197,6 +213,7 @@ impl Gui {
         workspace.set_extra_commands(doc.command_titles());
         Gui {
             prefs_generation: prefs.generation(),
+            autosave: crate::autosave::AutoSave::default(),
             prefs,
             app,
             workspace,
@@ -241,6 +258,15 @@ impl Gui {
             .workspace
             .ui(ui, &self.status, &self.doc, self.app.resources());
         self.pending.extend(invocations);
+        let queue = self.app.resource::<bae_ui_motion::SharedRenderQueue>();
+        if let Some(result) = self.autosave.tick(
+            std::time::Instant::now(),
+            &self.prefs.current(),
+            &self.doc,
+            queue,
+        ) {
+            result.expect("workbench auto-save");
+        }
         self.passes += 1;
         // As `Shell::sync_prefs`.
         let prefs = self.prefs.clone();
@@ -260,7 +286,12 @@ impl Gui {
         };
         match inv.id.as_str() {
             ids::QUIT => {
-                if crate::view_state::confirm_quit(&self.app, &mut self.doc, &mut self.dialogs) {
+                if crate::view_state::confirm_quit(
+                    &self.app,
+                    &mut self.doc,
+                    &self.workspace,
+                    &mut self.dialogs,
+                ) {
                     self.quit = true;
                 }
             }
@@ -273,6 +304,7 @@ impl Gui {
                 crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.doc,
+                    &mut self.workspace,
                     &mut self.dialogs,
                     &inv,
                 );
@@ -299,11 +331,15 @@ impl Gui {
     }
 
     /// A native menu click on the contributed item `registry_id` (e.g.
-    /// `motion.layer.new.solid`): queued like `UserEvent::Menu`. Returns `false`
-    /// (and does nothing) when the item is disabled, as a greyed-out menu item.
+    /// `motion.layer.new.solid`), queued like `UserEvent::Menu`. Disabled items
+    /// and commands blocked by a modal dialog return `false`.
     pub fn menu(&mut self, registry_id: &str) -> bool {
         let item = self.menu_item(registry_id);
-        if !item.enabled {
+        if !item.enabled
+            || !self
+                .workspace
+                .accepts_native_menu(self.app.resources(), &item.invocation)
+        {
             return false;
         }
         self.pending.push(item.invocation);
@@ -432,6 +468,18 @@ pub(crate) struct MenuItemView {
 }
 
 pub(crate) type Ui = Harness<'static, Gui>;
+
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
 
 /// A harness around a fresh [`Gui`].
 pub(crate) fn gui() -> Ui {
@@ -688,6 +736,20 @@ pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }
 
+/// A panel's anchor text: [`FITTED`] finds the Composition viewer's fitted
+/// magnification ("(50%)"), anything else is [`find_text`].
+pub(crate) fn find_anchor(h: &Ui, anchor: &str) -> Option<Rect> {
+    if anchor == FITTED {
+        return find_texts(h, |t| t.starts_with('(') && t.ends_with("%)"))
+            .into_iter()
+            .next();
+    }
+    find_text(h, anchor)
+}
+
+/// The Composition viewer's anchor: its magnification popup while fitted.
+pub(crate) const FITTED: &str = "(%)";
+
 /// Every painted text matching `pred`, as visible rects.
 pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {
     fn walk(shape: &egui::Shape, clip: Rect, pred: &dyn Fn(&str) -> bool, out: &mut Vec<Rect>) {
@@ -718,17 +780,28 @@ pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {
 /// Every painted text of the last frame (debugging aid for failures).
 pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     let mut out = Vec::new();
-    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+    visit_painted_text(h, |_, text| out.push(text.galley.text().to_owned()));
+    out
+}
+
+fn visit_painted_text<State>(
+    h: &Harness<'_, State>,
+    mut visit: impl FnMut(Rect, &egui::epaint::TextShape),
+) {
+    fn walk(
+        shape: &egui::Shape,
+        clip: Rect,
+        visit: &mut impl FnMut(Rect, &egui::epaint::TextShape),
+    ) {
         match shape {
-            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Text(t) => visit(clip, t),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, visit)),
             _ => {}
         }
     }
     for clipped in &h.output().shapes {
-        walk(&clipped.shape, &mut out);
+        walk(&clipped.shape, clipped.clip_rect, &mut visit);
     }
-    out
 }
 
 /// The process-wide GPU for tests (`None` without an adapter), shared with every

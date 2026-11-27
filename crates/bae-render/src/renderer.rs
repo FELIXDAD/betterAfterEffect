@@ -235,6 +235,8 @@ pub struct Renderer {
     pool: TexturePool,
     draws: DrawBuffer,
     output_uniform: Option<([u8; OUTPUT_PARAMS_SIZE as usize], wgpu::Buffer)>,
+    /// Receiver-space shadow maps kept across frames.
+    shadow_maps: crate::exec::shadowmap::ShadowMapCache,
     readback_target: Option<OutputTarget>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
@@ -275,7 +277,14 @@ impl SourceResolver for Resolver<'_> {
         let Some(file) = &footage.file else {
             return Ok(None);
         };
-        match self.footage.get(file, footage.sequence) {
+        match self.footage.get(
+            file,
+            &footage.asset,
+            footage.file_revision,
+            footage.sequence,
+            footage.alphabetical,
+            footage.psd_layer,
+        ) {
             Ok(source) => Ok(Some(source)),
             Err(message) => {
                 self.warnings.push(message);
@@ -303,6 +312,7 @@ impl Renderer {
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
             output_uniform: None,
+            shadow_maps: Default::default(),
             readback_target: None,
             mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
@@ -518,7 +528,8 @@ impl Renderer {
         }
         let encode_start = Instant::now();
         let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
-        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
+        let tiles = (self.frames.stats().budget > 0 || feedback).then(|| crate::exec::TileCache {
+            whole_surfaces: request.roi.is_some(),
             feedback,
             frames: &mut self.frames,
             request: RenderRequest {
@@ -537,6 +548,7 @@ impl Renderer {
             &graph,
             format,
             tiles,
+            &mut self.shadow_maps,
             crate::exec::Timing {
                 cpu: self.layer_times,
                 gpu: self.gpu_timer.as_mut(),
@@ -551,6 +563,7 @@ impl Renderer {
         }
         let encode = encode_start.elapsed();
         self.pool.end_frame();
+        self.shadow_maps.end_frame();
 
         let output = executed.output;
         let image = executed.image;
@@ -738,6 +751,7 @@ impl Renderer {
                 &graph,
                 format,
                 None,
+                &mut self.shadow_maps,
                 crate::exec::Timing {
                     cpu: false,
                     gpu: None,

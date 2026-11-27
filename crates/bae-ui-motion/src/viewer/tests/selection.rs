@@ -160,17 +160,14 @@ fn arrow_keys_nudge_by_screen_pixels() {
     let mut h = H::new();
     let a = h.solid([200.0, 100.0], [320.0, 180.0]);
     h.select(&[&a]);
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 1, "dy": 0}));
-    h.apply(&r);
+    h.nudge(1.0, 0.0);
     assert!(close3(h.v3(&a, "transform:position"), [321.0, 180.0, 0.0]));
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 0, "dy": -10}));
-    h.apply(&r);
+    h.nudge(0.0, -10.0);
     assert!(close3(h.v3(&a, "transform:position"), [321.0, 170.0, 0.0]));
     // At 200 % one screen pixel is half a comp pixel.
     h.viewer.zoom = Some(2.0);
     h.frame(Vec::new(), Modifiers::NONE);
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": -1, "dy": 0}));
-    h.apply(&r);
+    h.nudge(-1.0, 0.0);
     assert!(close3(h.v3(&a, "transform:position"), [320.5, 170.0, 0.0]));
     // From another panel the tool handler does the same at the viewer's
     // magnification.
@@ -223,8 +220,7 @@ fn selection_tool_edits_mask_vertices() {
         "layer not moved"
     );
     // Arrow keys move the selected vertex, Delete removes it.
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 0, "dy": 1}));
-    h.apply(&r);
+    h.nudge(0.0, 1.0);
     assert!(near(h.bezier(&mask).vertices[0], [170.0, 36.0]));
     let r = h.action_with(crate::actions::ids::DELETE, json!({}));
     one(&r, "path.set_vertices");
@@ -309,6 +305,58 @@ fn double_clicking_shape_and_text_layers_edits_them() {
     h.frame(Vec::new(), Modifiers::NONE);
     assert_eq!(h.tools().lock().current(), Tool::TypeHorizontal);
     assert_eq!(h.viewer.type_tool.edited_layer(), Some(&text));
+}
+
+/// The bar's Toggle Mask and Shape Path Visibility off: mask paths are not
+/// shown, so their vertices cannot be picked.
+#[test]
+fn hidden_mask_paths_have_no_vertices_to_pick() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "mask.create",
+        json!({"layer": a, "kind": "rect", "position": [100.0, 50.0], "size": [100.0, 50.0]}),
+    );
+    h.select(&[&a]);
+    h.tools().lock().set(Tool::Selection);
+    h.session().lock().view_options.paths = false;
+    h.click(370.0, 155.0, Modifiers::NONE);
+    assert!(h.viewer.select.vertices.indices.is_empty());
+    h.session().lock().view_options.paths = true;
+    h.click(370.0, 155.0, Modifiers::NONE);
+    assert_eq!(h.viewer.select.vertices.indices, [0]);
+}
+
+/// #400: double-clicking a parametric shape selects its group (AE): its box
+/// moves the group, not the layer.
+#[test]
+fn double_clicking_a_parametric_shape_selects_its_group() {
+    let mut h = H::new();
+    let r = h.draw(Tool::Rectangle, (200.0, 100.0), (300.0, 200.0));
+    h.apply(&r);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let group = h.contents(&layer)[0].clone();
+    let before = vec2v(h.value(&group, "transform:position"));
+    let layer_pos = h.v3(&layer, "transform:position");
+    h.session().lock().selected_layers.clear();
+    h.tools().lock().set(Tool::Selection);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    assert_eq!(h.viewer.select.group.as_ref(), Some(&group));
+    let r = h.drag((250.0, 150.0), (280.0, 160.0), Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let after = vec2v(h.value(&group, "transform:position"));
+    assert!(
+        close(after, [before[0] + 30.0, before[1] + 10.0]),
+        "{before:?} → {after:?}"
+    );
+    assert_eq!(
+        h.v3(&layer, "transform:position"),
+        layer_pos,
+        "the layer stays"
+    );
 }
 
 /// While mask or shape vertices are dragged, the picture follows (#593): the

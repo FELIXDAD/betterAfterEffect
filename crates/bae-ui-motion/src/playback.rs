@@ -22,6 +22,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+pub(crate) mod idle;
+
 const DEPTH: usize = 3;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -29,6 +31,8 @@ struct SceneKey {
     revision: u64,
     path: PrimPath,
     resolution: u32,
+    nested_switches: bool,
+    scope_source: bool,
     sources: Option<u64>,
     effects: Option<u64>,
 }
@@ -38,13 +42,15 @@ impl SceneKey {
         FrameKey {
             comp: self.path.clone(),
             time,
-            request: u64::from(self.resolution),
+            request: u64::from(self.resolution) | (u64::from(self.nested_switches) << 32),
         }
     }
 
     fn same_view(&self, other: &Self) -> bool {
         self.path == other.path
             && self.resolution == other.resolution
+            && self.nested_switches == other.nested_switches
+            && self.scope_source == other.scope_source
             && self.sources == other.sources
             && self.effects == other.effects
     }
@@ -65,6 +71,7 @@ struct Slot {
     time: Time,
     errors: Vec<AttrError>,
     bytes: u64,
+    source: Option<bae_render::GpuImage>,
     /// The published texture (the Info panel and snapshots read it).
     texture: wgpu::Texture,
     /// Its target, handed to [`Spares`] when the frame is dropped.
@@ -147,9 +154,11 @@ impl Spares {
 struct Demand {
     scene: Arc<Scene>,
     times: Vec<Time>,
-    /// Frames to render into the cache once `times` are done (the first frames
-    /// playback would show, prepared while the viewer is idle).
-    prefetch: Vec<Time>,
+    /// Background range and ordering, used after visible frames are ready.
+    idle: Option<idle::Plan>,
+    idle_index: i64,
+    /// A visible viewer renews this allowance on repaint. Hidden tabs stop requesting work.
+    idle_allowance: usize,
     range: TimeRange,
     looping: bool,
     rate: FrameRate,
@@ -212,6 +221,65 @@ struct Mailbox {
     shutdown: bool,
 }
 
+enum Work {
+    Render(Arc<Scene>, Time),
+    CheckMore,
+    Wait,
+}
+
+impl Mailbox {
+    fn next_frame(&mut self) -> Work {
+        let Some(d) = self.demand.as_mut() else {
+            return Work::Wait;
+        };
+        if self.queued.len() >= DEPTH {
+            return Work::Wait;
+        }
+        let needed = |t: Time| {
+            !self.cache.frames.contains(&d.scene.key.frame(t))
+                && !self.ready.iter().any(|s| s.time == t)
+                && !self.queued.contains(&t)
+                && !self.failed.contains(&t)
+        };
+        if let Some(&time) = d.times.iter().find(|&&t| needed(t)) {
+            return Work::Render(d.scene.clone(), time);
+        }
+        let Some(plan) = d.idle else {
+            return Work::Wait;
+        };
+        if d.idle_allowance == 0 {
+            return Work::Wait;
+        }
+        let stats = self.cache.frames.stats();
+        let bytes = self
+            .ready
+            .back()
+            .map(|s| s.bytes)
+            .or_else(|| stats.bytes.checked_div(stats.entries as u64));
+        let Some(bytes) = bytes.filter(|b| *b > 0) else {
+            return Work::Wait;
+        };
+        let capacity = stats.budget / bytes;
+        // Check long runs of already-cached frames in batches. The UI shares
+        // this lock to post immediate requests, which always take precedence.
+        for _ in 0..64 {
+            if d.idle_index as u64 >= capacity {
+                return Work::Wait;
+            }
+            let Some(frame) = plan.frame(d.idle_index) else {
+                return Work::Wait;
+            };
+            d.idle_index += 1;
+            let time = d.rate.frame_to_time(frame);
+            if needed(time) {
+                d.idle_allowance -= 1;
+                return Work::Render(d.scene.clone(), time);
+            }
+        }
+        Work::CheckMore
+    }
+}
+
 #[derive(Default)]
 struct Shared {
     state: Mutex<Mailbox>,
@@ -266,16 +334,32 @@ impl PlaybackPreview {
         session.lock().cached_preview = Some((scene.path.clone(), scene.revision, spans));
     }
 
-    /// Renders `times` into the cache after the demanded frames (the frames
-    /// playback would start with, while the viewer is idle).
-    pub(super) fn prefetch(&self, times: Vec<Time>) {
+    /// Changes the idle range and order, or pauses speculative rendering.
+    pub(super) fn prefetch(&self, plan: Option<idle::Plan>) {
         let mut state = self.shared.state.lock().unwrap();
-        if let Some(d) = state.demand.as_mut()
-            && d.prefetch != times
-        {
-            d.prefetch = times;
-            self.shared.changed.notify_all();
+        if let Some(d) = state.demand.as_mut() {
+            let changed = d.idle != plan;
+            if changed {
+                d.idle = plan;
+                d.idle_index = 0;
+            }
+            let resume = plan.is_some() && d.idle_allowance == 0;
+            d.idle_allowance = if plan.is_some() { DEPTH } else { 0 };
+            if changed || resume {
+                self.shared.changed.notify_all();
+            }
         }
+    }
+
+    pub(super) fn invalidate_source(&mut self, event: &bae_model::StageEvent) {
+        self.stop();
+        let mut state = self.shared.state.lock().unwrap();
+        if state.cache.dynamic {
+            state.cache.frames.clear();
+        } else {
+            state.cache.frames.invalidate(event);
+        }
+        state.cache.revision += 1;
     }
 
     pub(super) fn stop(&mut self) {
@@ -320,18 +404,28 @@ impl PlaybackPreview {
             revision: stage.revision(),
             path: path.clone(),
             resolution,
+            nested_switches: crate::prefs::current(resources)
+                .bool("composition.switches_affect_nested_comps"),
+            scope_source: crate::scopes::needs_working_frame(repaint),
             sources: sources.map(|s| s.0.generation()),
             effects: effects.map(|e| e.0.generation()),
         };
         let mut state = self.shared.state.lock().unwrap();
-        let budget_mib = resources
-            .get::<Arc<bae_prefs::PrefsStore>>()
-            .map_or(1024, |store| {
-                store.current().int(bae_prefs::keys::PREVIEW_CACHE_MIB)
-            });
-        state
-            .cache
-            .sync(stage, &key, (budget_mib.max(0) as u64) << 20);
+        let (budget_mib, reserved_gb) =
+            resources
+                .get::<Arc<bae_prefs::PrefsStore>>()
+                .map_or((1024, 0), |store| {
+                    let prefs = store.current();
+                    (
+                        prefs.int(bae_prefs::keys::PREVIEW_CACHE_MIB),
+                        prefs.int(bae_prefs::keys::RAM_RESERVED_GB),
+                    )
+                });
+        state.cache.sync(
+            stage,
+            &key,
+            cache_budget(budget_mib, reserved_gb, bae_platform::memory::total_bytes()),
+        );
         let frame_key = key.frame(time);
         let replaced = state.demand.as_ref().is_none_or(|d| d.scene.key != key);
         if replaced {
@@ -348,7 +442,9 @@ impl PlaybackPreview {
                     effects: effects.cloned(),
                 }),
                 times: Vec::with_capacity(DEPTH),
-                prefetch: Vec::new(),
+                idle: None,
+                idle_index: 0,
+                idle_allowance: 0,
                 range,
                 looping,
                 rate,
@@ -385,7 +481,8 @@ impl PlaybackPreview {
             if discontinuity {
                 // Jobs already encoded can finish, but cannot publish into the
                 // new epoch. Completed frames inside the new horizon are reusable.
-                d.prefetch.clear();
+                d.idle = None;
+                d.idle_index = 0;
                 state.epoch += 1;
                 state.queued.clear();
                 state.ready.retain(|slot| times.contains(&slot.time));
@@ -424,6 +521,10 @@ impl PlaybackPreview {
         }
         let shown = self.shown.as_ref()?;
         Some((shown.image()?, shown.time, &shown.errors))
+    }
+
+    pub(super) fn scope_source(&self) -> Option<bae_render::GpuImage> {
+        self.shown.as_ref()?.source.clone()
     }
 
     /// The texture and rect of the frame [`Self::poll`] returned last.
@@ -502,11 +603,13 @@ impl Evaluate {
         let samples = Arc::new(bae_anim::ImageSamples::new());
         let mut eval = Evaluator::new();
         eval.set_image_samples(Some(samples.clone()));
+        let mut anim = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+        anim.set_nested_switches(scene.key.nested_switches);
         Ok(Self {
             dynamic,
             stage: Arc::new(stage),
             eval,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            anim,
             gpu,
             samples,
             sampler: None,
@@ -565,6 +668,7 @@ impl Evaluate {
 
 /// Registers `scene`'s layer sources and effects with `engine`.
 fn sync_engine(engine: &mut RenderEngine, scene: &Scene) {
+    engine.anim.set_nested_switches(scene.key.nested_switches);
     if let Some(sources) = &scene.sources {
         for entry in sources.0.snapshot().iter() {
             engine
@@ -597,18 +701,18 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                 if state.shutdown || gpu.is_lost() {
                     return;
                 }
-                if let Some(d) = &state.demand
-                    && state.queued.len() < DEPTH
-                    && let Some(&time) = d.times.iter().chain(&d.prefetch).find(|t| {
-                        !state.cache.frames.contains(&d.scene.key.frame(**t))
-                            && !state.ready.iter().any(|s| s.time == **t)
-                            && !state.queued.contains(t)
-                            && !state.failed.contains(t)
-                    })
-                {
-                    let scene = d.scene.clone();
-                    state.queued.push(time);
-                    break (state.epoch, scene, time);
+                match state.next_frame() {
+                    Work::Render(scene, time) => {
+                        state.queued.push(time);
+                        break (state.epoch, scene, time);
+                    }
+                    Work::CheckMore => {
+                        drop(state);
+                        std::thread::yield_now();
+                        state = shared.state.lock().unwrap();
+                        continue;
+                    }
+                    Work::Wait => {}
                 }
                 // Frames finishing on the GPU or a new demand wake us.
                 state = shared.changed.wait(state).unwrap();
@@ -721,15 +825,17 @@ fn render_worker(
                 spare,
             )
             .map_err(|e| e.to_string())
-            .and_then(|(target, rect, temporal)| {
+            .and_then(|(target, source, temporal)| {
                 let mut spares_now = spares.lock().unwrap();
                 spares_now.size = Some(target.size());
                 // Not an interactive thread: it waits for the warm-up instead.
-                let Some(rect) = rect else {
+                let Some(source) = source else {
                     spares_now.give(target);
                     return Err("incomplete frame".to_owned());
                 };
                 drop(spares_now);
+                let rect = source.rect;
+                let source = job.scene.key.scope_source.then_some(source);
                 let texture = target.view().texture().clone();
                 let channels = engine.channels.clone();
                 let pick_bytes = channels
@@ -743,7 +849,9 @@ fn render_worker(
                     time: job.time,
                     errors: job.errors,
                     bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
-                        + pick_bytes,
+                        + pick_bytes
+                        + source.as_ref().map_or(0, bae_render::GpuImage::byte_size),
+                    source,
                     texture,
                     target: Some(target),
                     spares: spares.clone(),
@@ -804,8 +912,26 @@ fn render_worker(
     }
 }
 
+/// The preview cache's byte budget: the GPU Preview Cache setting, never more
+/// than the RAM left after Memory & CPU ▸ RAM Reserved for Other Applications.
+fn cache_budget(cache_mib: i64, reserved_gb: i64, installed: Option<u64>) -> u64 {
+    let budget = (cache_mib.max(0) as u64) << 20;
+    installed.map_or(budget, |total| {
+        budget.min(total.saturating_sub((reserved_gb.max(0) as u64) << 30))
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_cache_leaves_the_reserved_ram_alone() {
+        let gib = 1u64 << 30;
+        assert_eq!(super::cache_budget(1024, 6, Some(16 * gib)), 1 << 30);
+        assert_eq!(super::cache_budget(32768, 6, Some(16 * gib)), 10 * gib);
+        assert_eq!(super::cache_budget(512, 64, Some(16 * gib)), 0);
+        assert_eq!(super::cache_budget(512, 6, None), 512 << 20);
+    }
+
     use super::*;
 
     #[test]

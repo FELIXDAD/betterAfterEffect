@@ -10,7 +10,10 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+mod verify;
+pub(crate) use verify::FrameChecks;
 
 use bae_media::sequence::{ScannedItem, scan_directory};
 use bae_media::{MediaFormats, OpenOptions, SequenceInfo, SequenceMode};
@@ -22,7 +25,7 @@ use serde_json::json;
 
 use crate::session::SharedSession;
 
-fn formats() -> &'static MediaFormats {
+pub(crate) fn formats() -> &'static MediaFormats {
     static FORMATS: OnceLock<MediaFormats> = OnceLock::new();
     FORMATS.get_or_init(MediaFormats::builtin)
 }
@@ -32,7 +35,10 @@ fn formats() -> &'static MediaFormats {
 #[derive(Debug, Default)]
 pub struct Probed {
     pub files: Vec<ImportFile>,
+    pub photoshop: Vec<(PathBuf, Option<String>)>,
     pub failed: Vec<String>,
+    notices: Vec<String>,
+    sequences_to_verify: Vec<(PathBuf, String, SequenceMode)>,
 }
 
 /// AE's name for a sequence item: the frame range in brackets
@@ -55,6 +61,12 @@ pub fn sequence_name(seq: &SequenceInfo) -> String {
     )
 }
 
+fn is_photoshop(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"))
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -66,10 +78,16 @@ fn file_name(path: &Path) -> String {
 pub struct ImportDefaults {
     /// Frames per second of image sequences.
     pub sequence_fps: f64,
+    /// Drop-frame counting for unlabeled NTSC footage.
+    pub ntsc_drop_frame: bool,
     /// Duration given to stills (`None`: the length of the composition).
     pub still_duration: Option<bae_model::Time>,
     /// Labels of stills, moving footage and audio.
     pub labels: Option<[i64; 3]>,
+    /// Report gaps between the first and last sequence frame.
+    pub report_missing: bool,
+    /// Decode each existing frame in the background to check it is readable.
+    pub verify_frames: bool,
 }
 
 impl Default for ImportDefaults {
@@ -77,8 +95,11 @@ impl Default for ImportDefaults {
     fn default() -> Self {
         ImportDefaults {
             sequence_fps: 30.0,
+            ntsc_drop_frame: true,
             still_duration: None,
             labels: None,
+            report_missing: true,
+            verify_frames: false,
         }
     }
 }
@@ -88,6 +109,9 @@ impl ImportDefaults {
         use bae_media::MediaKind;
         ImportDefaults {
             sequence_fps: crate::prefs::sequence_fps(prefs),
+            ntsc_drop_frame: prefs.str("import.indeterminate_media_ntsc") == "drop_frame",
+            report_missing: prefs.bool("import.report_missing_frames"),
+            verify_frames: prefs.bool("import.verify_individual_frames"),
             still_duration: crate::prefs::still_duration(prefs),
             labels: Some([
                 crate::prefs::footage_label(prefs, MediaKind::Still),
@@ -102,18 +126,46 @@ impl ImportDefaults {
 fn probe_file(
     path: &Path,
     folder: Option<&str>,
-    sequences: bool,
+    sequence: SequenceMode,
     defaults: &ImportDefaults,
     seen: &mut HashSet<PathBuf>,
     out: &mut Probed,
 ) {
+    // 3D models (glTF / GLB / OBJ): read in the background from now on.
+    if bae_render::model::is_model_file(path) {
+        if !seen.insert(path.to_path_buf()) {
+            return;
+        }
+        let _ = bae_render::model::get(path, false);
+        let mut attrs = std::collections::BTreeMap::new();
+        attrs.insert("kind".to_owned(), bae_model::Value::Enum("model".into()));
+        attrs.insert("width".to_owned(), bae_model::Value::Int(1000));
+        attrs.insert("height".to_owned(), bae_model::Value::Int(1000));
+        if let Some(d) = defaults.still_duration {
+            attrs.insert("duration".into(), bae_model::Value::Time(d));
+        }
+        if let Some([still, _, _]) = defaults.labels {
+            attrs.insert("label".into(), bae_model::Value::Int(still));
+        }
+        out.files.push(ImportFile {
+            path: path.to_string_lossy().into_owned(),
+            name: Some(file_name(path)),
+            attrs,
+            folder: folder.map(str::to_owned),
+        });
+        return;
+    }
+    if is_photoshop(path) {
+        if seen.insert(path.to_owned()) {
+            out.photoshop
+                .push((path.to_owned(), folder.map(str::to_owned)));
+        }
+        return;
+    }
     let options = OpenOptions {
-        sequence: if sequences {
-            SequenceMode::Sequence
-        } else {
-            SequenceMode::Single
-        },
+        sequence,
         sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
+        ..Default::default()
     };
     let info = match bae_media::audio::file_info(path) {
         Some(info) => Ok(info),
@@ -128,7 +180,20 @@ fn probe_file(
                 return;
             }
             let name = match &info.sequence {
-                Some(seq) => sequence_name(seq),
+                Some(seq) => {
+                    let name = sequence_name(seq);
+                    if defaults.report_missing && !seq.missing.is_empty() {
+                        out.notices.push(format!(
+                            "{name} — {}: {}",
+                            tr("Missing frames"),
+                            verify::ranges(&seq.missing)
+                        ));
+                    }
+                    if defaults.verify_frames {
+                        out.sequences_to_verify.push((info.path.clone(), name.clone(), sequence));
+                    }
+                    name
+                }
                 None => file_name(path),
             };
             let mut attrs: std::collections::BTreeMap<String, bae_model::Value> = info
@@ -136,7 +201,11 @@ fn probe_file(
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v))
                 .collect();
+            crate::progress_metadata::import_xmp(path, &mut attrs);
             use bae_media::MediaKind;
+            if info.timecode.is_none() && info.video.as_ref().and_then(|v| v.frame_rate).is_some_and(bae_media::time::is_ntsc) {
+                attrs.insert("timecode:drop_frame".into(), bae_model::Value::Bool(defaults.ntsc_drop_frame));
+            }
             if info.kind == MediaKind::Still
                 && let Some(d) = defaults.still_duration
             {
@@ -187,12 +256,24 @@ fn probe_dir(
                 if name.starts_with('.') || name.eq_ignore_ascii_case("thumbs.db") {
                     continue;
                 }
-                probe_file(&p, Some(rel), false, defaults, seen, out);
+                probe_file(&p, Some(rel), SequenceMode::Single, defaults, seen, out);
+            }
+            ScannedItem::Sequence(seq) if is_photoshop(&seq.path_for(seq.first())) => {
+                for &frame in &seq.frames {
+                    probe_file(
+                        &seq.path_for(frame),
+                        Some(rel),
+                        SequenceMode::Single,
+                        defaults,
+                        seen,
+                        out,
+                    );
+                }
             }
             ScannedItem::Sequence(seq) => probe_file(
                 &seq.path_for(seq.first()),
                 Some(rel),
-                true,
+                SequenceMode::Sequence,
                 defaults,
                 seen,
                 out,
@@ -221,13 +302,17 @@ fn probe_dir(
 
 /// Probe chosen or dropped paths: files (with their sequences) and folders.
 pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
+    probe_selected(paths, defaults, SequenceMode::Sequence)
+}
+
+fn probe_selected(paths: &[PathBuf], defaults: &ImportDefaults, sequence: SequenceMode) -> Probed {
     let mut out = Probed::default();
     let mut seen = HashSet::new();
     for path in paths {
         if path.is_dir() {
             probe_dir(path, &file_name(path), defaults, &mut seen, &mut out);
         } else {
-            probe_file(path, None, true, defaults, &mut seen, &mut out);
+            probe_file(path, None, sequence, defaults, &mut seen, &mut out);
         }
     }
     out
@@ -252,14 +337,41 @@ pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
             .resources
             .get::<crate::SharedSession>()
             .and_then(|s| s.lock().active_comp.clone());
-        import_into(cx, &paths, None, comp);
+        drop_paths(cx, &paths, None, comp);
     }
 }
 
 /// Import `paths` into `parent` (default the assets folder): one
 /// `item.import`; unreadable files are reported in an alert.
 pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent: Option<PrimPath>) {
-    import_into(cx, paths, parent, None);
+    import_into(
+        cx,
+        paths,
+        parent,
+        None,
+        SequenceMode::Sequence,
+        false,
+        Default::default(),
+    );
+}
+
+pub(crate) fn drop_paths(
+    cx: &mut PanelContext<'_>,
+    paths: &[PathBuf],
+    parent: Option<PrimPath>,
+    comp: Option<PrimPath>,
+) {
+    use bae_motion::photoshop::ImportKind;
+    let kind = if paths.len() > 1 {
+        match crate::prefs::current(cx.resources).str("import.drag_import_multiple_items_as") {
+            "composition" => ImportKind::Composition,
+            "composition_retain_layer_sizes" => ImportKind::RetainSize,
+            _ => ImportKind::Footage,
+        }
+    } else {
+        ImportKind::Footage
+    };
+    import_into(cx, paths, parent, comp, SequenceMode::Sequence, false, kind);
 }
 
 fn import_into(
@@ -267,30 +379,43 @@ fn import_into(
     paths: &[PathBuf],
     parent: Option<PrimPath>,
     comp: Option<PrimPath>,
+    sequence: SequenceMode,
+    create_comp: bool,
+    photoshop_kind: bae_model::psd::ImportKind,
 ) {
     if paths.is_empty() {
         return;
     }
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
-    let probed = probe(paths, &defaults);
+    let mut probed = probe_selected(paths, &defaults, sequence);
+    for (path, folder) in probed.photoshop.drain(..) {
+        crate::dialogs::shared(cx.resources)
+            .lock()
+            .photoshop_queue
+            .push_back(crate::dialogs::photoshop::PhotoshopDialog::new(
+                path,
+                parent.clone(),
+                comp.clone(),
+                folder,
+                defaults.clone(),
+                photoshop_kind,
+            ));
+    }
     if !probed.files.is_empty() {
-        let mut params = json!({ "files": probed.files });
+        let mut params = json!({ "files": probed.files, "folder_label": crate::prefs::current(cx.resources).int("labels.label_default_folder") });
+        if create_comp {
+            params["create_comp"] = json!(true);
+        }
         if let Some(p) = parent {
             params["parent"] = json!(p);
         }
         if let Some(c) = comp {
             params["comp"] = json!(c);
+            params["precompose"] = json!(photoshop_kind != bae_model::psd::ImportKind::Footage);
         }
         cx.invoke_with("item.import", params);
     }
-    if !probed.failed.is_empty() {
-        let message =
-            tr("These files could not be imported because their format is not supported:")
-                .to_owned()
-                + "\n"
-                + &probed.failed.join("\n");
-        crate::dialogs::alert(cx, tr("Import File"), message);
-    }
+    verify::report(cx, tr("Import File"), probed);
 }
 
 /// Where File > Import puts the items: the folder selected in the Project
@@ -323,9 +448,38 @@ fn request() -> OpenRequest {
 
 /// File > Import > File (Cmd/Ctrl+I): one open panel.
 pub(crate) fn import_file(cx: &mut PanelContext<'_>, session: &SharedSession) {
-    let paths = SharedFilePicker::open(cx.resources, &request());
     let folder = import_folder(cx, session);
-    import_paths(cx, &paths, folder);
+    choose_import(cx, &request(), folder);
+}
+
+fn choose_import(
+    cx: &mut PanelContext<'_>,
+    request: &OpenRequest,
+    folder: Option<PrimPath>,
+) -> bool {
+    let Some(picker) = cx.resources.get::<SharedFilePicker>() else {
+        return false;
+    };
+    let selection = picker.0.import(request);
+    if selection.paths.is_empty() {
+        return false;
+    }
+    import_into(
+        cx,
+        &selection.paths,
+        folder,
+        None,
+        if !selection.sequences {
+            SequenceMode::Single
+        } else if selection.alphabetical {
+            SequenceMode::Alphabetical
+        } else {
+            SequenceMode::Sequence
+        },
+        selection.create_comp,
+        selection.photoshop_kind,
+    );
+    true
 }
 
 /// The footage item File > Replace Footage acts on: the one selected in the
@@ -385,12 +539,31 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         let Some(path) = footage_file(cx.stage, &item) else {
             continue;
         };
-        if let Some(file) = probe(&[path], &defaults).files.pop() {
+        if queue_psd_replace(cx, &path, &item, &defaults, true) {
+            continue;
+        }
+        let Some(view) = cx.stage.prim(&item) else {
+            continue;
+        };
+        let sequence = if view.value("kind").and_then(|v| v.as_str()) != Some("sequence") {
+            SequenceMode::Single
+        } else if view
+            .value("sequence:pattern")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.starts_with("*."))
+        {
+            SequenceMode::Alphabetical
+        } else {
+            SequenceMode::Sequence
+        };
+        let mut probed = probe_selected(&[path], &defaults, sequence);
+        if let Some(file) = probed.files.pop() {
             cx.invoke_with(
                 "item.replace_file",
-                json!({ "item": item, "file": file, "keep_name": true }),
+                json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }),
             );
         }
+        verify::report(cx, tr("Reload Footage"), probed);
     }
 }
 
@@ -428,18 +601,49 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
         return;
     };
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
-    let mut probed = probe(&[path], &defaults);
-    match probed.files.pop() {
-        Some(file) => cx.invoke_with("item.replace_file", json!({ "item": item, "file": file })),
-        None => {
-            let message =
-                tr("These files could not be imported because their format is not supported:")
-                    .to_owned()
-                    + "\n"
-                    + &probed.failed.join("\n");
-            crate::dialogs::alert(cx, tr("Replace Footage File"), message);
-        }
+    if queue_psd_replace(cx, &path, &item, &defaults, false) {
+        return;
     }
+    let mut probed = probe(&[path], &defaults);
+    if let Some(file) = probed.files.pop() {
+        let keep = crate::prefs::current(cx.resources)
+            .str("import.footage_interpretation_on_replace")
+            == "remember";
+        cx.invoke_with(
+            "item.replace_file",
+            json!({ "item": item, "file": file, "keep_interpretation": keep }),
+        );
+    }
+    verify::report(cx, tr("Replace Footage File"), probed);
+}
+
+fn queue_psd_replace(
+    cx: &PanelContext<'_>,
+    path: &Path,
+    item: &PrimPath,
+    defaults: &ImportDefaults,
+    reload: bool,
+) -> bool {
+    if !is_photoshop(path) {
+        return false;
+    }
+    let Some(view) = cx.stage.prim(item) else {
+        return false;
+    };
+    let mut job = crate::dialogs::photoshop::PhotoshopDialog::new(
+        path.to_owned(),
+        None,
+        None,
+        None,
+        defaults.clone(),
+        Default::default(),
+    );
+    job.replace(item.clone(), &view, reload);
+    crate::dialogs::shared(cx.resources)
+        .lock()
+        .photoshop_queue
+        .push_back(job);
+    true
 }
 
 /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I): the open panel comes back
@@ -450,18 +654,23 @@ pub(crate) fn import_multiple(cx: &mut PanelContext<'_>, session: &SharedSession
     request.title = tr("Import Multiple Files").to_owned();
     // A guard against a picker that never cancels (a script).
     for _ in 0..1000 {
-        let paths = SharedFilePicker::open(cx.resources, &request);
-        if paths.is_empty() {
+        if !choose_import(cx, &request, folder.clone()) {
             break;
         }
-        import_paths(cx, &paths, folder.clone());
     }
 }
 
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Missing frames", "缺少帧"),
+    ("Unreadable frames", "无法读取的帧"),
+    ("Could not verify the image sequence.", "无法校验图像序列。"),
     // File > Import and dropped files (`import`).
+    ("Force alphabetical order", "强制按字母顺序排列"),
+    ("Import As:", "导入为："),
+    ("Create Composition", "创建合成"),
+    ("Render Queue Complete", "渲染队列已完成"),
     ("Import File", "导入文件"),
     ("Import Multiple Files", "导入多个文件"),
     ("File", "文件"),
@@ -478,8 +687,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
-pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
+        "bae.media/import-formats",
+        Arc::new(verify::FormatWarmUp),
+    );
 }
 
 #[cfg(test)]

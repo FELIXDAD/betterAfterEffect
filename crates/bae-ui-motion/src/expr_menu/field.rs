@@ -5,6 +5,15 @@ use egui::text_edit::TextEditOutput;
 use egui::{Align2, Color32, FontId, Galley, Id, Rect, Stroke, TextBuffer, TextEdit, Ui, pos2};
 use std::sync::Arc;
 
+mod syntax;
+
+fn display_preferences(resources: &Resources) -> Arc<bae_prefs::Preferences> {
+    resources
+        .get::<Arc<bae_prefs::PrefsStore>>()
+        .map(|s| s.display())
+        .unwrap_or_default()
+}
+
 fn gutter_width(ui: &Ui, source: &str, font: &FontId, width: f32, numbers: bool) -> f32 {
     if !numbers {
         return 0.0;
@@ -21,9 +30,11 @@ fn layout(
     source: &str,
     font: &FontId,
     text: Color32,
-    wrap: &str,
+    prefs: &bae_prefs::Preferences,
     width: f32,
+    caret: Option<usize>,
 ) -> Arc<Galley> {
+    let wrap = prefs.str("scripting_expressions.expr_word_wrap");
     let mut job = LayoutJob::simple(
         source.to_owned(),
         font.clone(),
@@ -34,12 +45,20 @@ fn layout(
             width.max(1.0)
         },
     );
+    if prefs.bool("scripting_expressions.expr_syntax_highlighting") {
+        syntax::colorize(ui, &mut job, prefs, caret);
+    }
     job.wrap.break_anywhere = wrap == "character";
+    job.tab_stop_spaces = std::num::NonZeroU8::new(
+        prefs
+            .int("scripting_expressions.expr_tab_width")
+            .clamp(1, 16) as u8,
+    );
     ui.fonts_mut(|f| f.layout_job(job))
 }
 
 pub(crate) fn height(ui: &Ui, resources: &Resources, source: &str, width: f32) -> f32 {
-    let prefs = crate::prefs::current(resources);
+    let prefs = display_preferences(resources);
     let (font, text, _) = crate::common::expression_style(resources);
     let gutter = gutter_width(
         ui,
@@ -48,16 +67,9 @@ pub(crate) fn height(ui: &Ui, resources: &Resources, source: &str, width: f32) -
         width,
         prefs.bool("scripting_expressions.expr_show_line_numbers"),
     );
-    layout(
-        ui,
-        source,
-        &font,
-        text,
-        prefs.str("scripting_expressions.expr_word_wrap"),
-        width - gutter - 8.0,
-    )
-    .size()
-    .y
+    layout(ui, source, &font, text, &prefs, width - gutter - 8.0, None)
+        .size()
+        .y
 }
 
 pub(super) fn show(
@@ -68,7 +80,7 @@ pub(super) fn show(
     buffer: &mut String,
     rows: Option<usize>,
 ) -> TextEditOutput {
-    let prefs = crate::prefs::current(resources);
+    let prefs = display_preferences(resources);
     let color = |key| {
         let [r, g, b] = prefs.color(key);
         Color32::from_rgb(r, g, b)
@@ -94,29 +106,47 @@ pub(super) fn show(
                 (prefs.float("scripting_expressions.expr_selection_alpha") * 255.0).round() as u8;
             ui.visuals_mut().selection.bg_fill = Color32::from_rgba_unmultiplied(r, g, b, alpha);
             let vertical = rows.is_some()
-                && layout(ui, buffer, &font, text, wrap, field.width() - 8.0)
+                && layout(ui, buffer, &font, text, &prefs, field.width() - 8.0, None)
                     .size()
                     .y
                     > field.height() + 0.5;
             let mut edit = |ui: &mut Ui| {
+                let mut input = super::typing::ExpressionBuffer::new(ui, buffer, &prefs);
+                let indented = rows.is_some() && input.indent_selection(ui, id);
+                let caret = if ui.memory(|m| m.has_focus(id))
+                    && prefs.bool("scripting_expressions.expr_highlight_matching_braces")
+                {
+                    TextEdit::load_state(ui.ctx(), id)
+                        .and_then(|s| s.cursor.char_range())
+                        .filter(|r| r.is_empty())
+                        .map(|r| usize::from(r.primary.index))
+                } else {
+                    None
+                };
                 let mut layouter = |ui: &Ui, buffer: &dyn TextBuffer, width: f32| {
-                    layout(ui, buffer.as_str(), &font, text, wrap, width)
+                    let width = if rows.is_some() { width } else { f32::INFINITY };
+                    layout(ui, buffer.as_str(), &font, text, &prefs, width, caret)
                 };
                 let widget = match rows {
-                    Some(_) => TextEdit::multiline(buffer)
+                    Some(_) => TextEdit::multiline(&mut input)
+                        .lock_focus(true)
                         .margin(egui::Margin::symmetric(4, 0))
-                        .desired_rows(1)
-                        .layouter(&mut layouter),
-                    None => TextEdit::singleline(buffer),
+                        .desired_rows(1),
+                    None => TextEdit::singleline(&mut input),
                 };
-                widget
+                let mut shown = widget
+                    .layouter(&mut layouter)
                     .id(id)
                     .font(font.clone())
                     .text_color(text)
                     .background_color(bg)
                     .min_size(field.size())
                     .desired_width(field.width())
-                    .show(ui)
+                    .show(ui);
+                if indented {
+                    shown.response.response.mark_changed();
+                }
+                shown
             };
             if rows.is_some() && (wrap == "none" || vertical) {
                 egui::ScrollArea::new([wrap == "none", vertical])
@@ -176,6 +206,35 @@ pub(super) fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_stops_align_with_spaces_at_the_configured_width() {
+        let ctx = bae_ui::testing::ctx_with_fonts();
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            let mut prefs = bae_prefs::Preferences::default();
+            for width in [2, 7] {
+                prefs.set("scripting_expressions.expr_tab_width", width);
+                let source = format!(" \tX\n{}X", " ".repeat(width as usize));
+                let galley = layout(
+                    ui,
+                    &source,
+                    &FontId::monospace(12.0),
+                    Color32::WHITE,
+                    &prefs,
+                    400.0,
+                    None,
+                );
+                let x = |line: usize| galley.rows[line].glyphs.last().unwrap().pos.x;
+                assert!(
+                    (x(0) - x(1)).abs() <= 1.0,
+                    "tab width {width}: {} vs {}",
+                    x(0),
+                    x(1)
+                );
+            }
+        });
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn wrapping_changes_visual_rows_without_changing_the_source() {

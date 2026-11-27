@@ -16,6 +16,7 @@
 //! The crate has no UI, GPU or platform dependency (without `file`), so domain
 //! command crates can read preferences too.
 
+mod expr_themes;
 pub mod i18n;
 pub mod pages;
 pub mod schema;
@@ -80,6 +81,7 @@ fn validate(p: &Pref, v: &Value) -> Option<Value> {
         Kind::Color => Value::from(parse_color(v.as_str()?).map(format_color)?),
         Kind::Timecode => Value::from(parse_timecode(v.as_str()?).map(|_| v.as_str())??),
         Kind::Text | Kind::Path => Value::from(v.as_str()?),
+        Kind::AudioOutput => Value::from(v.as_str().filter(|id| !id.is_empty())?),
     })
 }
 
@@ -115,6 +117,9 @@ impl Preferences {
     /// to its default. Returns the keys that were replaced.
     pub fn from_json(data: &Map<String, Value>) -> (Self, Vec<String>) {
         let mut prefs = Self::default();
+        if let Some(theme) = data.get(keys::EXPR_THEME) {
+            prefs.set(keys::EXPR_THEME, theme.clone());
+        }
         let mut fixed = Vec::new();
         for (key, value) in data {
             match schema::find(key) {
@@ -134,6 +139,7 @@ impl Preferences {
                 }
             }
         }
+        prefs.apply_transparency_preset();
         (prefs, fixed)
     }
 
@@ -160,13 +166,47 @@ impl Preferences {
         let Some(v) = validate(p, &value.into()) else {
             return false;
         };
-        self.values.insert(p.key, v.clone()) != Some(v)
+        if self.values.get(p.key) == Some(&v) {
+            if key == keys::EXPR_THEME && self.selected_expression_theme().is_some() {
+                self.update_expression_palette(key);
+                return true;
+            }
+            return false;
+        }
+        self.values.insert(p.key, v);
+        match p.key {
+            keys::TRANSPARENCY_PRESET => self.apply_transparency_preset(),
+            keys::TRANSPARENCY_FIRST | keys::TRANSPARENCY_SECOND => {
+                self.values
+                    .insert(keys::TRANSPARENCY_PRESET, Value::from("custom"));
+            }
+            _ => self.update_expression_palette(key),
+        }
+        true
+    }
+
+    fn apply_transparency_preset(&mut self) {
+        let (first, second) = match self.str(keys::TRANSPARENCY_PRESET) {
+            "light" => ("#cccccc", "#ffffff"),
+            "medium" => ("#808080", "#b3b3b3"),
+            "dark" => ("#333333", "#666666"),
+            "red" => ("#cc6666", "#ffcccc"),
+            "orange" => ("#cc9966", "#ffe6cc"),
+            "green" => ("#66aa66", "#cce6cc"),
+            "blue" => ("#6699cc", "#cce6ff"),
+            "purple" => ("#9966cc", "#e6ccff"),
+            _ => return,
+        };
+        self.values
+            .insert(keys::TRANSPARENCY_FIRST, Value::from(first));
+        self.values
+            .insert(keys::TRANSPARENCY_SECOND, Value::from(second));
     }
 
     /// Resets `key` to its default.
     pub fn reset(&mut self, key: &str) {
         if let Some(p) = schema::find(key) {
-            self.values.insert(p.key, default_json(p));
+            self.set(p.key, default_json(p));
         }
     }
 
@@ -248,7 +288,12 @@ impl Preferences {
 
 /// Keys features read (the schema has them all).
 pub mod keys {
+    pub const CACHE_FRAMES_WHEN_IDLE: &str = "previews.cache_frames_when_idle";
+    pub const TRANSPARENCY_PRESET: &str = "grids_guides.transparency_grid_colors_preset";
+    pub const TRANSPARENCY_FIRST: &str = "grids_guides.transparency_grid_color_1";
+    pub const TRANSPARENCY_SECOND: &str = "grids_guides.transparency_grid_color_2";
     pub const PREVIEW_CACHE_MIB: &str = "memory_cpu.preview_cache_mib";
+    pub const RAM_RESERVED_GB: &str = "memory_cpu.ram_reserved_for_other_apps_gb";
     pub const LEVELS_OF_UNDO: &str = "general.levels_of_undo";
     // Appearance
     /// BAE: the UI language (`system`, `zh-CN`, `en`).
@@ -297,6 +342,7 @@ type Subscriber = Box<dyn Fn(&Preferences) + Send + Sync>;
 /// The app's current preferences (an app resource, `Arc<PrefsStore>`).
 pub struct PrefsStore {
     current: RwLock<Arc<Preferences>>,
+    display_preview: RwLock<Option<Arc<Preferences>>>,
     generation: AtomicU64,
     subscribers: Mutex<Vec<Subscriber>>,
     #[cfg(feature = "file")]
@@ -322,6 +368,7 @@ impl PrefsStore {
     pub fn new(prefs: Preferences) -> Self {
         Self {
             current: RwLock::new(Arc::new(prefs)),
+            display_preview: RwLock::default(),
             generation: AtomicU64::new(0),
             subscribers: Mutex::new(Vec::new()),
             #[cfg(feature = "file")]
@@ -335,6 +382,22 @@ impl PrefsStore {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// Visual settings for painting the next frame while the dialog is open.
+    pub fn display(&self) -> Arc<Preferences> {
+        self.display_preview
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| self.current())
+    }
+
+    pub fn preview_display(&self, preview: Option<&Preferences>) {
+        *self
+            .display_preview
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = preview.cloned().map(Arc::new);
     }
 
     /// Bumped on every change; poll it to refresh cached values.

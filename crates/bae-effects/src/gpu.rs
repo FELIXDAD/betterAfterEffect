@@ -27,13 +27,15 @@ pub(crate) enum Binding {
     Uniform(u32),
     /// A sampled float texture (read with `textureLoad`, never filtered).
     Texture,
+    /// Read-only structured data used by a compute kernel.
+    ReadBuffer,
     /// An unfiltered 3D lookup texture.
     Texture3d,
     /// Raw scalar planes from a multi-channel footage frame.
     UintTextureArray,
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
-    ReadBuffer,
+    /// Read-write structured data used by a compute kernel.
     ReadWriteBuffer,
 }
 
@@ -118,6 +120,7 @@ pub(crate) struct Runtime {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub particles: OnceLock<Result<crate::categories::simulation::Engine, String>>,
+    pub mesh_upload: OnceLock<Mutex<wgpu::util::StagingBelt>>,
     ring: UniformRing,
     placeholder: wgpu::TextureView,
     kernels: Mutex<FxHashMap<KernelKey, Arc<Kernel>>>,
@@ -188,6 +191,7 @@ impl Runtime {
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
         Self {
+            mesh_upload: OnceLock::new(),
             device,
             queue,
             particles: OnceLock::new(),

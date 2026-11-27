@@ -316,11 +316,14 @@ impl TimelinePanel {
             select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
         if resp.double_clicked() {
-            // A precomp opens its comp at the matching time, any other layer the
-            // Layer panel (AE).
-            if !self.open_precomp(cx, session, layer) {
-                crate::layer_panel::open(cx, session, layer);
-            }
+            crate::layer_panel::open_clicked(
+                cx,
+                session,
+                layer,
+                ui.input(|i| i.modifiers.alt),
+                crate::tools::shared(cx.resources).current(),
+                &mut self.eval,
+            );
         }
         // Right-click: the layer context menu (as on the layer name).
         let mut menu_out = None;

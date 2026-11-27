@@ -152,6 +152,13 @@ impl Group {
 }
 
 impl Tool {
+    pub(crate) fn is_layer_paint(self) -> bool {
+        matches!(
+            self,
+            Self::Brush | Self::CloneStamp | Self::Eraser | Self::RotoBrush | Self::RefineEdge
+        )
+    }
+
     pub fn group(self) -> Group {
         Group::ALL
             .into_iter()
@@ -511,6 +518,20 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// Whether a mask or shape path is selected: vertices in the Composition
+/// viewer, or its path property in the Timeline.
+fn path_selected(cx: &PanelContext<'_>) -> bool {
+    let session = crate::common::session(cx.resources);
+    let s = session.lock();
+    s.vertex_path.is_some()
+        || s.selected_props.iter().any(|(p, attr)| {
+            attr == "path"
+                && cx.stage.prim(p).is_some_and(|v| {
+                    v.is_a(&bae_model::PrimType::MASK) || v.is_a(&bae_model::PrimType::PATH)
+                })
+        })
+}
+
 /// `(id, English title)` of the tool actions, for the shortcut editor.
 pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
     SHORTCUTS
@@ -521,12 +542,14 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
             (crate::viewer::ZOOM_100, "Zoom to 100%"),
+            (crate::viewer::FIT_UP_TO_100, "Fit up to 100%"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::view_options::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
         .chain([
             (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::FAST_PREVIEWS, "Fast Previews"),
             (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
             (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
             (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
@@ -570,6 +593,12 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
             let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
             (crate::viewer::display::SHOW_CHANNEL, params, *title)
         });
+    let fast = crate::viewer::display::FAST_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::FAST_PREVIEWS, params, *title)
+        });
     let views = crate::viewer::view3d::SHORTCUT_NAMES
         .iter()
         .map(|(slot, title)| {
@@ -594,6 +623,7 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         .chain(views)
         .chain(custom)
         .chain(channels)
+        .chain(fast)
         .map(|(id, params, title)| (id, params, title.to_owned()))
         .chain(crate::viewer::display::snapshot_names())
         .map(|(id, params, title)| {
@@ -625,6 +655,49 @@ pub fn bindings() -> Vec<Binding> {
 pub fn keymap_bindings() -> KeymapBindings {
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, bindings())
         .for_workspace(crate::menus::WORKSPACE)
+}
+
+/// Keep the Motion keymap and the Keyboard Shortcuts editor on the same factory
+/// bindings. The workbench applies the user's own shortcuts over these.
+pub fn configure_camera_keys(app: &bae_app::App, prefs: &bae_prefs::PrefsStore) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const KEY: &str = "3d.override_123456_for_gizmos";
+    let Some(registry) = app.get_registry::<KeymapBindings>() else {
+        return;
+    };
+    let snapshot = registry.snapshot();
+    let Some(entry) = snapshot.entry("motion.tools") else {
+        return;
+    };
+    let owner = entry.owner().clone();
+    let apply = move |camera: bool| {
+        let mut map = keymap_bindings();
+        if !camera {
+            for number in 1..=6 {
+                for (prefix, action) in [
+                    ("", crate::actions::ids::GO_TO_COMP_MARKER),
+                    ("Shift+", crate::actions::ids::SET_COMP_MARKER),
+                ] {
+                    let marker = Binding::new(&format!("{prefix}{number}"), action)
+                        .params(serde_json::json!({"number":number}));
+                    map.bindings.retain(|b| b.chord != marker.chord);
+                    map.bindings.push(marker);
+                }
+            }
+        }
+        let _ = registry.replace(owner.clone(), "motion.tools", Arc::new(map));
+    };
+    let initial = prefs.current().bool(KEY);
+    if !initial {
+        apply(initial);
+    }
+    let previous = AtomicBool::new(initial);
+    prefs.subscribe(move |p| {
+        let enabled = p.bool(KEY);
+        if previous.swap(enabled, Ordering::Relaxed) != enabled {
+            apply(enabled);
+        }
+    });
 }
 
 /// A tool switched on while its key is held (AE: hold a tool's key to use it,
@@ -719,6 +792,8 @@ pub struct PaintOptions {
     pub clone_offset: [f64; 2],
     /// Clone Stamp: source time shift in seconds.
     pub clone_time_shift: f64,
+    /// Clone Stamp, Lock Source Time: the source time in seconds.
+    pub clone_source_time: f64,
     /// Brush tip (Brushes panel): pixels, degrees, percents.
     pub diameter: f64,
     pub angle: f64,
@@ -729,6 +804,58 @@ pub struct PaintOptions {
     /// Pressure, 2 Pen Tilt, 3 Stylus Wheel.
     pub dynamics: [u8; 5],
     pub minimum_size: f64,
+    /// Clone Source Overlay (the source shown over the layer while cloning)
+    /// and its opacity in percent.
+    pub clone_overlay: bool,
+    pub overlay_opacity: f64,
+    /// The Paint panel's five Clone presets and the one in use.
+    pub clone_presets: [ClonePreset; 5],
+    pub clone_preset: usize,
+}
+
+/// One of the Paint panel's Clone presets: the Clone Options it recalls.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClonePreset {
+    pub source: Option<bae_model::PrimPath>,
+    pub aligned: bool,
+    pub lock_source_time: bool,
+    pub offset: [f64; 2],
+    pub time_shift: f64,
+}
+
+impl Default for ClonePreset {
+    fn default() -> Self {
+        ClonePreset {
+            source: None,
+            aligned: true,
+            lock_source_time: false,
+            offset: [0.0, 0.0],
+            time_shift: 0.0,
+        }
+    }
+}
+
+impl PaintOptions {
+    /// Recalls Clone preset `i`, keeping the current options in the one in
+    /// use first (AE: changes go to the selected preset).
+    pub fn choose_clone_preset(&mut self, i: usize) {
+        let i = i.min(4);
+        self.clone_presets[self.clone_preset.min(4)] = ClonePreset {
+            source: self.clone_source.clone(),
+            aligned: self.aligned,
+            lock_source_time: self.lock_source_time,
+            offset: self.clone_offset,
+            time_shift: self.clone_time_shift,
+        };
+        let p = self.clone_presets[i].clone();
+        self.clone_source = p.source;
+        self.aligned = p.aligned;
+        self.lock_source_time = p.lock_source_time;
+        self.clone_offset = p.offset;
+        self.clone_time_shift = p.time_shift;
+        self.clone_preset = i;
+    }
 }
 
 impl Default for PaintOptions {
@@ -748,6 +875,7 @@ impl Default for PaintOptions {
             lock_source_time: false,
             clone_offset: [0.0, 0.0],
             clone_time_shift: 0.0,
+            clone_source_time: 0.0,
             diameter: 21.0,
             angle: 0.0,
             roundness: 100.0,
@@ -755,6 +883,10 @@ impl Default for PaintOptions {
             spacing: 25.0,
             dynamics: [1, 0, 0, 0, 0],
             minimum_size: 1.0,
+            clone_overlay: false,
+            overlay_opacity: 50.0,
+            clone_presets: Default::default(),
+            clone_preset: 0,
         }
     }
 }
@@ -815,6 +947,11 @@ pub struct ToolOptions {
     pub creates_mask: bool,
     /// Snapping (Selection, Rotation, Pan Behind, shape and pen tools).
     pub snapping: bool,
+    /// Snap to edges extended beyond layer bounds (AE, off by default).
+    pub snap_edges: bool,
+    /// Snap to features inside collapsed compositions and text layers (AE,
+    /// on by default).
+    pub snap_features: bool,
     /// Type and paint tools: open the Character / Paragraph (Paint / Brushes) panels.
     pub auto_open_panels: bool,
     pub axis_mode: AxisMode,
@@ -846,6 +983,8 @@ impl Default for ToolOptions {
             roto_bezier: false,
             creates_mask: false,
             snapping: false,
+            snap_edges: false,
+            snap_features: true,
             auto_open_panels: true,
             axis_mode: AxisMode::Local,
             gizmo: GizmoMode::Position,
@@ -868,6 +1007,8 @@ pub enum ViewRequest {
     Center,
     /// Double-click Zoom: magnification 100%.
     Actual,
+    /// View ▸ Fit up to 100% (Alt/Option+/).
+    FitUpTo100,
 }
 
 /// A double-click on a shape tool button (AE-SHP-054), applied by the viewer.
@@ -964,12 +1105,17 @@ impl ToolState {
         }
     }
 
-    fn apply(&self, shortcut: Shortcut) -> Tool {
+    fn apply(&self, shortcut: Shortcut, toggle_pen: bool) -> Tool {
         match shortcut {
             Shortcut::Tool(t) => t,
             Shortcut::Group { group, cycle } => {
                 if cycle && self.current.group() == group {
-                    self.next_in_group(group, false)
+                    self.next_in_group(group, group == Group::Pen && !toggle_pen)
+                } else if group == Group::Pen
+                    && toggle_pen
+                    && !group.cycle().contains(&self.shown(group))
+                {
+                    Tool::Pen
                 } else {
                     self.shown(group)
                 }
@@ -997,7 +1143,7 @@ impl ToolState {
     }
 
     /// Run a tool shortcut (`motion.tool.*`). Returns false for other actions.
-    pub fn shortcut(&mut self, action: &str) -> bool {
+    pub fn shortcut(&mut self, action: &str, toggle_pen: bool) -> bool {
         let Some((_, _, _, what)) = SHORTCUTS.iter().find(|(id, ..)| *id == action) else {
             return false;
         };
@@ -1010,7 +1156,7 @@ impl ToolState {
             return true;
         }
         let previous = self.momentary.as_ref().map_or(self.current, |m| m.previous);
-        let tool = self.apply(*what);
+        let tool = self.apply(*what, toggle_pen);
         self.set(tool);
         self.momentary = Some(Momentary {
             action: action.to_owned(),
@@ -1149,7 +1295,20 @@ impl ActionHandler for ToolActions {
             shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
             return true;
         }
+        if inv.id == crate::viewer::FIT_UP_TO_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::FitUpTo100);
+            return true;
+        }
         if crate::viewer::view_options::handle(inv, cx) {
+            return true;
+        }
+        // Ctrl+T with a mask or shape path selected: Free Transform Points,
+        // else the Type tools (AE).
+        if inv.id == ids::TYPE && path_selected(cx) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            t.set(Tool::Selection);
+            t.free_transform_request = true;
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
@@ -1159,7 +1318,10 @@ impl ActionHandler for ToolActions {
             t.free_transform_request = true;
             return true;
         }
-        shared(cx.resources).lock().shortcut(&inv.id)
+        let toggle_pen = !matches!(inv.id.as_str(), ids::PEN | ids::PEN_CYCLE)
+            || crate::prefs::current(cx.resources)
+                .bool("composition.pen_shortcut_toggles_mask_feather");
+        shared(cx.resources).lock().shortcut(&inv.id, toggle_pen)
     }
 }
 
@@ -1248,6 +1410,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Bezier Path", "贝塞尔曲线路径"),
     ("RotoBezier", "RotoBezier"),
     ("Snapping", "对齐"),
+    (
+        "Snap to edges extended beyond layer bounds",
+        "沿扩展到图层边界以外的边缘对齐",
+    ),
+    (
+        "Snap to features inside collapsed compositions and text layers",
+        "对齐并显示折叠合成和文本图层内的特性",
+    ),
     ("Auto-Open Panels", "自动打开面板"),
     ("Local Axis Mode", "本地轴模式"),
     ("World Axis Mode", "世界轴模式"),

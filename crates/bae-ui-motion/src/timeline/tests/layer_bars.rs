@@ -193,6 +193,9 @@ fn time_remap_row_scrubs_and_the_bar_runs_past_the_source() {
         panic!("live scrub: {live:?}")
     };
     assert!(t > Time::from_seconds(1.0), "{t:?}");
+    // The viewer drops the live value on pointer-up before the Timeline draws
+    // the release frame: the dragged value still lands.
+    h.session().lock().scrub = None;
     let r = h.frame(
         &mut tl,
         vec![button(to, false, Modifiers::NONE)],
@@ -208,4 +211,133 @@ fn time_remap_row_scrubs_and_the_bar_runs_past_the_source() {
         .get(&Time::from_seconds(1.0))
         .expect("key at the current time");
     assert_eq!(key.value, Value::Time(t));
+}
+
+/// AE's in / out and work-area keys: relative moves and trims keep the
+/// layers' offsets, Ctrl+Alt+B spans the selection, Shift+End and
+/// Ctrl+Alt+Shift+Right move the CTI, Alt+Home aligns to the comp start,
+/// Ctrl+Alt+, stretches the out point to the CTI.
+#[test]
+fn in_out_and_work_area_shortcuts() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    let a = h.layer.clone();
+    let b = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    h.run(
+        "layer.trim",
+        json!({"layers": [a], "in_point": SEC, "out_point": 4 * SEC}),
+    );
+    h.run(
+        "layer.trim",
+        json!({"layers": [b], "in_point": 2 * SEC, "out_point": 6 * SEC}),
+    );
+    let mut tl = h.bars();
+    let span = |h: &H, l: &PrimPath| {
+        let t = query::layer_timing(&h.stage, l);
+        (t.in_point.0 / (SEC / 30), t.out_point.0 / (SEC / 30))
+    };
+    let run = |h: &mut H, tl: &mut TimelinePanel, inv: Invocation| {
+        let r = h.action(tl, inv);
+        h.apply(&r);
+    };
+    let relative = |id: &str| Invocation::with_params(id, json!({"relative": true}));
+    h.session().lock().selected_layers = vec![a.clone(), b.clone()];
+    // Shift+[ at 3 s: a starts at 3 s, b keeps its 1 s offset.
+    h.session().lock().set_time(&info, Time::from_seconds(3.0));
+    run(&mut h, &mut tl, relative(ids::MOVE_IN));
+    assert_eq!((span(&h, &a), span(&h, &b)), ((90, 180), (120, 240)));
+    // Alt+Shift+] at 7 s: the latest out point (b, 8 s) trims back by 1 s, a too.
+    h.session()
+        .lock()
+        .set_time(&info, Time::from_seconds(7.0) - info.frame_duration());
+    run(&mut h, &mut tl, relative(ids::TRIM_OUT));
+    assert_eq!((span(&h, &a), span(&h, &b)), ((90, 150), (120, 210)));
+    // Ctrl+Alt+B: the work area spans both.
+    run(
+        &mut h,
+        &mut tl,
+        Invocation::new(ids::WORK_AREA_TO_SELECTION),
+    );
+    let wa = query::comp_info(&h.stage, &comp).unwrap().work_area;
+    assert_eq!((wa.start, wa.end), (Time(3 * SEC), Time(7 * SEC)));
+    // Shift+End: the work area's last frame; Ctrl+Alt+Shift+Left from there:
+    // the previous layer edge (a's last frame, 5 s - 1 frame).
+    run(&mut h, &mut tl, Invocation::new(ids::GO_WORK_AREA_END));
+    let now = |h: &H| h.session().lock().time(&comp);
+    let frame = info.frame_duration();
+    assert_eq!(now(&h), Time(7 * SEC) - frame);
+    run(&mut h, &mut tl, Invocation::new(ids::GO_PREV_IN_OUT));
+    assert_eq!(now(&h), Time(5 * SEC) - frame);
+    // Alt+Home on a: its in point to 0.
+    h.session().lock().selected_layers = vec![a.clone()];
+    run(&mut h, &mut tl, Invocation::new(ids::IN_TO_COMP_START));
+    assert_eq!(span(&h, &a), (0, 60));
+    // Ctrl+Alt+, at 3 s: a's out point stretches to 3 s (+1 frame), in stays.
+    h.session().lock().set_time(&info, Time::from_seconds(3.0));
+    run(&mut h, &mut tl, Invocation::new(ids::STRETCH_OUT));
+    assert_eq!(span(&h, &a), (0, 91));
+}
+
+/// #769: Freeze Frame at 2:03 with Time Remapping on shows 0:00:02:03 in the
+/// Time Remap row (the held source time), not 0.
+#[test]
+fn freeze_frame_shows_the_held_source_time() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let inner = path(
+        &h.run(
+            "comp.create",
+            json!({"width": 64, "height": 64, "fps": 30, "duration": 10 * SEC}),
+        )["path"],
+    );
+    h.session().lock().open_comp(&comp);
+    let pre = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "pre_comp", "source": inner}),
+        )["path"],
+    );
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    let at = Time::from_seconds(2.0) + Time(3 * SEC / 30);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.selected_layers = vec![pre.clone()];
+        s.set_time(&info, at);
+        s.reveal.insert(
+            pre.clone(),
+            crate::session::Reveal::Attrs(vec!["time_remap".into()]),
+        );
+    }
+    // Time Remapping already on (the identity), as after Ctrl+Alt+T.
+    h.run(
+        "layer.time_remap",
+        json!({"layers": [pre], "enabled": true}),
+    );
+    let mut tl = TimelinePanel::default();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let r = h.action(&mut tl, Invocation::new(ids::FREEZE_FRAME));
+    h.apply(&r);
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let texts = h.painted_text.clone().unwrap();
+    let label = texts
+        .iter()
+        .find(|(s, _)| s == bae_ui::tr("Time Remap"))
+        .map(|(_, r)| *r)
+        .expect("Time Remap row");
+    let on_row: Vec<&String> = texts
+        .iter()
+        .filter(|(_, r)| (r.center().y - label.center().y).abs() < 4.0)
+        .map(|(s, _)| s)
+        .collect();
+    assert!(
+        on_row.iter().any(|s| *s == "0:00:02:03"),
+        "row shows {on_row:?}"
+    );
+    let _ = info;
 }

@@ -1,5 +1,5 @@
 use crate::{
-    Builtin, EffectTarget, TargetEffect, blur,
+    Builtin, EffectTarget, TargetEffect,
     catalog::DefBuilder,
     common,
     effects::{layer_input, sampled::Shader, temporal},
@@ -200,7 +200,21 @@ impl Effect for Cleanup {
         let v = Params::new(&self.def, p);
         let radius = match self.method {
             Method::Key if v.popup(1) != 2 => 2. * v.f(6) * p.scale,
-            Method::Wire if v.popup(3) >= 3 => v.f(4) * p.scale + 2.,
+            // Displace reads (2 * half width + 1) / |axis . normal| from a
+            // pixel inside the wire.
+            Method::Wire if v.popup(3) >= 3 => {
+                let line = match (v.value(1), v.value(2)) {
+                    (Some(Value::Vec2(a)), Some(Value::Vec2(b))) => [b[0] - a[0], b[1] - a[1]],
+                    _ => [1., 0.],
+                };
+                let length = line[0].hypot(line[1]).max(1e-9);
+                let across = if v.popup(3) == 4 {
+                    (line[1] / length).abs()
+                } else {
+                    1.
+                };
+                (v.f(4) * p.scale + 1.) / across.max(0.05) + 2.
+            }
             _ => 0.,
         };
         roi.inflate(radius.ceil() as i32)
@@ -216,26 +230,6 @@ impl Effect for Cleanup {
     }
 }
 
-// Run the shared blur in texture coordinates, then restore the layer placement.
-fn blurred(
-    target: &mut dyn EffectTarget,
-    image: &GpuImage,
-    radius: f64,
-) -> Result<GpuImage, RenderError> {
-    let sigma = radius * 0.5 / image.pixel_scale;
-    if blur::radius(sigma) == 0 {
-        return Ok(image.clone());
-    }
-    let mut local = common::premultiplied(target, image)?;
-    let [w, h] = local.texel_size();
-    local.rect = IRect::from_size(w, h);
-    local.pixel_scale = 1.;
-    let mut result = blur::plan_gaussian(local.rect, [sigma; 2], blur::Edge::Repeat, local.rect)
-        .encode(target, &local)?;
-    result.rect = image.rect;
-    result.pixel_scale = image.pixel_scale;
-    Ok(result)
-}
 impl TargetEffect for Cleanup {
     fn encode(
         &self,
@@ -261,8 +255,8 @@ impl TargetEffect for Cleanup {
                 let Some(map) = map else {
                     return Ok(input.clone());
                 };
-                let plate = blurred(target, map, v.f(6))?;
-                let source = blurred(target, input, v.f(6))?;
+                let plate = common::blurred(target, map, v.f(6))?;
+                let source = common::blurred(target, input, v.f(6))?;
                 KEY.dispatch(target, v, roi, input, [Some(&plate), Some(&source)], [0, 0])
             }
             Method::Wire => WIRE.dispatch(target, v, roi, input, [map.as_ref()], [0, 0]),

@@ -18,6 +18,22 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
     prefs.set("export.segment_sequences_enabled", true);
     prefs.set("export.segment_sequences_files", 2);
     h.state().prefs.set(prefs).unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page":"memory_cpu"}),
+    ));
+    settle(&mut h);
+    h.get_by_label("Enable Multi-Frame Rendering").click();
+    settle(&mut h);
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "OK")
+        .click();
+    settle(&mut h);
+    assert!(
+        !h.state()
+            .prefs
+            .current()
+            .bool("memory_cpu.enable_multi_frame_rendering")
+    );
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = h.state().render_queue();
     {
@@ -25,9 +41,9 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
         assert_eq!(q.items().len(), 1);
         let id = q.items()[0].id;
         let item = q.item_mut(id).unwrap();
-        assert!(item.output.is_empty());
-        item.set_format(bae_render::ExportFormat::Png);
-        item.output = tmp
+        assert!(item.outputs[0].output.is_empty());
+        item.outputs[0].set_format(bae_render::ExportFormat::Png);
+        item.outputs[0].output = tmp
             .path()
             .join("镜头_[###].png")
             .to_string_lossy()
@@ -35,7 +51,8 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
         item.start = 7;
         item.end = 11;
     }
-    h.get_by_label("Render").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+        .click();
     settle(&mut h);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while queue.lock().is_running() {
@@ -67,8 +84,8 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = queue.lock();
     let items = queue.items();
-    let auto = Path::new(&items[1].output);
-    let repeated = Path::new(&items[2].output);
+    let auto = Path::new(&items[1].outputs[0].output);
+    let repeated = Path::new(&items[2].outputs[0].output);
     assert_eq!(auto.parent(), Some(tmp.path()));
     assert_eq!(repeated.parent(), Some(tmp.path()));
     assert_ne!(auto, repeated);
@@ -80,4 +97,31 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
             .starts_with("Comp 1_1")
     );
     eprintln!("Rendered frames 7–11 into three folders and verified unique queue output names.");
+}
+
+#[test]
+fn info_and_flowchart_show_the_active_render_when_enabled() {
+    let mut h = gui();
+    new_comp(&mut h);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    let queue = h.state().render_queue();
+    {
+        let mut q = queue.lock();
+        let id = q.items()[0].id;
+        q.item_mut(id).unwrap().status = ItemStatus::Rendering { done: 2, total: 12 };
+    }
+    for panel in ["info", "flowchart"] {
+        to_front(&mut h, panel);
+        for show in [true, false] {
+            let mut prefs = (*h.state().prefs.current()).clone();
+            prefs.set("appearance.show_rendering_progress_in_info_flowchart", show);
+            h.state().prefs.set(prefs).unwrap();
+            settle(&mut h);
+            assert_eq!(
+                find_text(&h, "Rendering Comp 1  2/12").is_some(),
+                show,
+                "{panel}"
+            );
+        }
+    }
 }

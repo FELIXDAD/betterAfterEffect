@@ -153,6 +153,9 @@ pub struct PresetEffect {
     /// `param:<id>` → value.
     #[serde(default)]
     pub values: std::collections::BTreeMap<String, Value>,
+    /// Keys relative to the playhead, in composition time.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub keys: std::collections::BTreeMap<String, Vec<(Time, Keyframe)>>,
 }
 
 /// Animation ▸ Apply Animation Preset (and double-click in Effects & Presets):
@@ -171,6 +174,8 @@ impl ApplyPreset {
 pub struct ApplyPresetParams {
     pub layers: Vec<PrimPath>,
     pub effects: Vec<PresetEffect>,
+    #[serde(default)]
+    pub time: Time,
 }
 
 impl bae_model::Command for ApplyPreset {
@@ -211,6 +216,21 @@ impl bae_model::Command for ApplyPreset {
                 for (attr, value) in &e.values {
                     if attr.starts_with("param:") {
                         set(tx, &effect, attr, value.clone())?;
+                    }
+                }
+                for (attr, keys) in &e.keys {
+                    if bae_model::effect::param_id(attr).is_none() {
+                        return Err(fail("expected an effect parameter for the preset keys"));
+                    }
+                    for (offset, keyframe) in keys {
+                        let time =
+                            query::to_key_time(tx.stage(), &effect, p.time.saturating_add(*offset));
+                        tx.apply(Op::SetKeyframe {
+                            path: effect.clone(),
+                            attr: attr.clone(),
+                            time,
+                            keyframe: keyframe.clone(),
+                        })?;
                     }
                 }
                 out.push(effect);
@@ -613,16 +633,17 @@ impl bae_model::Command for AudioAmplitude {
             source: None,
             index: None,
             color: None,
+            solids_folder_name: None,
+            solids_folder_label: None,
             size: None,
             pixel_aspect: None,
             text: None,
             font_size: None,
             shape: None,
             position: None,
-            start: Some(Time::ZERO),
+            defaults: crate::layer::NewLayerDefaults::default(),
             camera: None,
             light: None,
-            label: None,
             position_3d: None,
             point_of_interest: None,
         };

@@ -19,6 +19,7 @@ use crate::preview_snapshot::PreviewSnapshot;
 pub(crate) struct LiveScene {
     /// Stage revision and the sources' and effects' registry generations.
     pub key: (u64, Option<u64>, Option<u64>),
+    pub nested_switches: bool,
     pub snapshot: PreviewSnapshot,
     pub sources: Option<PreviewSources>,
     pub effects: Option<PreviewEffects>,
@@ -52,7 +53,7 @@ pub(crate) struct LiveFrame {
     pub size: [u32; 2],
     /// `None`: incomplete (something still warming up), the target is
     /// untouched.
-    pub rect: Option<IRect>,
+    pub source: Option<bae_render::GpuImage>,
     pub layer_times: Option<(PrimPath, Vec<(PrimPath, Duration)>)>,
 }
 
@@ -146,6 +147,7 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
                 engine.renderer.sync_effects(&effects.0);
             }
             engine.anim.clear_compiled();
+            engine.anim.set_nested_switches(job.scene.nested_switches);
             scene = Some((job.scene.clone(), Arc::new(stage)));
         }
         let stage = scene.as_ref().unwrap().1.clone();
@@ -174,13 +176,13 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
             job.roi,
             target.take(),
         );
-        let Ok((out, rect, _)) = rendered else {
+        let Ok((out, source, _)) = rendered else {
             continue;
         };
         let frame = LiveFrame {
             view: out.view().clone(),
             size: out.size(),
-            rect,
+            source,
             layer_times: engine.layer_times.take(),
         };
         target = Some(out);

@@ -331,6 +331,8 @@ impl<'a> MockPass<'a> {
                 }),
                 None => BlendMode::Normal,
             };
+            out.quality =
+                bae_anim::LayerQuality::from_token(string(layer, "quality", local).as_deref());
             out.preserve_transparency =
                 boolean(layer, "preserve_transparency", local).unwrap_or(false);
             out.track_matte = string(layer, "track_matte", local)
@@ -347,7 +349,12 @@ impl<'a> MockPass<'a> {
                 if boolean(layer, "effects_enabled", local).unwrap_or(true) {
                     out.effects = self.effects(layer, local);
                 }
+                out.layer_styles =
+                    bae_model::layer_styles::effective_styles(self.stage, layer.path())
+                        .and_then(|p| self.effect(p, local));
                 out.masks = self.masks(layer, local);
+                out.resolve_photoshop_mask(self.stage);
+                out.resolve_photoshop_group(self.stage, self.assets);
             }
             if layer_has_expressions(layer) {
                 self.warn(format!(
@@ -357,6 +364,7 @@ impl<'a> MockPass<'a> {
             }
             comp.layers.push(out);
         }
+        comp.photoshop_clipping_visibility(self.stage);
         Ok(comp)
     }
 
@@ -467,10 +475,19 @@ impl<'a> MockPass<'a> {
                 };
                 Ok(LayerContent::Footage(FootageRef {
                     asset: source,
+                    file_revision: bae_model::asset::file_revision(&src),
+                    psd_layer: bae_model::psd::LayerImage::from_asset(&src),
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: local,
-                    sequence: None,
+                    sequence: (asset_kind == "sequence").then(|| match src.value("frame_rate") {
+                        Some(Value::FrameRate(rate)) => *rate,
+                        _ => FrameRate::FPS_30,
+                    }),
+                    alphabetical: src
+                        .value("sequence:pattern")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s.starts_with("*.")),
                     blend: None,
                 }))
             }
@@ -482,41 +499,43 @@ impl<'a> MockPass<'a> {
         let stage = self.stage;
         children_of_type(stage, layer.path(), "effects", &PrimType::EFFECT)
             .into_iter()
-            .filter_map(|path| {
-                let fx = stage.prim(&path)?;
-                let mut params: Vec<(u32, Value)> = fx
-                    .attr_names()
-                    .into_iter()
-                    .filter_map(|name| {
-                        let id = bae_model::effect::param_id(name)?;
-                        Some((id, sample(&fx, name, local)?))
-                    })
-                    .collect();
-                let effect = string(&fx, "match_name", local).unwrap_or_default();
-                if effect == "CC Ripple Pulse"
-                    && fx
-                        .attr("param:0002")
-                        .is_some_and(|p| !p.keyframes.is_empty())
-                {
-                    let span = sample(&fx, "param:0003", local)
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(1.0);
-                    let profile = bae_anim::effect_history::ripple_profile(local, span, |t| {
-                        sample(&fx, "param:0002", t)
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(100.0)
-                    });
-                    params.push((bae_anim::effect_history::HISTORY_PARAM, profile));
-                }
-                params.sort_by_key(|(id, _)| *id);
-                Some(RenderEffect {
-                    effect,
-                    enabled: boolean(&fx, "enabled", local).unwrap_or(true),
-                    params,
-                    path,
-                })
-            })
+            .filter_map(|path| self.effect(path, local))
             .collect()
+    }
+
+    fn effect(&self, path: PrimPath, local: Time) -> Option<RenderEffect> {
+        let fx = self.stage.prim(&path)?;
+        let mut params: Vec<(u32, Value)> = fx
+            .attr_names()
+            .into_iter()
+            .filter_map(|name| {
+                let id = bae_model::effect::param_id(name)?;
+                Some((id, sample(&fx, name, local)?))
+            })
+            .collect();
+        let effect = string(&fx, "match_name", local).unwrap_or_default();
+        if effect == "CC Ripple Pulse"
+            && fx
+                .attr("param:0002")
+                .is_some_and(|p| !p.keyframes.is_empty())
+        {
+            let span = sample(&fx, "param:0003", local)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let profile = bae_anim::effect_history::ripple_profile(local, span, |t| {
+                sample(&fx, "param:0002", t)
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(100.0)
+            });
+            params.push((bae_anim::effect_history::HISTORY_PARAM, profile));
+        }
+        params.sort_by_key(|(id, _)| *id);
+        Some(RenderEffect {
+            effect,
+            enabled: boolean(&fx, "enabled", local).unwrap_or(true),
+            params,
+            path,
+        })
     }
 
     fn masks(&self, layer: &PrimView<'_>, local: Time) -> Vec<RenderMask> {

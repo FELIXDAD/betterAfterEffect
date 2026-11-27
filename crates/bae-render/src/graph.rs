@@ -50,6 +50,8 @@
 //! that affects its pixels, rect, scale) – the `(Prim, time, parameter hash)` key
 //! of ARCHITECTURE §5. Identical subgraphs within a frame are shared.
 
+pub mod layer_styles;
+
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -174,6 +176,47 @@ pub enum NodeKind {
     Mix(MixNode),
     /// A 3D layer drawn alone, blurred by the camera's depth of field.
     DepthBlur(DepthBlurNode),
+    /// A 3D model layer drawn through the camera with a depth buffer.
+    Mesh(Box<MeshNode>),
+    /// A lit 3D layer's shadows in its own space.
+    ShadowMap(ShadowMapNode),
+}
+
+/// A 3D model layer (AE's Advanced 3D models, [`crate::model`]) drawn
+/// through the camera with a depth buffer and lit by the comp's lights,
+/// premultiplied, in the composite's space (`exec/mesh.rs`).
+#[derive(Debug)]
+pub struct MeshNode {
+    /// The layer (diagnostics).
+    pub layer: PrimPath,
+    pub model: Arc<crate::model::Model>,
+    /// Model space → comp space.
+    pub matrix: DMat4,
+    pub camera: crate::camera::Camera,
+    /// The lights that reach the layer.
+    pub lights: Arc<[crate::light::Light]>,
+    /// The comp's size in pixels.
+    pub comp_size: [u32; 2],
+    /// A linear working space (the shading is not display-encoded).
+    pub linear: bool,
+}
+
+/// How much of each shadow-casting light reaches every point of a lit 3D
+/// layer past the layer's shadow casters, in the layer's own pixels (AE's
+/// shadow maps): drawn when the layer, its lights or casters change and kept
+/// across frames; the layer's draws sample it (`exec/shadowmap.rs`).
+#[derive(Debug)]
+pub struct ShadowMapNode {
+    /// The layer (diagnostics).
+    pub layer: PrimPath,
+    /// The layer's lighting with its casters.
+    pub lighting: Arc<crate::light::Lighting>,
+    /// Output texels the layer covers: when they outnumber a map slot's
+    /// texels, testing the casters per output pixel costs more than the map.
+    pub screen_texels: u64,
+    /// Per slot, the key of its contents (the layer, its casters and that
+    /// light): a slot whose light did not change is copied, not drawn.
+    pub slot_keys: Vec<u64>,
 }
 
 /// Depth of field of one 3D layer (AE's camera Depth of Field): the layer
@@ -245,6 +288,14 @@ impl NodeKind {
                 f(m.coverage);
             }
             NodeKind::DepthBlur(d) => f(d.input),
+            NodeKind::Mesh(_) => {}
+            NodeKind::ShadowMap(m) => {
+                for c in m.lighting.casters.iter() {
+                    if let crate::light::CasterPixels::Image(id) = c.pixels {
+                        f(id);
+                    }
+                }
+            }
             NodeKind::Fill(_) | NodeKind::Source(_) | NodeKind::Mask(_) => {}
         }
     }
@@ -259,6 +310,8 @@ impl NodeKind {
             NodeKind::Mask(_) => "mask",
             NodeKind::Mix(_) => "mix",
             NodeKind::DepthBlur(_) => "depth of field",
+            NodeKind::Mesh(_) => "3d model",
+            NodeKind::ShadowMap(_) => "shadow map",
         }
     }
 }
@@ -292,6 +345,8 @@ pub struct LayerOp {
     pub blend: BlendMode,
     /// Stable per-layer dissolve seed, mixed with the comp frame for Dancing Dissolve.
     pub dissolve_seed: u32,
+    /// Sampling quality of the source layer.
+    pub quality: bae_anim::LayerQuality,
     /// Only draw where the backdrop has alpha.
     pub preserve_transparency: bool,
     /// Track matte image (composite space, same units as the composite).
@@ -632,6 +687,7 @@ pub fn build_layer_image(
                 opacity: 1.0,
                 blend: BlendMode::Normal,
                 dissolve_seed: 0,
+                quality: bae_anim::LayerQuality::Best,
                 preserve_transparency: false,
                 matte: None,
                 mask: None,
@@ -658,6 +714,44 @@ pub fn build_layer_image(
 }
 
 /// Converts a rectangle in space pixels to texel units at `pixel_scale`.
+/// The plate a 3D model sorts by among the layers of its 3D group: square,
+/// facing the camera through the model's centre, as wide as the model.
+fn model_plate(comp: &RenderComp, layer: &RenderLayer, camera: &crate::camera::Camera) -> Plate {
+    let matrix = model_matrix(comp, layer);
+    let centre = matrix.w_axis.truncate();
+    let r = 0.87 * matrix.x_axis.truncate().length();
+    let right = camera.world.x_axis.truncate().normalize_or_zero();
+    let down = camera.world.y_axis.truncate().normalize_or_zero();
+    let forward = camera.world.z_axis.truncate().normalize_or_zero();
+    let origin = centre - right * r - down * r;
+    Plate {
+        matrix: DMat4::from_cols(
+            right.extend(0.0),
+            down.extend(0.0),
+            forward.extend(0.0),
+            origin.extend(1.0),
+        ),
+        rect: Rect::new(0.0, 0.0, 2.0 * r, 2.0 * r),
+    }
+}
+
+/// A 3D model layer's model space (centred, a largest side of 1) → comp
+/// space: AE sizes an imported model to half the comp's smaller side, placed
+/// by the layer's transform.
+fn model_matrix(comp: &RenderComp, layer: &RenderLayer) -> DMat4 {
+    let place = layer.matrix_3d.unwrap_or_else(|| {
+        let t = layer.transform;
+        DMat4::from_cols(
+            glam::DVec4::new(t.matrix2.x_axis.x, t.matrix2.x_axis.y, 0.0, 0.0),
+            glam::DVec4::new(t.matrix2.y_axis.x, t.matrix2.y_axis.y, 0.0, 0.0),
+            glam::DVec4::new(0.0, 0.0, 1.0, 0.0),
+            glam::DVec4::new(t.translation.x, t.translation.y, 0.0, 1.0),
+        )
+    });
+    let size = f64::from(comp.width.min(comp.height)) / 2.0;
+    place * DMat4::from_scale(glam::DVec3::splat(size))
+}
+
 /// Largest depth-of-field blur radius (space pixels).
 const MAX_DOF_RADIUS: f64 = 500.0;
 
@@ -683,6 +777,7 @@ struct Builder<'a, 'f> {
     /// While planning an adjustment layer's coverage: that layer's effects
     /// apply to the backdrop, not to its own pixels.
     skip_effects_of: Option<PrimPath>,
+    native_motion_blur: bool,
     /// Other frames of the comp (effects reading other times).
     frames: Option<&'f mut dyn CompFrames>,
     /// Layers whose effects are being planned (cycle detection of layer inputs).
@@ -728,6 +823,7 @@ impl<'a, 'f> Builder<'a, 'f> {
             dedup: FxHashMap::default(),
             warnings: Vec::new(),
             skip_effects_of: None,
+            native_motion_blur: true,
             frames,
             resolving: Vec::new(),
             time_dependent: false,
@@ -751,7 +847,10 @@ impl<'a, 'f> Builder<'a, 'f> {
 }
 
 impl Builder<'_, '_> {
-    fn push(&mut self, node: Node) -> NodeId {
+    fn push(&mut self, mut node: Node) -> NodeId {
+        if !self.native_motion_blur {
+            node.key = hash_of(&("without native motion blur", node.key));
+        }
         if let Some(&id) = self.dedup.get(&node.key) {
             return id;
         }
@@ -796,6 +895,18 @@ impl Builder<'_, '_> {
         depth: usize,
         cacheable: bool,
     ) -> Result<NodeId, RenderError> {
+        self.composite_from(comp, 0, rect, scale, depth, cacheable)
+    }
+
+    fn composite_from(
+        &mut self,
+        comp: &RenderComp,
+        first_layer: usize,
+        rect: IRect,
+        scale: f64,
+        depth: usize,
+        cacheable: bool,
+    ) -> Result<NodeId, RenderError> {
         if depth > MAX_DEPTH {
             return Err(RenderError::Cycle {
                 path: comp.path.clone(),
@@ -806,13 +917,16 @@ impl Builder<'_, '_> {
         if !rect.is_empty() {
             // AE draws from the bottom of the stack (highest index) to the top;
             // contiguous 3D layers form groups drawn in depth order.
-            for segment in crate::three_d::segments(&comp.layers) {
+            for segment in crate::three_d::segments(&comp.layers[first_layer..]) {
                 let index = match segment {
-                    Segment::Group(indices) => {
+                    Segment::Group(mut indices) => {
+                        for index in &mut indices {
+                            *index += first_layer;
+                        }
                         self.group_3d(comp, &indices, rect, scale, depth, &mut ops)?;
                         continue;
                     }
-                    Segment::Layer(index) => index,
+                    Segment::Layer(index) => first_layer + index,
                 };
                 let layer = &comp.layers[index];
                 if layer.adjustment {
@@ -820,6 +934,25 @@ impl Builder<'_, '_> {
                     continue;
                 }
                 let mut visiting = vec![index];
+                if let Some(styles) = &layer.layer_styles
+                    && styles.enabled
+                    && let Some(effect) = self.effects.get(&styles.effect).cloned()
+                {
+                    self.owned(comp, index, depth, |b| {
+                        b.styled_layer(
+                            comp,
+                            index,
+                            rect,
+                            scale,
+                            depth,
+                            &mut visiting,
+                            effect,
+                            styles,
+                            &mut ops,
+                        )
+                    })?;
+                    continue;
+                }
                 if let Some(op) = self.layer_op(comp, index, rect, scale, depth, &mut visiting)? {
                     ops.push(op);
                 } else if layer.blend_mode.is_stencil()
@@ -832,6 +965,7 @@ impl Builder<'_, '_> {
         }
         let mut h = FxHasher::default();
         "composite".hash(&mut h);
+        first_layer.hash(&mut h);
         if depth == 0 {
             // The frame's own comp is the only root: its key only has to be
             // unique in this graph, so the whole comp is not hashed per frame
@@ -892,6 +1026,9 @@ impl Builder<'_, '_> {
         planned.retain(|(index, _)| {
             comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
         });
+        for (index, op) in &mut planned {
+            self.shadow_map(comp, *index, op, depth);
+        }
         let drawn = Self::depth_order_3d(comp, planned);
         for (index, op) in drawn {
             let op = self.depth_of_field(comp, index, op, canvas, scale, depth);
@@ -943,21 +1080,109 @@ impl Builder<'_, '_> {
                 drawn.push(planned[first].clone());
                 continue;
             }
+            let camera = comp.view_camera();
             let plates: Vec<Plate> = members
                 .iter()
-                .map(|&i| Plate {
-                    matrix: comp.layers[planned[i].0].matrix_3d.unwrap_or_default(),
-                    rect: planned[i].1.content,
+                .map(|&i| {
+                    let layer = &comp.layers[planned[i].0];
+                    if matches!(layer.content, LayerContent::Model(_)) {
+                        model_plate(comp, layer, &camera)
+                    } else {
+                        Plate {
+                            matrix: layer.matrix_3d.unwrap_or_default(),
+                            rect: planned[i].1.content,
+                        }
+                    }
                 })
                 .collect();
+            let mut models_drawn = Vec::new();
             for fragment in depth_order(&plates, eye) {
                 let (index, op) = &planned[members[fragment.item]];
                 let mut op = op.clone();
-                op.clips = fragment.clips;
+                if matches!(comp.layers[*index].content, LayerContent::Model(_)) {
+                    // A model sorts by a plate facing the camera at its centre;
+                    // it is drawn once, whole (its own depth buffer handles
+                    // itself).
+                    if models_drawn.contains(index) {
+                        continue;
+                    }
+                    models_drawn.push(*index);
+                } else {
+                    op.clips = fragment.clips;
+                }
                 drawn.push((*index, op));
             }
         }
         drawn
+    }
+
+    /// Gives a lit layer with shadow casters its receiver-space shadow map
+    /// ([`ShadowMapNode`]). Motion-blurred layers (lit per sample) and
+    /// textures whose pixels are turned relative to the layer keep testing
+    /// the casters per pixel.
+    fn shadow_map(&mut self, comp: &RenderComp, index: usize, op: &mut LayerOp, depth: usize) {
+        let Some(lighting) = &op.lighting else {
+            return;
+        };
+        if lighting.casters.is_empty()
+            || !lighting.samples.is_empty()
+            || lighting.shadow_slots().is_empty()
+        {
+            return;
+        }
+        let mut h = FxHasher::default();
+        "shadow map".hash(&mut h);
+        for v in lighting.matrix.to_cols_array() {
+            v.to_bits().hash(&mut h);
+        }
+        let r = lighting.rect;
+        [r.x0, r.y0, r.x1, r.y1].map(f64::to_bits).hash(&mut h);
+        for c in lighting.casters.iter() {
+            for v in c.matrix.to_cols_array() {
+                v.to_bits().hash(&mut h);
+            }
+            [c.rect.x0, c.rect.y0, c.rect.x1, c.rect.y1]
+                .map(f64::to_bits)
+                .hash(&mut h);
+            c.opacity.to_bits().hash(&mut h);
+            c.transmission.to_bits().hash(&mut h);
+            match c.pixels {
+                crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
+                crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
+            }
+        }
+        let base = h.finish();
+        let slot_keys: Vec<u64> = lighting
+            .shadow_slots()
+            .into_iter()
+            .map(|li| {
+                let mut h = FxHasher::default();
+                base.hash(&mut h);
+                crate::input::hash_light(&lighting.lights[li], &mut h);
+                h.finish()
+            })
+            .collect();
+        let key = hash_of(&(base, &slot_keys));
+        let (_, [w, ht]) = lighting.shadow_map_size();
+        let slots = slot_keys.len() as i32;
+        let node = self.owned(comp, index, depth, |b| {
+            b.push(Node {
+                kind: NodeKind::ShadowMap(ShadowMapNode {
+                    layer: op.layer.clone(),
+                    lighting: lighting.clone(),
+                    screen_texels: u64::from(op.bounds.width()) * u64::from(op.bounds.height()),
+                    slot_keys,
+                }),
+                rect: IRect::new(0, 0, w as i32 * slots, ht as i32),
+                pixel_scale: 1.0,
+                key,
+                cacheable: true,
+            })
+        });
+        op.lighting = Some(Arc::new(crate::light::Lighting {
+            shadow_map: Some(node),
+            ..(**lighting).clone()
+        }));
     }
 
     /// Depth of field (AE's camera Depth of Field): a 3D layer away from the
@@ -974,7 +1199,10 @@ impl Builder<'_, '_> {
         depth: usize,
     ) -> LayerOp {
         let camera = comp.view_camera();
-        let Some(matrix) = comp.layers[index].matrix_3d else {
+        let Some(matrix) = comp.layers[index]
+            .matrix_3d
+            .filter(|_| !matches!(comp.layers[index].content, LayerContent::Model(_)))
+        else {
             return op;
         };
         if !camera.depth_of_field
@@ -1078,6 +1306,7 @@ impl Builder<'_, '_> {
             opacity: 1.0,
             blend,
             dissolve_seed,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             matte: None,
             mask: None,
@@ -1107,10 +1336,153 @@ impl Builder<'_, '_> {
         visiting: &mut Vec<usize>,
     ) -> Result<Option<LayerOp>, RenderError> {
         self.owned(comp, index, depth, |b| {
-            b.plan_layer(comp, index, canvas, scale, depth, visiting)
+            let layer = &comp.layers[index];
+            if let Some(styles) = &layer.layer_styles
+                && styles.enabled
+                && let Some(effect) = b.effects.get(&styles.effect).cloned()
+            {
+                let mut isolated = Vec::new();
+                b.styled_layer(
+                    comp,
+                    index,
+                    canvas,
+                    scale,
+                    depth,
+                    visiting,
+                    effect,
+                    styles,
+                    &mut isolated,
+                )?;
+                return Ok(isolated.pop());
+            }
+            b.plan_layer(comp, index, canvas, scale, depth, visiting, true)
         })
     }
 
+    /// A 3D model layer: its model drawn through the comp's camera
+    /// ([`MeshNode`]), the image drawn in the layer's place. The frame is
+    /// incomplete while the model loads.
+    fn plan_model(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        model: &crate::input::ModelRef,
+        canvas: IRect,
+        scale: f64,
+    ) -> Result<Option<LayerOp>, RenderError> {
+        let layer = &comp.layers[index];
+        if layer.opacity <= 0.0 {
+            return Ok(None);
+        }
+        let Some(file) = &model.file else {
+            return Ok(None);
+        };
+        let mesh = match crate::model::get(file, !crate::is_interactive_thread()) {
+            crate::model::State::Ready(mesh) => mesh,
+            crate::model::State::Loading => {
+                self.incomplete = true;
+                return Ok(None);
+            }
+            crate::model::State::Failed(e) => {
+                self.warn(format!("{}: {e}", layer.path));
+                return Ok(None);
+            }
+        };
+        let matrix = model_matrix(comp, layer);
+        let camera = comp.view_camera();
+        // Where the model's box lands on screen (all of the canvas when a
+        // corner is behind the camera).
+        let size = DVec2::new(f64::from(comp.width), f64::from(comp.height));
+        let mut lo = DVec2::splat(f64::MAX);
+        let mut hi = DVec2::splat(f64::MIN);
+        let mut everywhere = false;
+        for k in 0..8 {
+            let c = glam::DVec3::new(
+                if k & 1 == 0 { -0.5 } else { 0.5 },
+                if k & 2 == 0 { -0.5 } else { 0.5 },
+                if k & 4 == 0 { -0.5 } else { 0.5 },
+            );
+            match camera.project(matrix.transform_point3(c), size) {
+                Some(p) => {
+                    lo = lo.min(p);
+                    hi = hi.max(p);
+                }
+                None => everywhere = true,
+            }
+        }
+        let rect = if everywhere {
+            canvas
+        } else {
+            units(
+                &Rect::new(lo.x - 2.0, lo.y - 2.0, hi.x + 2.0, hi.y + 2.0),
+                scale,
+            )
+            .intersect(&canvas)
+        };
+        if rect.is_empty() {
+            return Ok(None);
+        }
+        let lights: Arc<[_]> = comp
+            .lights
+            .iter()
+            .filter(|l| l.scope_below.is_none_or(|light| index > light))
+            .copied()
+            .collect();
+        let key = hash_of(&(
+            "3d model",
+            &layer.path,
+            Arc::as_ptr(&mesh) as usize,
+            matrix.to_cols_array().map(f64::to_bits),
+            comp.view_camera().world.to_cols_array().map(f64::to_bits),
+            comp.view_camera().zoom.to_bits(),
+            lights.len(),
+            rect,
+            scale.to_bits(),
+            self.nodes.len(),
+        ));
+        let linear = self.linear;
+        let node = self.push(Node {
+            kind: NodeKind::Mesh(Box::new(MeshNode {
+                layer: layer.path.clone(),
+                model: mesh,
+                matrix,
+                camera,
+                lights,
+                comp_size: [comp.width, comp.height],
+                linear,
+            })),
+            rect,
+            pixel_scale: scale,
+            key,
+            cacheable: false,
+        });
+        Ok(Some(LayerOp {
+            layer: layer.path.clone(),
+            input: OpInput::Image(node),
+            transform: DAffine2::IDENTITY,
+            opacity: layer.opacity.clamp(0.0, 1.0),
+            blend: layer.blend_mode,
+            dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
+            // Best in final renders; previews follow the layer's switch.
+            quality: layer.quality,
+            preserve_transparency: layer.preserve_transparency,
+            matte: None,
+            mask: None,
+            bounds: rect,
+            content: Rect::new(
+                f64::from(rect.x0) * scale,
+                f64::from(rect.y0) * scale,
+                f64::from(rect.x1) * scale,
+                f64::from(rect.y1) * scale,
+            ),
+            projection: None,
+            motion: None,
+            clips: Vec::new(),
+            lighting: None,
+        }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn plan_layer(
         &mut self,
         comp: &RenderComp,
@@ -1119,9 +1491,18 @@ impl Builder<'_, '_> {
         scale: f64,
         depth: usize,
         visiting: &mut Vec<usize>,
+        apply_matte: bool,
     ) -> Result<Option<LayerOp>, RenderError> {
         let layer = &comp.layers[index];
-        let flat = layer.matrix_3d.is_none() && layer.motion_samples.is_empty();
+        if let LayerContent::Model(model) = &layer.content {
+            return self.plan_model(comp, index, model, canvas, scale);
+        }
+        let motion_samples = if self.native_motion_blur {
+            &layer.motion_samples[..]
+        } else {
+            &[]
+        };
+        let flat = layer.matrix_3d.is_none() && motion_samples.is_empty();
         if layer.opacity <= 0.0 || (flat && !is_invertible(&layer.transform)) {
             return Ok(None);
         }
@@ -1133,7 +1514,7 @@ impl Builder<'_, '_> {
             Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
             Content::Comp(c) => c.rect(),
         };
-        let placement = placement(comp, layer, &content_rect, scale);
+        let placement = placement(comp, layer, motion_samples, &content_rect, scale);
         if let Placement::General {
             frame,
             motion: None,
@@ -1239,7 +1620,7 @@ impl Builder<'_, '_> {
             return Ok(None);
         }
 
-        let matte = match layer.track_matte {
+        let matte = match layer.track_matte.filter(|_| apply_matte) {
             None => None,
             Some(tm) => match self.matte(comp, tm.layer, bounds, scale, depth, visiting)? {
                 Some(node) => Some(MatteRef {
@@ -1384,8 +1765,7 @@ impl Builder<'_, '_> {
                     // Motion blur: the layer, its lights and the eye at every
                     // sample.
                     let samples: Arc<[_]> = match &comp.motion_blur {
-                        Some(mb) if mb.lights.len() == layer.motion_samples.len() => layer
-                            .motion_samples
+                        Some(mb) if mb.lights.len() == motion_samples.len() => motion_samples
                             .iter()
                             .zip(&mb.lights)
                             .enumerate()
@@ -1411,6 +1791,8 @@ impl Builder<'_, '_> {
                         world_per_pixel: camera.world_per_pixel(),
                         casters: Arc::new([]),
                         samples,
+                        rect: content_rect,
+                        shadow_map: None,
                     })
                 })
             });
@@ -1433,6 +1815,7 @@ impl Builder<'_, '_> {
             opacity: layer.opacity.clamp(0.0, 1.0),
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
+            quality: layer.quality,
             preserve_transparency: layer.preserve_transparency,
             matte,
             mask: op_mask,
@@ -1613,6 +1996,7 @@ impl Builder<'_, '_> {
                 opacity: weight,
                 blend: BlendMode::AlphaAdd,
                 dissolve_seed: 0,
+                quality: bae_anim::LayerQuality::Best,
                 preserve_transparency: false,
                 matte: None,
                 mask: None,
@@ -1671,6 +2055,7 @@ impl Builder<'_, '_> {
             opacity: 1.0,
             blend: BlendMode::Normal,
             dissolve_seed: 0,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             matte: None,
             mask: Some(mask),
@@ -1939,6 +2324,7 @@ impl Builder<'_, '_> {
             opacity: 1.0,
             blend: BlendMode::Normal,
             dissolve_seed: 0,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             matte: None,
             mask: None,
@@ -2180,7 +2566,7 @@ impl Builder<'_, '_> {
         let Some(layer) = at.layers.iter().find(|l| l.path == dep.layer) else {
             return Ok(None);
         };
-        if matches!(dep.stage, LayerStage::BeforeEffect(_)) && !layer.active {
+        if matches!(dep.stage, LayerStage::BeforeEffect { .. }) && !layer.active {
             return Ok(None);
         }
         let mut stage = dep.stage.clone();
@@ -2191,7 +2577,17 @@ impl Builder<'_, '_> {
             ));
             stage = LayerStage::Masks;
         }
-        self.layer_image(at, layer, stage, scale, depth)
+        let native = self.native_motion_blur;
+        self.native_motion_blur &= !matches!(
+            stage,
+            LayerStage::BeforeEffect {
+                native_motion_blur: false,
+                ..
+            }
+        );
+        let result = self.layer_image(at, layer, stage, scale, depth);
+        self.native_motion_blur = native;
+        result
     }
 
     /// `layer`'s pixels in its layer space at `stage` (its source, with masks,
@@ -2204,38 +2600,64 @@ impl Builder<'_, '_> {
         scale: f64,
         depth: usize,
     ) -> Result<Option<NodeId>, RenderError> {
-        let Some(content) = self.plan_content(layer, layer.time)? else {
-            return Ok(None);
-        };
-        let content_rect = match &content {
-            Content::Solid { rect, .. } | Content::Fill { rect, .. } => *rect,
-            Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
-            Content::Comp(c) => c.rect(),
+        let backdrop = layer.adjustment && matches!(stage, LayerStage::BeforeEffect { .. });
+        let (content_rect, mut node) = if backdrop {
+            let index = comp
+                .layers
+                .iter()
+                .position(|l| l.path == layer.path)
+                .expect("layer of comp");
+            let rect = comp.rect();
+            (
+                rect,
+                self.composite_from(
+                    comp,
+                    index + 1,
+                    units(&rect, scale),
+                    scale,
+                    depth + 1,
+                    false,
+                )?,
+            )
+        } else {
+            let Some(content) = self.plan_content(layer, layer.time)? else {
+                return Ok(None);
+            };
+            let content_rect = match &content {
+                Content::Solid { rect, .. } | Content::Fill { rect, .. } => *rect,
+                Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
+                Content::Comp(c) => c.rect(),
+            };
+            let roi = units(&content_rect, scale);
+            let node = match content {
+                Content::Solid { color, rect } | Content::Fill { color, rect } => self.push(Node {
+                    kind: NodeKind::Fill(FillNode { color, rect }),
+                    rect: roi,
+                    pixel_scale: scale,
+                    key: hash_of(&(
+                        "fill",
+                        color.map(f32::to_bits),
+                        rect_bits(&rect),
+                        roi,
+                        scale.to_bits(),
+                    )),
+                    cacheable: false,
+                }),
+                Content::Source(source, time) => {
+                    self.effect_source(layer, &source, time, roi, scale)
+                }
+                Content::Mix(source, frames) => {
+                    self.mix(layer, &frames, roi, scale, content_rect, |b, time| {
+                        b.effect_source(layer, &source, time, roi, scale)
+                    })
+                }
+                Content::Comp(nested) => self.composite(&nested, roi, scale, depth + 1, true)?,
+            };
+            (content_rect, node)
         };
         let roi = units(&content_rect, scale);
-        let mut node = match content {
-            Content::Solid { color, rect } | Content::Fill { color, rect } => self.push(Node {
-                kind: NodeKind::Fill(FillNode { color, rect }),
-                rect: roi,
-                pixel_scale: scale,
-                key: hash_of(&(
-                    "fill",
-                    color.map(f32::to_bits),
-                    rect_bits(&rect),
-                    roi,
-                    scale.to_bits(),
-                )),
-                cacheable: false,
-            }),
-            Content::Source(source, time) => self.effect_source(layer, &source, time, roi, scale),
-            Content::Mix(source, frames) => {
-                self.mix(layer, &frames, roi, scale, content_rect, |b, time| {
-                    b.effect_source(layer, &source, time, roi, scale)
-                })
-            }
-            Content::Comp(nested) => self.composite(&nested, roi, scale, depth + 1, true)?,
-        };
-        if stage != LayerStage::Source
+        if !backdrop
+            && stage != LayerStage::Source
             && let Some(stack) = MaskStack::new(&layer.masks)
         {
             let mask = self.mask(layer, &stack, roi, scale, true, content_rect, 1.0 / scale);
@@ -2247,7 +2669,7 @@ impl Builder<'_, '_> {
         }
         let effect_count = match stage {
             LayerStage::EffectsAndMasks => layer.effects.len(),
-            LayerStage::BeforeEffect(path) => layer
+            LayerStage::BeforeEffect { effect: path, .. } => layer
                 .effects
                 .iter()
                 .position(|e| e.path == path)
@@ -2340,7 +2762,7 @@ impl Builder<'_, '_> {
                         .is_some_and(|fx| fx.renders_pixels())
             });
         Ok(match &layer.content {
-            LayerContent::None => None,
+            LayerContent::None | LayerContent::Model(_) => None,
             LayerContent::Solid {
                 color,
                 width,
@@ -2532,14 +2954,19 @@ enum Placement {
 /// The placement of `layer` (content `content`, layer pixels) in `comp` at
 /// resolution `scale`: through the camera for 3D layers, and at every
 /// motion-blur sample unless the layer does not move during the shutter.
-fn placement(comp: &RenderComp, layer: &RenderLayer, content: &Rect, scale: f64) -> Placement {
+fn placement(
+    comp: &RenderComp,
+    layer: &RenderLayer,
+    samples: &[crate::LayerSample],
+    content: &Rect,
+    scale: f64,
+) -> Placement {
     let size = DVec2::new(f64::from(comp.width), f64::from(comp.height));
     if let Some(m) = layer.matrix_3d {
         let frame = Homography(comp.view_camera().plane_homography(&m, size));
-        let motion = (!layer.motion_samples.is_empty())
+        let motion = (!samples.is_empty())
             .then(|| {
-                layer
-                    .motion_samples
+                samples
                     .iter()
                     .enumerate()
                     .map(|(k, s)| {
@@ -2563,8 +2990,8 @@ fn placement(comp: &RenderComp, layer: &RenderLayer, content: &Rect, scale: f64)
             three_d: true,
         };
     }
-    if layer.motion_samples.len() > 1 && !crate::motion::is_static(&layer.motion_samples) {
-        let transforms: Vec<DAffine2> = layer.motion_samples.iter().map(|s| s.transform).collect();
+    if samples.len() > 1 && !crate::motion::is_static(samples) {
+        let transforms: Vec<DAffine2> = samples.iter().map(|s| s.transform).collect();
         let limit = comp.motion_blur.as_ref().map_or(128, |m| m.adaptive_limit);
         let dense = crate::motion::adaptive_samples(&transforms, content, limit, scale);
         return Placement::General {
@@ -2584,7 +3011,9 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
     let casters: Vec<(usize, ShadowCaster)> = planned
         .iter()
         .filter(|(index, op)| {
-            comp.layers[*index].material.casts_shadows != ShadowMode::Off && op.opacity > 0.0
+            comp.layers[*index].material.casts_shadows != ShadowMode::Off
+                && op.opacity > 0.0
+                && !matches!(comp.layers[*index].content, LayerContent::Model(_))
         })
         .filter_map(|(index, op)| {
             let pixels = match &op.input {
@@ -2599,6 +3028,7 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
                     opacity: op.opacity,
                     transmission: comp.layers[*index].material.light_transmission,
                     pixels,
+                    footprints: Arc::new([]),
                 },
             ))
         })
@@ -2617,17 +3047,43 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
         }
         let receiver = lighting.matrix;
         let rect = op.content;
+        // Per light, where each caster's shadow can land: casters that miss
+        // the receiver for every light are dropped, the rest are skipped by
+        // the shader outside their footprint.
         let mine: Arc<[ShadowCaster]> = casters
             .iter()
-            .filter(|(i, c)| {
-                i != index
-                    && lighting
-                        .lights
-                        .iter()
-                        .filter(|l| l.casts_shadows)
-                        .any(|l| can_shadow(&receiver, &rect, c, l))
+            .filter(|(i, _)| i != index)
+            .filter_map(|(_, c)| {
+                let footprints: Arc<[Rect]> = lighting
+                    .lights
+                    .iter()
+                    .map(|l| {
+                        if !l.casts_shadows {
+                            return Rect::new(1.0, 1.0, 0.0, 0.0);
+                        }
+                        match shadow_footprint(&receiver, c, l) {
+                            None => Rect::new(1.0, 1.0, 0.0, 0.0),
+                            Some(None) => Rect::new(f64::MIN, f64::MIN, f64::MAX, f64::MAX),
+                            Some(Some(b))
+                                if b.x1 <= rect.x0
+                                    || b.x0 >= rect.x1
+                                    || b.y1 <= rect.y0
+                                    || b.y0 >= rect.y1 =>
+                            {
+                                Rect::new(1.0, 1.0, 0.0, 0.0)
+                            }
+                            Some(Some(b)) => b,
+                        }
+                    })
+                    .collect();
+                footprints
+                    .iter()
+                    .any(|f| !f.is_empty())
+                    .then(|| ShadowCaster {
+                        footprints,
+                        ..c.clone()
+                    })
             })
-            .map(|(_, c)| c.clone())
             .collect();
         if mine.is_empty() {
             continue;
@@ -2639,70 +3095,94 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
     }
 }
 
-/// Whether `caster` can throw a shadow of `light` onto the receiver plane
-/// `receiver` within `rect` (layer pixels). Conservative: only rules out casters
-/// behind the receiver as seen from the light, or whose shadow lands outside it.
-fn can_shadow(
+/// Where `caster` can throw a shadow of `light` on the receiver plane
+/// `receiver`, in receiver layer pixels with the softest edge included
+/// (conservative): `None` nowhere (behind the receiver as seen from the
+/// light), `Some(None)` anywhere (a corner's shadow is unbounded).
+fn shadow_footprint(
     receiver: &glam::DMat4,
-    rect: &Rect,
     caster: &crate::light::ShadowCaster,
     light: &crate::light::Light,
-) -> bool {
+) -> Option<Option<Rect>> {
     use crate::light::LightKind;
+    use glam::DVec3;
     let Some(n) = receiver
         .x_axis
         .truncate()
         .cross(receiver.y_axis.truncate())
         .try_normalize()
     else {
-        return true;
+        return Some(None);
     };
     let d = -n.dot(receiver.w_axis.truncate());
-    let side = |p: glam::DVec3| n.dot(p) + d;
-    let corners = caster
-        .rect
-        .corners()
-        .map(|c| caster.matrix.transform_point3(c.extend(0.0)));
-    // Where each corner's shadow falls on the receiver plane.
-    let shadow_of = |c: glam::DVec3| -> Option<glam::DVec3> {
-        match light.kind {
-            LightKind::Parallel => {
-                let dir = light.direction();
-                let toward = -n.dot(dir) * side(c);
-                (toward > 1e-9).then(|| c - dir * (side(c) / n.dot(dir)))
-            }
-            _ => {
-                let lp = light.position();
-                let (sl, sc) = (side(lp), side(c));
-                // Strictly between the light and the receiver plane.
-                (sl * sc > 1e-9 && sc.abs() < sl.abs()).then(|| lp + (c - lp) * (sl / (sl - sc)))
-            }
-        }
-    };
+    let side = |p: DVec3| n.dot(p) + d;
     let light_side = match light.kind {
         LightKind::Parallel => -n.dot(light.direction()),
         _ => side(light.position()),
     };
-    if corners.iter().all(|c| side(*c) * light_side <= 0.0) {
-        // Behind the receiver (or in its plane) as seen from the light.
-        return false;
+    if light_side.abs() < 1e-9 {
+        return Some(None);
     }
-    let Some(shadows) = corners
-        .iter()
-        .map(|c| shadow_of(*c))
-        .collect::<Option<Vec<_>>>()
-    else {
-        return true;
-    };
+    // The caster grown by its softest shadow edge (diffusion plus the
+    // shader's minimum softness), in its own pixels.
+    let caster_px = caster.matrix.x_axis.truncate().length().max(1e-12);
+    let grow = (f64::from(light.shadow_diffusion) + 8.0) / caster_px;
+    let r = caster.rect;
+    let grown = Rect::new(r.x0 - grow, r.y0 - grow, r.x1 + grow, r.y1 + grow);
+    let corners = grown
+        .corners()
+        .map(|c| caster.matrix.transform_point3(c.extend(0.0)));
+    // Only the part on the light's side of the receiver plane casts onto it
+    // (a point on the plane shadows itself).
+    let ahead = |p: DVec3| side(p) * light_side.signum();
+    let mut poly: Vec<DVec3> = Vec::with_capacity(8);
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        let (sa, sb) = (ahead(a), ahead(b));
+        if sa > 0.0 {
+            poly.push(a);
+        }
+        if (sa > 0.0) != (sb > 0.0) {
+            poly.push(a + (b - a) * (sa / (sa - sb)));
+        }
+    }
+    if poly.is_empty() {
+        // Behind the receiver (or in its plane) as seen from the light.
+        return None;
+    }
+    let mut shadows = Vec::with_capacity(poly.len());
+    for v in poly {
+        let sv = side(v);
+        let p = match light.kind {
+            LightKind::Parallel => {
+                let dir = light.direction();
+                v - dir * (sv / n.dot(dir))
+            }
+            _ => {
+                let lp = light.position();
+                // At or past the light's own plane: the shadow is unbounded.
+                if sv.abs() >= 0.999 * light_side.abs() {
+                    return Some(None);
+                }
+                lp + (v - lp) * (light_side / (light_side - sv))
+            }
+        };
+        shadows.push(p);
+    }
     let to_layer = receiver.inverse();
     let pts: Vec<glam::DVec2> = shadows
         .iter()
         .map(|p| to_layer.transform_point3(*p).truncate())
         .collect();
     let b = crate::three_d::points_bounds(&pts);
-    let px = 1.0 / receiver.x_axis.truncate().length().max(1e-12);
-    let pad = (2.0 * f64::from(light.shadow_diffusion) + 4.0) * px;
-    b.x1 + pad > rect.x0 && b.x0 - pad < rect.x1 && b.y1 + pad > rect.y0 && b.y0 - pad < rect.y1
+    // Anti-aliasing margin.
+    let pad = 2.0;
+    Some(Some(Rect::new(
+        b.x0 - pad,
+        b.y0 - pad,
+        b.x1 + pad,
+        b.y1 + pad,
+    )))
 }
 
 /// Whether every homography of `hs` is the same map.

@@ -31,7 +31,11 @@ mod imp {
         pub fn get(
             &self,
             path: &Path,
+            _asset: &bae_model::PrimPath,
+            _revision: i64,
             _sequence: Option<bae_model::FrameRate>,
+            _alphabetical: bool,
+            _psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
             Err(format!(
                 "footage {}: bae-render was built without the `media` feature",
@@ -98,14 +102,17 @@ mod imp {
             gpu: Arc<MediaGpu>,
             path: &Path,
             sequence: Option<FrameRate>,
+            psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Self, RenderError> {
-            let open = match sequence {
-                Some(rate) => OpenOptions {
-                    sequence: SequenceMode::Sequence,
-                    sequence_frame_rate: rate,
-                },
-                None => OpenOptions::default(),
-            };
+            Self::open_with_options(library, gpu, path, open_options(sequence, false, psd_layer))
+        }
+
+        fn open_with_options(
+            library: Arc<MediaLibrary>,
+            gpu: Arc<MediaGpu>,
+            path: &Path,
+            open: OpenOptions,
+        ) -> Result<Self, RenderError> {
             let info = library
                 .info(path, &open)
                 .map_err(|e| RenderError::Footage {
@@ -174,11 +181,25 @@ mod imp {
         }
     }
 
+    fn open_options(
+        sequence: Option<FrameRate>,
+        alphabetical: bool,
+        psd_layer: Option<bae_model::psd::LayerImage>,
+    ) -> OpenOptions {
+        let mut options = sequence.map(OpenOptions::sequence).unwrap_or_default();
+        options.psd_layer = psd_layer;
+        if alphabetical && sequence.is_some() {
+            options.sequence = SequenceMode::Alphabetical;
+        }
+        options
+    }
+
     /// Footage sources by path, over one [`MediaLibrary`].
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
-        sources: FxHashMap<(PathBuf, Option<FrameRate>), Result<Arc<FootageSource>, String>>,
+        revisions: FxHashMap<bae_model::PrimPath, i64>,
+        sources: FxHashMap<(PathBuf, OpenOptions), Result<Arc<FootageSource>, String>>,
     }
 
     impl FootageCache {
@@ -190,6 +211,7 @@ mod imp {
             Self {
                 library: Arc::new(library),
                 gpu: Arc::new(MediaGpu::new(gpu)),
+                revisions: FxHashMap::default(),
                 sources: FxHashMap::default(),
             }
         }
@@ -205,15 +227,29 @@ mod imp {
         pub fn get(
             &mut self,
             path: &Path,
+            asset: &bae_model::PrimPath,
+            revision: i64,
             sequence: Option<FrameRate>,
+            alphabetical: bool,
+            psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
-            let key = (path.to_path_buf(), sequence);
+            if self.revisions.insert(asset.clone(), revision).unwrap_or(0) != revision {
+                self.sources.retain(|(file, _), _| file != path);
+                self.library.invalidate(path);
+            }
+            let options = open_options(sequence, alphabetical, psd_layer);
+            let key = (path.to_path_buf(), options);
             if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
             }
-            let entry = FootageSource::open(self.library.clone(), self.gpu.clone(), path, sequence)
-                .map(Arc::new)
-                .map_err(|e| e.to_string());
+            let entry = FootageSource::open_with_options(
+                self.library.clone(),
+                self.gpu.clone(),
+                path,
+                options,
+            )
+            .map(Arc::new)
+            .map_err(|e| e.to_string());
             self.sources.insert(key, entry.clone());
             entry.map(|s| s as Arc<dyn LayerSource>)
         }
@@ -225,7 +261,10 @@ mod imp {
             let path = footage.file.as_ref()?;
             let source = self
                 .sources
-                .get(&(path.clone(), footage.sequence))?
+                .get(&(
+                    path.clone(),
+                    open_options(footage.sequence, footage.alphabetical, footage.psd_layer),
+                ))?
                 .as_ref()
                 .ok()?;
             source

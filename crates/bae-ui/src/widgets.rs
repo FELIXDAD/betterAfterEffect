@@ -669,9 +669,24 @@ pub fn dropdown(
     items: &[&str],
     width: f32,
 ) -> Response {
+    dropdown_with_source(ui, id_salt, selected, items, width, |_| None)
+}
+
+/// A dropdown whose selected value and popup rows can carry their data source.
+pub(crate) fn dropdown_with_source(
+    ui: &mut Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    selected: &mut usize,
+    items: &[&str],
+    width: f32,
+    source: impl Fn(usize) -> Option<&'static str>,
+) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 17.0), Sense::click());
     let current = items.get(*selected).copied().unwrap_or("");
     resp = resp.labeled_value(egui::WidgetType::ComboBox, current, current);
+    if let Some(class) = source(*selected) {
+        crate::a11y::value_source(&resp, class);
+    }
     let id = ui.id().with(id_salt);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
@@ -698,7 +713,11 @@ pub fn dropdown(
     let mut picked = None;
     egui::Popup::menu(&resp).id(id).width(width).show(|ui| {
         for (i, item) in items.iter().enumerate() {
-            if ui.selectable_label(i == *selected, *item).clicked() {
+            let response = ui.selectable_label(i == *selected, *item);
+            if let Some(class) = source(i) {
+                crate::a11y::value_source(&response, class);
+            }
+            if response.clicked() {
                 picked = Some(i);
             }
         }
