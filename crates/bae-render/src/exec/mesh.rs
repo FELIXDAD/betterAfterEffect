@@ -1221,16 +1221,7 @@ fn light_shadows(node: &MeshNode) -> Vec<(crate::light::Light, DMat4)> {
     let points: Vec<DVec3> = node
         .models
         .iter()
-        .flat_map(|m| {
-            (0..8).map(move |k| {
-                let corner = DVec3::new(
-                    if k & 1 == 0 { -0.5 } else { 0.5 },
-                    if k & 2 == 0 { -0.5 } else { 0.5 },
-                    if k & 4 == 0 { -0.5 } else { 0.5 },
-                );
-                m.matrix.transform_point3(corner)
-            })
-        })
+        .flat_map(|m| m.model.corners(&m.matrix))
         .collect();
     let mut out: Vec<(crate::light::Light, DMat4)> = Vec::new();
     for l in node

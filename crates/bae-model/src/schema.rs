@@ -394,6 +394,16 @@ const LAYER: &[AttrDef] = &[
     float("material:transparency", 0.0).kinds(VISUAL),
     float("material:transparency_rolloff", 0.0).kinds(VISUAL),
     float("material:index_of_refraction", 1.0).kinds(VISUAL),
+    // Advanced 3D Geometry Options of text and shape layers.
+    int("geometry:bevel_style", 1)
+        .kinds(&["text", "shape"])
+        .doc("AE's Bevel Style: 1 None, 2 Angular, 3 Concave, 4 Convex."),
+    int("geometry:bevel_direction", 1).kinds(&["text", "shape"]),
+    float("geometry:bevel_depth", 2.0).kinds(&["text", "shape"]),
+    float("geometry:hole_bevel_depth", 100.0).kinds(&["text", "shape"]),
+    float("geometry:extrusion_depth", 0.0)
+        .kinds(&["text", "shape"])
+        .doc("Pixels (0–10000) the layer is extruded behind its plane."),
 ];
 
 const SHAPE_TRANSFORM: &[AttrDef] = &[

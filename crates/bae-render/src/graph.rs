@@ -618,6 +618,12 @@ pub trait SourceResolver {
 
     /// The source of custom content.
     fn custom(&mut self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError>;
+
+    /// The filled outlines of custom content (3D extrusion); `None` when its
+    /// provider has none.
+    fn outlines(&mut self, _content: &CustomContent) -> Option<Arc<crate::source::Outlines>> {
+        None
+    }
 }
 
 /// A resolver without footage or providers (solids and nested comps only).
@@ -1273,16 +1279,8 @@ impl Builder<'_, '_> {
         let nearest = mesh
             .models
             .iter()
-            .flat_map(|m| {
-                (0..8).map(move |k| {
-                    let corner = glam::DVec3::new(
-                        if k & 1 == 0 { -0.5 } else { 0.5 },
-                        if k & 2 == 0 { -0.5 } else { 0.5 },
-                        if k & 4 == 0 { -0.5 } else { 0.5 },
-                    );
-                    view.transform_point3(m.matrix.transform_point3(corner)).z
-                })
-            })
+            .flat_map(|m| m.model.corners(&m.matrix))
+            .map(|c| view.transform_point3(c).z)
             .fold(f64::MAX, f64::min);
         if found.len() > 1 {
             // Joined models draw with Normal (each keeps its opacity).
@@ -1692,6 +1690,27 @@ impl Builder<'_, '_> {
             }
         };
         let matrix = model_matrix(comp, layer);
+        self.plan_mesh(comp, index, mesh, matrix, canvas, scale, depth)
+    }
+
+    /// A 3D solid (a model, or an extruded text or shape layer; `matrix`:
+    /// its space → comp space) drawn through the comp's camera
+    /// ([`MeshNode`]) in the layer's place.
+    #[allow(clippy::too_many_arguments)]
+    fn plan_mesh(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        mesh: Arc<crate::model::Model>,
+        matrix: DMat4,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+    ) -> Result<Option<LayerOp>, RenderError> {
+        let layer = &comp.layers[index];
+        if layer.opacity <= 0.0 {
+            return Ok(None);
+        }
         let camera = comp.view_camera();
         // Where the model's box lands on screen (all of the canvas when a
         // corner is behind the camera).
@@ -1699,13 +1718,8 @@ impl Builder<'_, '_> {
         let mut lo = DVec2::splat(f64::MAX);
         let mut hi = DVec2::splat(f64::MIN);
         let mut everywhere = false;
-        for k in 0..8 {
-            let c = glam::DVec3::new(
-                if k & 1 == 0 { -0.5 } else { 0.5 },
-                if k & 2 == 0 { -0.5 } else { 0.5 },
-                if k & 4 == 0 { -0.5 } else { 0.5 },
-            );
-            match camera.project(matrix.transform_point3(c), size) {
+        for c in mesh.corners(&matrix) {
+            match camera.project(c, size) {
                 Some(p) => {
                     lo = lo.min(p);
                     hi = hi.max(p);
@@ -1927,6 +1941,19 @@ impl Builder<'_, '_> {
         let layer = &comp.layers[index];
         if let LayerContent::Model(model) = &layer.content {
             return self.plan_model(comp, index, model, canvas, scale, depth);
+        }
+        // Advanced 3D: an extruded text or shape layer is a solid.
+        if layer.extrusion > 0.0
+            && let (LayerContent::Custom(content), Some(matrix)) = (&layer.content, layer.matrix_3d)
+        {
+            let depth_px = layer.extrusion;
+            let key = hash_of(&(content.hash, &content.provider, depth_px.to_bits()));
+            let outlines = self.sources.outlines(content);
+            if let Some(mesh) = outlines.and_then(|o| {
+                crate::model::extrude::cached(key, || crate::model::extrude::extrude(&o, depth_px))
+            }) {
+                return self.plan_mesh(comp, index, mesh, matrix, canvas, scale, depth);
+            }
         }
         let motion_samples = if self.native_motion_blur {
             &layer.motion_samples[..]
