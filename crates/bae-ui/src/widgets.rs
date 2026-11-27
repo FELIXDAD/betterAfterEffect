@@ -661,6 +661,48 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
     resp
 }
 
+/// On/off switch with a label (AE 26's Preferences > Appearance >
+/// Accessibility Color Contrast): a gray track with the knob on the left when
+/// off, a blue track with the knob on the right when on.
+pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), theme::body(), color::TEXT);
+    let track = vec2(22.0, 12.0);
+    let gap = 10.0;
+    let size = vec2(
+        track.x + gap + galley.size().x,
+        ui.spacing().interact_size.y,
+    );
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let resp = resp.labeled_toggle(egui::WidgetType::Checkbox, label, *on);
+    if ui.is_rect_visible(rect) {
+        let t = ui.ctx().animate_bool_responsive(resp.id, *on);
+        let p = ui.painter();
+        let track = Rect::from_min_size(pos2(rect.left(), rect.center().y - track.y / 2.0), track);
+        let fill = theme::lerp(color::BUTTON_ON, color::TOOL_SELECTED, t);
+        p.rect_filled(track, track.height() / 2.0, fill);
+        let r = track.height() / 2.0 - 2.0;
+        let x = egui::lerp(track.left() + r + 2.0..=track.right() - r - 2.0, t);
+        let fg = if resp.hovered() {
+            color::TEXT_STRONG
+        } else {
+            color::TEXT
+        };
+        p.circle_filled(pos2(x, track.center().y), r, fg);
+        p.galley_with_override_text_color(
+            pos2(track.right() + gap, rect.center().y - galley.size().y / 2.0),
+            galley,
+            fg,
+        );
+    }
+    resp
+}
+
 /// Dark rounded field with a chevron, opening a list of choices.
 pub fn dropdown(
     ui: &mut Ui,
@@ -736,11 +778,17 @@ pub fn search_field(ui: &mut Ui, text: &mut String, width: f32) -> Response {
     let height = 20.0;
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, 4.0, color::FIELD);
+    // Accessibility Color Contrast: a black well with a bright border (AE 26).
+    let fill = if theme::accessible_contrast() {
+        Color32::BLACK
+    } else {
+        color::FIELD
+    };
+    p.rect_filled(rect, 4.0, fill);
     p.rect_stroke(
         rect,
         4.0,
-        Stroke::new(1.0, color::FIELD_BORDER),
+        Stroke::new(1.0, theme::field_border()),
         egui::StrokeKind::Inside,
     );
     let glass =

@@ -172,6 +172,118 @@ fn gpu_finds_translated_feature_in_all_channels() {
 }
 
 #[test]
+fn warp_analysis_records_pan_and_reuses_it_after_a_smoothing_edit() {
+    use bae_model::{
+        AuthorId, CommandRegistry, FrameRate, Time, Value,
+        effect::{
+            param_attr,
+            stabilizer::{MATCH_NAME, MOTION},
+        },
+    };
+    use bae_ui::{PanelContext, PanelId, PanelRequests};
+    use serde_json::json;
+    use std::sync::Arc;
+    let Some(gpu) = shared_context() else {
+        return;
+    };
+    let fps = FrameRate::FPS_30;
+    let dt = fps.frame_duration();
+    let end = Time(dt.0 * 3);
+    let mut scene = bae_render::fixture::SceneBuilder::new();
+    let nested = scene.comp("source", 96, 72, fps, end).unwrap();
+    let dot = scene
+        .solid_layer(&nested, "dot", [1., 1., 1., 1.], [8, 8], [48., 36.])
+        .unwrap();
+    for i in 0..3 {
+        scene
+            .key(
+                &dot,
+                "transform:position",
+                Time(dt.0 * i),
+                Value::Vec3([48. + i as f64 * 2., 36., 0.]),
+            )
+            .unwrap();
+    }
+    let comp = scene.comp("main", 96, 72, fps, end).unwrap();
+    let layer = scene
+        .layer(&comp, "plate", "pre_comp", Some(&nested))
+        .unwrap();
+    let folder = layer.child("effects").unwrap();
+    let effect = folder.child("warp").unwrap();
+    let mut stage = scene.into_stage();
+    let mut registry = CommandRegistry::with_builtins();
+    bae_motion::register_commands(&mut registry);
+    let author = AuthorId::new("user:stabilizer").unwrap();
+    for (p, ty) in [(&folder, "Scope"), (&effect, "Effect")] {
+        registry
+            .execute(
+                &mut stage,
+                &author,
+                "prim.create",
+                json!({"path":p,"prim_type":ty}),
+            )
+            .unwrap();
+    }
+    registry.execute(&mut stage,&author,"attr.set_at",json!({"path":effect,"attr":"match_name","time":0,"value":Value::String(MATCH_NAME.into())})).unwrap();
+    let cache = Arc::new(super::gpu::TrackingGpu::default());
+    cache.run(&gpu).unwrap();
+    let mut resources = bae_app::Resources::new();
+    resources.insert(gpu);
+    resources.insert(cache);
+    let id = PanelId::new("tracker");
+    let mut requests = PanelRequests::default();
+    let cx = PanelContext::new(&id, "Tracker", &stage, &author, &resources, &mut requests);
+    let job = super::worker::launch(
+        &cx,
+        &egui::Context::default(),
+        &effect,
+        super::worker::Mode::Stabilize(2),
+    )
+    .unwrap();
+    let mut frames = Vec::new();
+    loop {
+        match job
+            .updates
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .unwrap()
+        {
+            super::worker::Update::Frame(frame) => frames.push(frame),
+            super::worker::Update::End(result) => {
+                result.unwrap();
+                break;
+            }
+        }
+    }
+    assert_eq!(frames.len(), 3);
+    assert!(
+        (frames[2].points[4].center[0] - 4.).abs() < 0.4,
+        "{:?}",
+        frames[2].points[4]
+    );
+    registry
+        .execute(
+            &mut stage,
+            &author,
+            "tracker.record_stabilization",
+            json!({"effect":effect,"quality":2,"frames":frames}),
+        )
+        .unwrap();
+    let attr = param_attr(MOTION);
+    let read = |stage: &bae_model::Stage| stage.prim(&effect).unwrap().attr(&attr).unwrap().clone();
+    let saved = read(&stage);
+    assert_eq!(saved.keyframes.len(), 3);
+    registry
+        .execute(
+            &mut stage,
+            &author,
+            "attr.set_at",
+            json!({"path":effect,"attr":"param:0020","time":0,"value":Value::Float(75.)}),
+        )
+        .unwrap();
+    assert_eq!(read(&stage.snapshot_reader()().unwrap()), saved);
+}
+
+#[test]
 fn camera_features_follow_a_textured_plate_and_reject_a_blank_one() {
     let Some(gpu) = shared_context() else {
         return;
