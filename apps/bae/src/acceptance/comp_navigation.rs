@@ -131,22 +131,27 @@ fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
     use bae_model::Time;
 
     let mut h = fixture();
-    let ruler = h.get_by_label("Time Ruler").rect();
-    let ruler_at = |fraction| {
+    // Read the ruler every time: a second open comp brings the comp tab row
+    // back and moves it down.
+    let ruler_at = |h: &Ui, fraction: f32| {
+        let ruler = h.get_by_label("Time Ruler").rect();
         egui::pos2(
             ruler.left() + ruler.width() * fraction,
             ruler.bottom() - 2.0,
         )
     };
-    click_at(&mut h, ruler_at(0.3));
+    let at = ruler_at(&h, 0.3);
+    click_at(&mut h, at);
     let start = h.state().now();
     assert!(start > Time::ZERO);
-    click_at(&mut h, ruler_at(0.7));
+    let at = ruler_at(&h, 0.7);
+    click_at(&mut h, at);
     let parent_time = h.state().now();
     assert!(parent_time > start);
 
     let blank_y = timeline_header(&h).unwrap().bottom() + 65.0;
-    drop_item(&mut h, "Child", egui::pos2(ruler_at(0.3).x, blank_y));
+    let at = egui::pos2(ruler_at(&h, 0.3).x, blank_y);
+    drop_item(&mut h, "Child", at);
     let layer = h.state().layers()[0].clone();
     let timing = query::layer_timing(h.state().stage(), &layer);
     assert_eq!((timing.start_time, timing.in_point), (start, start));
@@ -184,7 +189,7 @@ fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
         ));
     }
     settle(&mut h);
-    let bar = egui::pos2(ruler_at(0.5).x, row(&h, "Child").center().y);
+    let bar = egui::pos2(ruler_at(&h, 0.5).x, row(&h, "Child").center().y);
     double_click_at(&mut h, bar);
     assert_eq!(h.state().active_comp().as_ref(), Some(&child));
     assert_eq!(h.state().now(), Time::from_seconds(1.0));
@@ -192,7 +197,8 @@ fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
     let mut prefs = (*h.state().prefs.current()).clone();
     prefs.set("composition.synchronize_time_all_related_items", false);
     h.state().prefs.set(prefs).unwrap();
-    click_at(&mut h, ruler_at(0.2));
+    let at = ruler_at(&h, 0.2);
+    click_at(&mut h, at);
     let saved_child_time = h.state().now();
     assert_ne!(saved_child_time, Time::from_seconds(1.0));
     double_click_at(&mut h, parent);
