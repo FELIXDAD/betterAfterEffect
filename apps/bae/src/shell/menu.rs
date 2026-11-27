@@ -193,6 +193,9 @@ pub struct AppMenu {
     actions: HashSet<String>,
     /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
     generation: u64,
+    /// The keymap the shown accelerators were looked up in: they are looked
+    /// up again (a search of every binding per item) only when it changes.
+    chords_of: Option<Vec<bae_ui::keymap::Binding>>,
 }
 
 impl AppMenu {
@@ -250,6 +253,7 @@ impl AppMenu {
             assign_slots,
             actions,
             generation: 0,
+            chords_of: None,
         };
         menu.set_undo_state((None, None));
         Ok(menu)
@@ -281,6 +285,10 @@ impl AppMenu {
             .with_actions(&self.actions);
         let undo = self.undo_state.0.is_some();
         let redo = self.undo_state.1.is_some();
+        let keys_changed = self.chords_of.as_deref() != Some(keymap.bindings.as_slice());
+        if keys_changed {
+            self.chords_of = Some(keymap.bindings.clone());
+        }
         for (id, c) in &mut self.contributed {
             let enabled = if Some(id) == self.undo.as_ref() {
                 undo || text_focus
@@ -308,10 +316,12 @@ impl AppMenu {
                     .set_text(&native_text(label.as_deref().unwrap_or_default()));
                 c.label = label;
             }
-            let chord = shell_chord(keymap, &c.spec.invocation());
-            if chord != c.chord {
-                c.item.set_accelerator(chord.as_ref().and_then(accelerator));
-                c.chord = chord;
+            if keys_changed {
+                let chord = shell_chord(keymap, &c.spec.invocation());
+                if chord != c.chord {
+                    c.item.set_accelerator(chord.as_ref().and_then(accelerator));
+                    c.chord = chord;
+                }
             }
         }
     }

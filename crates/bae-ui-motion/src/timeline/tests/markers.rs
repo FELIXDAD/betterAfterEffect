@@ -228,3 +228,43 @@ fn timecode_fields_parse_timecode_and_frames() {
     assert_eq!(p("45"), Some(45));
     assert_eq!(p("x"), None);
 }
+
+/// Layer ▸ Markers ▸ Lock Markers toggles the selected layers' lock; the
+/// Responsive Design — Time items add protected-region comp markers.
+#[test]
+fn lock_markers_and_responsive_design_markers() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let layer = h.layer.clone();
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    let mut tl = h.bars();
+    let run = |h: &mut H, tl: &mut TimelinePanel, id: &str| {
+        let r = h.action(tl, Invocation::new(id));
+        h.apply(&r);
+    };
+    h.session().lock().selected_layers = vec![layer.clone()];
+    run(&mut h, &mut tl, ids::LOCK_MARKERS);
+    assert!(bae_motion::markers::markers_locked(&h.stage, &layer));
+    run(&mut h, &mut tl, ids::LOCK_MARKERS);
+    assert!(!bae_motion::markers::markers_locked(&h.stage, &layer));
+    // Intro: comp start to the CTI (2 s), protected.
+    h.session().lock().set_time(&info, Time::from_seconds(2.0));
+    run(&mut h, &mut tl, ids::CREATE_INTRO);
+    run(&mut h, &mut tl, ids::CREATE_OUTRO);
+    let markers = bae_motion::markers::markers_of(&h.stage, &comp);
+    assert_eq!(markers.len(), 2);
+    let get = |m: &PrimPath, a: &str| h.stage.prim(m).and_then(|v| query::static_value(&v, a));
+    let (intro, outro) = (&markers[0].0, &markers[1].0);
+    assert_eq!(markers[0].1, Time::ZERO);
+    assert_eq!(
+        get(intro, "duration"),
+        Some(Value::Time(Time::from_seconds(2.0)))
+    );
+    assert_eq!(get(intro, "protected_region"), Some(Value::Bool(true)));
+    assert_eq!(markers[1].1, Time::from_seconds(2.0));
+    assert_eq!(
+        get(outro, "duration"),
+        Some(Value::Time(info.duration - Time::from_seconds(2.0)))
+    );
+}
