@@ -172,8 +172,27 @@ struct Snapping {
 /// The 9 snap features of a layer: bounds corners, edge midpoints and center
 /// (comp space).
 /// A layer's snapping features (AE): its 9 bound points, its anchor point
-/// (`anchor`), and the vertices of its masks and shape paths.
-fn features(l: &EvaluatedLayer, anchor: bool, out: &mut Vec<DVec2>) {
+/// (`anchor`), the vertices of its masks and shape paths and, with `inner`,
+/// the features of the layers inside a collapsed pre-comp.
+fn features(l: &EvaluatedLayer, anchor: bool, inner: bool, out: &mut Vec<DVec2>) {
+    if inner
+        && l.switches.collapse_transformation
+        && let bae_anim::LayerSource::Comp {
+            nested: Some(nested),
+            ..
+        } = &l.source
+    {
+        let m = Affine::new(l.world_matrix);
+        for n in nested
+            .layers
+            .iter()
+            .filter(|n| n.visible && !matches!(n.kind, LayerKind::Camera | LayerKind::Light))
+        {
+            let mut own = Vec::new();
+            features(n, true, true, &mut own);
+            out.extend(own.into_iter().map(|p| m.apply(p)));
+        }
+    }
     if anchor {
         let a = l.world_matrix.transform_point3(l.transform.anchor_point);
         out.push(DVec2::new(a.x, a.y));
@@ -273,7 +292,13 @@ impl TransformDrag {
     /// of the other visible layers (and, dragging the anchor, of its own
     /// layer). A layer's features are its 9 bound points, its anchor point and
     /// its mask and shape path vertices (AE). The comp frame is not a target.
-    pub fn with_snapping(mut self, comp: &EvaluatedComp, primary: &PrimPath, grab: DVec2) -> Self {
+    pub fn with_snapping(
+        mut self,
+        comp: &EvaluatedComp,
+        primary: &PrimPath,
+        grab: DVec2,
+        inner: bool,
+    ) -> Self {
         let anchor = matches!(
             self.kind,
             Kind::Anchor {
@@ -291,10 +316,10 @@ impl TransformDrag {
             if moving.contains(&&l.path) {
                 // Dragging the anchor: not to itself.
                 if &l.path == primary {
-                    features(l, !anchor, &mut own);
+                    features(l, !anchor, inner, &mut own);
                 }
             } else if l.visible && !matches!(l.kind, LayerKind::Camera | LayerKind::Light) {
-                features(l, true, &mut targets);
+                features(l, true, inner, &mut targets);
             }
         }
         let feature = if anchor {
