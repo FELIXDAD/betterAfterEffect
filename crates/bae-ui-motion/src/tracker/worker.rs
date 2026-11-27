@@ -241,6 +241,14 @@ pub(super) fn pictures<'a>(
             );
         Ok(Image {
             target,
+            placement: {
+                let m = comp.layer(source).expect("isolated layer").world_matrix;
+                bae_anim::glam::DAffine2::from_cols(
+                    m.x_axis.truncate().truncate(),
+                    m.y_axis.truncate().truncate(),
+                    m.w_axis.truncate().truncate(),
+                )
+            },
             origin,
             field,
         })
@@ -251,8 +259,9 @@ const MAX_TARGETS: usize = 4;
 
 #[derive(Clone)]
 pub(super) struct Image {
+    pub(super) placement: bae_anim::glam::DAffine2,
     target: Arc<OutputTarget>,
-    origin: DVec2,
+    pub(super) origin: DVec2,
     field: u32,
 }
 

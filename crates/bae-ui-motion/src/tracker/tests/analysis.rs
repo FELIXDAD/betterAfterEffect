@@ -336,6 +336,33 @@ fn camera_features_follow_a_textured_plate_and_reject_a_blank_one() {
         })
         .count();
     assert!(hits > 100, "{hits} of {} seeds", seeds.len());
+    let c = texture(6, false);
+    let last = tracker.measure(&gpu, &b, &c, 2, false, &mut ids).unwrap();
+    use bae_motion::camera_track::{Measurements, Settings, solve};
+    let frames = [seeds, moved, last]
+        .into_iter()
+        .enumerate()
+        .map(|(i, samples)| Measurements {
+            time: bae_model::Time(i as i64),
+            samples,
+            layer_from_comp: bae_anim::glam::DAffine2::IDENTITY.to_cols_array(),
+        })
+        .collect();
+    let solution = solve(
+        [128, 96],
+        frames,
+        Settings {
+            shot: 4,
+            angle: 60.,
+            method: 4,
+            detailed: false,
+        },
+        || false,
+    )
+    .unwrap();
+    assert_eq!(solution.frames.len(), 3);
+    assert!(solution.points.len() > 100 && solution.error < 0.75);
+    assert!(solution.frames[2].camera.position().length() > 1.);
     assert!(
         tracker
             .measure(&gpu, &blank, &blank, 0, false, &mut ids)

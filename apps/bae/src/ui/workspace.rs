@@ -248,6 +248,7 @@ impl Workspace {
                     GPU_INFORMATION,
                     "disk.empty_disk_cache",
                     "choose",
+                    "disk.clean_database_and_cache",
                 ]),
         }
     }
