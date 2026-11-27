@@ -43,6 +43,7 @@ mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+pub(crate) mod puppet_tool;
 mod scene_icons;
 mod select_tool;
 mod shape_tool;
@@ -305,6 +306,8 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    /// Puppet tools: the pin being dragged.
+    puppet: puppet_tool::PuppetState,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
     /// menu): Esc goes to it instead of switching to the last 3D view.
     esc_taken: bool,
@@ -814,6 +817,10 @@ impl Panel for CompositionViewer {
                     Some(info) => self.nudge_by(cx, &session, &info, d),
                     None => false,
                 }
+            }
+            crate::actions::ids::DELETE if self.puppet.has_selection() => {
+                self.puppet.delete_selected(cx);
+                true
             }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
@@ -1761,6 +1768,21 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
+        // Puppet tools: pins added and dragged.
+        let selected_layers = session.lock().selected_layers.clone();
+        let puppet = puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+            effective,
+            &painter,
+            time,
+            &selected_layers,
+        );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.
@@ -1798,7 +1820,9 @@ impl Panel for CompositionViewer {
             &opts,
             effective == Tool::Selection && !path.owns && !points.owns,
         );
-        let select_cursor = if points.owns {
+        let select_cursor = if puppet.owns {
+            puppet.cursor
+        } else if points.owns {
             points.cursor
         } else if path.owns || sketching || guide_busy {
             path.cursor
@@ -1866,6 +1890,7 @@ impl Panel for CompositionViewer {
             &session,
             &comp,
             &view,
+            self.type_tool.editing.is_some(),
         );
 
         // Items dropped from the project panel become layers.

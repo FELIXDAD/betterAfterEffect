@@ -325,6 +325,7 @@ pub type Request = String;
 #[derive(Default)]
 pub struct SettingsDialog {
     installed_ram: Option<u64>,
+    cache_root: Option<std::path::PathBuf>,
     open: bool,
     confirm_reset: bool,
     save_theme_name: Option<String>,
@@ -375,6 +376,11 @@ impl SettingsDialog {
         self
     }
 
+    pub fn with_cache_root(mut self, root: Option<std::path::PathBuf>) -> Self {
+        self.cache_root = root;
+        self
+    }
+
     pub fn with_installed_ram(mut self, bytes: Option<u64>) -> Self {
         self.installed_ram = bytes;
         self
@@ -387,6 +393,9 @@ impl SettingsDialog {
             .and_then(|id| PAGES.iter().position(|p| p.id == id))
             .unwrap_or(0);
         self.draft = current.clone();
+        if let Some(total) = self.installed_ram {
+            self.draft.set_installed_ram(total);
+        }
         self.open = true;
         self.confirm_reset = false;
         self.save_theme_name = None;
@@ -413,7 +422,27 @@ impl SettingsDialog {
 
     /// Sets a draft value (host answers to Choose…, tests).
     pub fn set(&mut self, key: &str, value: impl Into<Value>) {
-        self.display_changed |= self.draft.set(key, value) && visual_setting(key);
+        if self.draft.set(key, value) {
+            self.display_changed |= visual_setting(key);
+            if key == "disk.disk_cache_folder" {
+                self.request_disk_measurement();
+            }
+        }
+    }
+
+    fn request_disk_measurement(&mut self) {
+        self.requests.push("disk.measure_free_space".into());
+    }
+
+    pub fn set_cache_free_space(&mut self, folder: &std::path::Path, free: u64) {
+        if self.open
+            && self
+                .cache_root
+                .as_ref()
+                .is_some_and(|root| self.draft.preview_cache_dir(root) == folder)
+        {
+            self.draft.set_cache_free_space(free);
+        }
     }
 
     /// New display values from this frame, including an in-progress number drag.
@@ -487,7 +516,8 @@ impl SettingsDialog {
                 ui.label(tr("Reset All Preferences to Default..."));
                 ui.horizontal(|ui| {
                     if ui.button(tr("OK")).clicked() || enter {
-                        self.draft = Preferences::default();
+                        self.draft = self.draft.factory_defaults();
+                        self.request_disk_measurement();
                         self.display_changed = true;
                         self.confirm_reset = false;
                     }
@@ -772,6 +802,11 @@ impl SettingsDialog {
                 }
             }
             Kind::Int { min, max } => {
+                let max = if p.key == bae_prefs::keys::RAM_RESERVED_GB {
+                    draft.ram_reserve_max()
+                } else {
+                    max
+                };
                 field_label(ui, shown);
                 let mut v = draft.int(p.key) as f64;
                 let r = ui.add(
@@ -1008,10 +1043,18 @@ impl SettingsDialog {
                 }
             }
             Kind::Path => {
-                let path = draft.str(p.key);
-                let path = if path.is_empty() { "—" } else { path };
+                let resolved;
+                let path = if p.key == "disk.disk_cache_folder"
+                    && let Some(root) = &self.cache_root
+                {
+                    resolved = draft.preview_cache_dir(root);
+                    resolved.to_string_lossy()
+                } else {
+                    let value = draft.str(p.key);
+                    std::borrow::Cow::Borrowed(if value.is_empty() { "—" } else { value })
+                };
                 let response = ui
-                    .label(RichText::new(path).color(color::TEXT_DIM))
+                    .label(RichText::new(path.as_ref()).color(color::TEXT_DIM))
                     .on_hover_text(label);
                 crate::a11y::value_source(&response, crate::a11y::VERBATIM_VALUE);
             }

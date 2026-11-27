@@ -622,6 +622,7 @@ impl ActionHandler for MotionActions {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Text Orientation", "文字方向"),
     // New layer menu
     ("New", "新建"),
     ("Text", "文本"),
