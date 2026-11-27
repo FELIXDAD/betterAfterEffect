@@ -273,6 +273,10 @@ pub mod ids {
     /// File ▸ Dependencies ▸ Find Missing Footage: the Project panel lists the
     /// footage whose file is not found.
     pub const FIND_MISSING_FOOTAGE: &str = "motion.file.find_missing_footage";
+    /// File ▸ Dependencies ▸ Find Missing Effects / Fonts: the Project panel
+    /// lists the comps that use them.
+    pub const FIND_MISSING_EFFECTS: &str = "motion.file.find_missing_effects";
+    pub const FIND_MISSING_FONTS: &str = "motion.file.find_missing_fonts";
     /// Help ▸ System Compatibility Report…
     pub const SYSTEM_REPORT: &str = "motion.help.system_compatibility_report";
     pub const CONSOLIDATE: &str = "motion.file.consolidate_all_footage";
@@ -508,6 +512,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ENABLE_LOGGING, "Enable Logging"),
     (ids::REMOVE_UNUSED, "Remove Unused Footage"),
     (ids::FIND_MISSING_FOOTAGE, "Find Missing Footage"),
+    (ids::FIND_MISSING_EFFECTS, "Find Missing Effects"),
+    (ids::FIND_MISSING_FONTS, "Find Missing Fonts"),
     (ids::SYSTEM_REPORT, "System Compatibility Report..."),
     (ids::CONSOLIDATE, "Consolidate All Footage"),
     (ids::REDUCE_PROJECT, "Reduce Project"),
@@ -1574,6 +1580,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if let Some(camera) = camera_settings_target(stage, session) {
                 crate::dialogs::layer_settings(cx, session, &camera);
             }
+            return true;
+        }
+        ids::FIND_MISSING_EFFECTS | ids::FIND_MISSING_FONTS => {
+            let term = if id == ids::FIND_MISSING_EFFECTS {
+                crate::project::MISSING_EFFECTS
+            } else {
+                crate::project::MISSING_FONTS
+            };
+            session.lock().project_search = Some(bae_ui::tr(term).to_owned());
+            cx.open_panel("project");
             return true;
         }
         ids::FIND_MISSING_FOOTAGE => {
@@ -3261,6 +3277,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // File ▸ Dependencies (AE 2026 zh_CN: menu items and their alerts).
     ("Remove Unused Footage", "删除未用过的素材"),
     ("Find Missing Footage", "查找缺失的素材"),
+    ("Find Missing Effects", "查找缺失的效果"),
+    ("Find Missing Fonts", "查找缺失的字体"),
+    ("Missing Effects", "缺失效果"),
+    ("Missing Fonts", "缺失字体"),
     ("Missing Footage", "缺失素材"),
     ("System Compatibility Report...", "系统兼容性报告..."),
     ("System Compatibility Report", "系统兼容性报告"),
