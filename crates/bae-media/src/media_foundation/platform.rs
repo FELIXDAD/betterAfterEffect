@@ -197,11 +197,12 @@ impl Platform {
 pub(super) fn video_device() -> windows::core::Result<ID3D11Device> {
     static DEVICE: std::sync::Mutex<Option<ID3D11Device>> = std::sync::Mutex::new(None);
     let mut cached = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
-    // SAFETY: GetDeviceRemovedReason only queries the current device.
-    if let Some(device) = cached.as_ref()
-        && unsafe { device.GetDeviceRemovedReason() }.is_ok()
-    {
-        return Ok(device.clone());
+    if let Some(device) = cached.as_ref() {
+        // SAFETY: GetDeviceRemovedReason only queries the current device.
+        let removed = unsafe { device.GetDeviceRemovedReason() };
+        if removed.is_ok() {
+            return Ok(device.clone());
+        }
     }
     // SAFETY: request the default hardware adapter and protect its immediate
     // context before passing it to Media Foundation's worker threads.

@@ -1,6 +1,8 @@
 use super::*;
 use bae_ui::files::{FilePicker, ImportSelection, OpenRequest, SharedFilePicker};
 
+/// Import ▸ Enable Hardware Accelerated Decoding (Requires Restart): OK
+/// keeps the switch; the next launch reads it (`startup::run`).
 #[cfg(windows)]
 #[test]
 fn import_dialog_saves_the_hardware_decoding_switch() {
@@ -20,20 +22,6 @@ fn import_dialog_saves_the_hardware_decoding_switch() {
     h.get_by_label("OK").click();
     settle(&mut h);
     assert!(!h.state().prefs.current().bool(id));
-    if let Some(path) = std::env::var_os("BAE_ACCEPTANCE_MOVIE_HOME") {
-        let root = PathBuf::from(path);
-        std::fs::create_dir_all(root.join("config")).unwrap();
-        let file = root.join("config").join(bae_prefs::FILE_NAME);
-        let store = bae_prefs::PrefsStore::open(file).0;
-        store.set((*h.state().prefs.current()).clone()).unwrap();
-        comp_with(&mut h, &[]);
-        let movie = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../crates/bae-media/tests/fixtures/hevc10-192x128.mp4").canonicalize().unwrap();
-        drop_on_canvas(&mut h, &[movie]);
-        assert_eq!(h.state().layers().len(), 1);
-        eprintln!("ACCEPTANCE_COMP={}",h.state().active_comp().unwrap());
-        h.state_mut().doc.save_as(&root.join("sample.bae")).unwrap();
-    }
 }
 
 struct ImportPicker {
