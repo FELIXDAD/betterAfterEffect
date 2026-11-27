@@ -208,6 +208,9 @@ impl bae_render::graph::CompFrames for SampledFrames<'_> {
     }
 }
 
+/// Keeps a background renderer's frame (and its texture) alive.
+type Hold = Arc<dyn Send + Sync>;
+
 pub(crate) struct GpuPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
@@ -233,12 +236,12 @@ pub(crate) struct GpuPreview {
     /// The display and region of the published frame.
     last_view: Option<(bae_render::Display, Option<IRect>)>,
     /// Snapshots 1–4 (AE's Take Snapshot): a published frame.
-    snapshots: [Option<(wgpu::Texture, IRect)>; 4],
+    snapshots: [Option<(wgpu::Texture, IRect, Option<Hold>)>; 4],
     /// The registry shows `target`'s view (not a snapshot).
     target_shown: bool,
     /// A frame of the background renderer or its cache the viewer shows
     /// instead (the Info panel and snapshots read it).
-    cached: Option<(wgpu::Texture, IRect)>,
+    cached: Option<(wgpu::Texture, IRect, Hold)>,
     /// The newest frame was incomplete (something still warming up): the
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
@@ -567,9 +570,10 @@ impl GpuPreview {
     /// one.
     pub fn output(&self) -> Option<(wgpu::Texture, u64)> {
         use std::hash::{Hash, Hasher};
-        if let Some((t, _)) = &self.cached {
+        if let Some((t, _, hold)) = &self.cached {
+            // The frame, not the texture: a recycled texture shows new frames.
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            t.hash(&mut h);
+            (Arc::as_ptr(hold) as *const () as usize).hash(&mut h);
             return Some((t.clone(), h.finish()));
         }
         if let Some(texture) = &self.live_texture {
@@ -596,10 +600,15 @@ impl GpuPreview {
     /// The viewer shows `texture` (a frame of the background renderer or
     /// its cache): the Info panel and snapshots read it until the next
     /// [`Self::frame`].
-    pub fn show_cached(&mut self, texture: wgpu::Texture, rect: IRect) {
-        if self.cached.as_ref().map(|c| &c.0) != Some(&texture) {
+    pub(crate) fn show_cached(&mut self, frame: crate::playback::ShownFrame) {
+        // Told apart by frame, not by texture: playback recycles textures.
+        if self
+            .cached
+            .as_ref()
+            .is_none_or(|c| !Arc::ptr_eq(&c.2, &frame.hold))
+        {
             self.direct_source = None;
-            self.cached = Some((texture, rect));
+            self.cached = Some((frame.texture, frame.rect, frame.hold));
             self.sampled = None;
             self.pending_pixel = None;
         }
@@ -610,9 +619,10 @@ impl GpuPreview {
         let Some(s) = self.snapshots.get_mut(slot) else {
             return false;
         };
-        // A cached frame's texture is never rendered into again.
-        if let Some(cached) = &self.cached {
-            *s = Some(cached.clone());
+        // A cached frame's texture is not rendered into again while the
+        // snapshot holds the frame.
+        if let Some((t, rect, hold)) = &self.cached {
+            *s = Some((t.clone(), *rect, Some(hold.clone())));
             return true;
         }
         let Some(r) = self.rect else {
@@ -623,7 +633,7 @@ impl GpuPreview {
         let Some(target) = self.target.take() else {
             return false;
         };
-        *s = Some((target.view().texture().clone(), r));
+        *s = Some((target.view().texture().clone(), r, None));
         self.last = None;
         true
     }
@@ -763,7 +773,7 @@ impl GpuPreview {
     }
 
     pub fn show_snapshot(&mut self, slot: usize) -> Option<PreviewImage> {
-        let (t, rect) = self.snapshots.get(slot)?.clone()?;
+        let (t, rect, _) = self.snapshots.get(slot)?.clone()?;
         self.registry
             .publish(self.id, &t, wgpu::FilterMode::Linear)
             .ok()?;
@@ -781,7 +791,7 @@ impl GpuPreview {
     /// until it arrives, the previous reading.
     pub fn pixel(&mut self, p: [f64; 2], repaint: &egui::Context) -> Option<[u8; 4]> {
         let (texture, rect) = match &self.cached {
-            Some((texture, rect)) => (texture, *rect),
+            Some((texture, rect, _)) => (texture, *rect),
             None => (self.target.as_ref()?.view().texture(), self.rect?),
         };
         let (w, h) = (texture.width(), texture.height());
