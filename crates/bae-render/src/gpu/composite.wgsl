@@ -146,6 +146,10 @@ const FLAG_OCCLUDE: u32 = 16384u;
 @group(1) @binding(4) var t_mask: texture_2d<f32>;
 // Image shadow casters of the composite (exec/shadow.rs).
 @group(1) @binding(5) var t_shadow: texture_2d<f32>;
+// Advanced 3D reflections: the environment light's picture (equirectangular
+// mip chain, linear light; exec/env.rs) and its sampler.
+@group(1) @binding(6) var t_env: texture_2d<f32>;
+@group(1) @binding(7) var s_env: sampler;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -380,6 +384,28 @@ fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> Shaded {
     let spec_color = mix(vec3<f32>(1.0), c, lighting[o + 6u].x);
     var out: Shaded;
     out.color = max(c * (mat.x * amb + mat.y * diff) + mat.z * spec_color * spec, vec3<f32>(0.0));
+    // Advanced 3D reflections of the environment picture (light.rs: the
+    // block's offset in the first row's w, the rolloff in the second's).
+    let at = u32(lighting[o].w);
+    if at > 0u {
+        let e = o + at;
+        let r0 = lighting[e];
+        let r = reflect(-v, n);
+        let d = vec3<f32>(dot(r0.xyz, r), dot(lighting[e + 1u].xyz, r), dot(lighting[e + 2u].xyz, r));
+        let dn = normalize(d);
+        let uv = vec2<f32>(0.5 + atan2(dn.x, dn.z) / 6.2831853, 0.5 + asin(clamp(dn.y, -1.0, 1.0)) / 3.14159265);
+        let tint = lighting[e + 3u];
+        let lod = (1.0 - tint.w) * (r0.w - 1.0);
+        var seen = textureSampleLevel(t_env, s_env, uv, lod).rgb * tint.rgb;
+        if lighting[e + 1u].w > 0.5 {
+            // Display-encode for a non-linear working space.
+            let x = max(seen, vec3<f32>(0.0));
+            seen = select(1.055 * pow(x, vec3<f32>(1.0 / 2.4)) - 0.055, x * 12.92, x <= vec3<f32>(0.0031308));
+        }
+        let rolloff = lighting[o + 1u].w;
+        let f = lighting[e + 2u].w * ((1.0 - rolloff) + rolloff * pow(1.0 - abs(dot(n, v)), 5.0));
+        out.color = mix(out.color, seen, clamp(f, 0.0, 1.0));
+    }
     out.shadow = select(0.0, clamp(1.0 - kept / free, 0.0, 1.0), free > 0.0);
     return out;
 }
