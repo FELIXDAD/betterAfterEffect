@@ -586,6 +586,13 @@ impl SourceProvider for TextProvider {
         crate::TEXT_PROVIDER
     }
 
+    /// The glyphs' filled outlines in layer pixels, for Advanced 3D
+    /// extrusion (04).
+    fn outlines(&self, content: &CustomContent) -> Option<Arc<bae_render::source::Outlines>> {
+        let layout = self.layout_of(content).ok()?;
+        Some(Arc::new(text_outlines(&layout)))
+    }
+
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
         if let Some(hit) = self.cache.lock().get(content.hash) {
             return Ok(hit);
@@ -663,5 +670,77 @@ impl bae_gpu::WarmUp for VerticalGlyphWarmUp {
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
+    }
+}
+
+/// Flattened glyph fill outlines of `text` (layer pixels), consecutive
+/// glyphs of one colour in one fill.
+fn text_outlines(text: &TextLayout) -> bae_render::source::Outlines {
+    let mut out = bae_render::source::Outlines::default();
+    for run in &text.runs {
+        let outlines = glyph_outlines(run);
+        let mut paths = outlines.iter();
+        for_batches(
+            text,
+            run,
+            Affine::IDENTITY,
+            |glyphs, matrix, paint, opacity| {
+                let batch: Vec<&BezPath> = paths.by_ref().take(glyphs.len()).flatten().collect();
+                let Some(mut color) = paint.fill else {
+                    return;
+                };
+                color[3] *= opacity;
+                if out.fills.last().is_none_or(|f| f.color != color) {
+                    out.fills.push(bae_render::source::OutlineFill {
+                        color,
+                        contours: Vec::new(),
+                    });
+                }
+                let contours = &mut out.fills.last_mut().expect("pushed").contours;
+                for path in batch {
+                    kurbo::flatten(matrix * path, 0.25, |el| match el {
+                        kurbo::PathEl::MoveTo(p) => contours.push(vec![[p.x, p.y]]),
+                        kurbo::PathEl::LineTo(p) => {
+                            if let Some(c) = contours.last_mut() {
+                                c.push([p.x, p.y]);
+                            }
+                        }
+                        _ => {}
+                    });
+                }
+            },
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod outline_tests {
+    use super::*;
+
+    /// The letter O: its outside and its hole, in layer pixels around the
+    /// baseline.
+    #[test]
+    fn letters_give_their_outlines() {
+        let mut fonts = crate::FontSystem::new();
+        let doc = bae_model::TextDocument::new("O", "ArialMT", 40.0);
+        let layout = crate::layout_text(&mut fonts, &doc);
+        if layout.runs.is_empty() {
+            return; // no font here
+        }
+        let out = text_outlines(&layout);
+        let contours: Vec<&Vec<[f64; 2]>> = out.fills.iter().flat_map(|f| &f.contours).collect();
+        assert_eq!(contours.len(), 2, "outside and hole");
+        let ys: Vec<f64> = contours
+            .iter()
+            .flat_map(|c| c.iter().map(|p| p[1]))
+            .collect();
+        let (lo, hi) = ys
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(l, h), &y| (l.min(y), h.max(y)));
+        assert!(
+            hi - lo > 20.0 && hi - lo < 40.0,
+            "an O 40 px high: {lo} … {hi}"
+        );
     }
 }

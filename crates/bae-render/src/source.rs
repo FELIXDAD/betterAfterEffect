@@ -309,6 +309,28 @@ pub trait SourceProvider: Send + Sync {
 
     /// The source for `content`. Providers may cache by `content.hash`.
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError>;
+
+    /// The filled outlines of `content` in layer pixels, for 3D extrusion
+    /// (AE's Advanced 3D Geometry Options); `None` when the provider has
+    /// none. Read-only: drawing does not depend on it.
+    fn outlines(&self, _content: &CustomContent) -> Option<Arc<Outlines>> {
+        None
+    }
+}
+
+/// The filled outlines of a source (layer pixels), by fill.
+#[derive(Clone, Debug, Default)]
+pub struct Outlines {
+    pub fills: Vec<OutlineFill>,
+}
+
+/// One fill's outlines.
+#[derive(Clone, Debug)]
+pub struct OutlineFill {
+    /// Straight RGBA (display-encoded, like solid colours).
+    pub color: [f32; 4],
+    /// Closed polylines (the last point joins the first), nonzero winding.
+    pub contours: Vec<Vec<[f64; 2]>>,
 }
 
 /// Source providers by ID (built-in and plugin providers alike).

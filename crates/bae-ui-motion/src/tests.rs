@@ -3901,3 +3901,74 @@ fn crop_comp_and_camera_focus() {
         .unwrap();
     assert!(d > 0.0, "{d}");
 }
+
+/// File ▸ Dependencies ▸ Find Missing Footage: the Project panel searches for
+/// "Missing Footage" and lists only footage whose file is gone.
+#[test]
+fn find_missing_footage_lists_footage_without_a_file() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let dir = tempfile::tempdir().unwrap();
+    let here = dir.path().join("here.mov");
+    let gone = dir.path().join("gone.mov");
+    std::fs::write(&here, b"clip").unwrap();
+    std::fs::write(&gone, b"clip").unwrap();
+    let out = h.run(
+        "item.import",
+        json!({"files": [{"path": here}, {"path": gone}]}),
+    );
+    let gone_item = PrimPath::new(out["items"][1].as_str().unwrap()).unwrap();
+    std::fs::remove_file(&gone).unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::FIND_MISSING_FOOTAGE));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    let shown = project.shown_items(&h.stage, None);
+    assert!(shown.contains(&gone_item), "{shown:?}");
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|p| h
+                .stage
+                .prim(p)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET)))
+            .count(),
+        1
+    );
+}
+
+/// File ▸ Dependencies ▸ Find Missing Effects: the Project panel lists the
+/// comps with an effect the app has no definition for.
+#[test]
+fn find_missing_effects_lists_the_comps_using_them() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let other = PrimPath::new(
+        h.run("comp.create", json!({"name": "Clean"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let fx = solid.child("missing_fx").unwrap();
+    h.run("prim.create", json!({"path": fx, "prim_type": "Effect"}));
+    h.run(
+        "attr.set",
+        json!({"path": fx, "attr": "match_name", "value": {"type": "string", "value": "Vendor Gone"}}),
+    );
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::FIND_MISSING_EFFECTS));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    let effects = crate::effects::EffectRegistries {
+        defs: std::sync::Arc::new(bae_app::Registry::new()),
+        infos: std::sync::Arc::new(bae_app::Registry::new()),
+    };
+    let shown = project.shown_items(&h.stage, Some(&effects));
+    assert!(shown.contains(&comp), "{shown:?}");
+    assert!(!shown.contains(&other), "{shown:?}");
+}
