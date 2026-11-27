@@ -444,6 +444,8 @@ pub struct Session {
     pub(crate) text_selection: Option<(PrimPath, Time, std::ops::Range<usize>)>,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
+    /// Composition displayed at the root of the Flowchart panel.
+    pub flowchart_root: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,

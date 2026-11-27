@@ -22,6 +22,19 @@ pub const CONTENTS: &str = "contents";
 /// Child folder of a comp or layer holding its markers.
 pub const MARKERS: &str = "markers";
 
+/// The source interval used when adding footage to a composition. The end is exclusive.
+pub fn footage_range(stage: &Stage, asset: &PrimPath, duration: Time) -> (Time, Time) {
+    let view = stage.prim(asset);
+    let mark = |attr| view.as_ref().and_then(|v| static_value(v, attr)?.as_time());
+    let first = mark("footage:in").unwrap_or(Time::ZERO);
+    let end = mark("footage:out").unwrap_or(duration).min(duration);
+    if first >= Time::ZERO && first < end {
+        (first, end)
+    } else {
+        (Time::ZERO, duration)
+    }
+}
+
 /// The settings of a comp that the timeline and viewer need.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompInfo {

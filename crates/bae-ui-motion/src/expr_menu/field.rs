@@ -5,6 +5,15 @@ use egui::text_edit::TextEditOutput;
 use egui::{Align2, Color32, FontId, Galley, Id, Rect, Stroke, TextBuffer, TextEdit, Ui, pos2};
 use std::sync::Arc;
 
+mod syntax;
+
+fn display_preferences(resources: &Resources) -> Arc<bae_prefs::Preferences> {
+    resources
+        .get::<Arc<bae_prefs::PrefsStore>>()
+        .map(|s| s.display())
+        .unwrap_or_default()
+}
+
 fn gutter_width(ui: &Ui, source: &str, font: &FontId, width: f32, numbers: bool) -> f32 {
     if !numbers {
         return 0.0;
@@ -23,6 +32,7 @@ fn layout(
     text: Color32,
     prefs: &bae_prefs::Preferences,
     width: f32,
+    caret: Option<usize>,
 ) -> Arc<Galley> {
     let wrap = prefs.str("scripting_expressions.expr_word_wrap");
     let mut job = LayoutJob::simple(
@@ -35,6 +45,9 @@ fn layout(
             width.max(1.0)
         },
     );
+    if prefs.bool("scripting_expressions.expr_syntax_highlighting") {
+        syntax::colorize(ui, &mut job, prefs, caret);
+    }
     job.wrap.break_anywhere = wrap == "character";
     job.tab_stop_spaces = std::num::NonZeroU8::new(
         prefs
@@ -45,7 +58,7 @@ fn layout(
 }
 
 pub(crate) fn height(ui: &Ui, resources: &Resources, source: &str, width: f32) -> f32 {
-    let prefs = crate::prefs::current(resources);
+    let prefs = display_preferences(resources);
     let (font, text, _) = crate::common::expression_style(resources);
     let gutter = gutter_width(
         ui,
@@ -54,7 +67,7 @@ pub(crate) fn height(ui: &Ui, resources: &Resources, source: &str, width: f32) -
         width,
         prefs.bool("scripting_expressions.expr_show_line_numbers"),
     );
-    layout(ui, source, &font, text, &prefs, width - gutter - 8.0)
+    layout(ui, source, &font, text, &prefs, width - gutter - 8.0, None)
         .size()
         .y
 }
@@ -67,7 +80,7 @@ pub(super) fn show(
     buffer: &mut String,
     rows: Option<usize>,
 ) -> TextEditOutput {
-    let prefs = crate::prefs::current(resources);
+    let prefs = display_preferences(resources);
     let color = |key| {
         let [r, g, b] = prefs.color(key);
         Color32::from_rgb(r, g, b)
@@ -93,25 +106,36 @@ pub(super) fn show(
                 (prefs.float("scripting_expressions.expr_selection_alpha") * 255.0).round() as u8;
             ui.visuals_mut().selection.bg_fill = Color32::from_rgba_unmultiplied(r, g, b, alpha);
             let vertical = rows.is_some()
-                && layout(ui, buffer, &font, text, &prefs, field.width() - 8.0)
+                && layout(ui, buffer, &font, text, &prefs, field.width() - 8.0, None)
                     .size()
                     .y
                     > field.height() + 0.5;
             let mut edit = |ui: &mut Ui| {
                 let mut input = super::typing::ExpressionBuffer::new(ui, buffer, &prefs);
                 let indented = rows.is_some() && input.indent_selection(ui, id);
+                let caret = if ui.memory(|m| m.has_focus(id))
+                    && prefs.bool("scripting_expressions.expr_highlight_matching_braces")
+                {
+                    TextEdit::load_state(ui.ctx(), id)
+                        .and_then(|s| s.cursor.char_range())
+                        .filter(|r| r.is_empty())
+                        .map(|r| usize::from(r.primary.index))
+                } else {
+                    None
+                };
                 let mut layouter = |ui: &Ui, buffer: &dyn TextBuffer, width: f32| {
-                    layout(ui, buffer.as_str(), &font, text, &prefs, width)
+                    let width = if rows.is_some() { width } else { f32::INFINITY };
+                    layout(ui, buffer.as_str(), &font, text, &prefs, width, caret)
                 };
                 let widget = match rows {
                     Some(_) => TextEdit::multiline(&mut input)
                         .lock_focus(true)
                         .margin(egui::Margin::symmetric(4, 0))
-                        .desired_rows(1)
-                        .layouter(&mut layouter),
+                        .desired_rows(1),
                     None => TextEdit::singleline(&mut input),
                 };
                 let mut shown = widget
+                    .layouter(&mut layouter)
                     .id(id)
                     .font(font.clone())
                     .text_color(text)
@@ -198,6 +222,7 @@ mod tests {
                     Color32::WHITE,
                     &prefs,
                     400.0,
+                    None,
                 );
                 let x = |line: usize| galley.rows[line].glyphs.last().unwrap().pos.x;
                 assert!(
