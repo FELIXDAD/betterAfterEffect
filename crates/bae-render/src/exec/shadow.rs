@@ -132,10 +132,15 @@ impl super::ExecCtx<'_> {
                     ImageAlpha::Opaque => flags::OPAQUE,
                 };
             draws.push(d);
-            groups.push(
-                self.pipelines
-                    .textures(device, Some(&img.view), None, None, None, None),
-            );
+            groups.push(self.pipelines.textures(
+                device,
+                Some(&img.view),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ));
         }
         let first = self.write_draws(&draws);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
