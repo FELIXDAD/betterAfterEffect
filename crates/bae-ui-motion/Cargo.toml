@@ -32,12 +32,15 @@ bae-render = { workspace = true, default-features = false }
 # Probing files for File > Import (the app links bae-media through bae-render's
 # `media` feature already).
 bae-media.workspace = true
+# Same XML parser as bae-effects, for XMP sidecar fields on import.
+roxmltree = "0.21.2"
 # The installed font list of the Character panel (the app links bae-text already).
 bae-text.workspace = true
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tempfile.workspace = true
 
 [build-dependencies]
 # build.rs deflates the catalog tables into $OUT_DIR/catalog.bin.
@@ -48,4 +51,3 @@ egui-wgpu.workspace = true
 bae-vector = { workspace = true, features = ["render"] }
 # Render queue tests write TIFF too (bae-media encoders).
 bae-render = { workspace = true, features = ["media"] }
-tempfile.workspace = true

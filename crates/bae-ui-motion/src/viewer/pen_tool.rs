@@ -12,6 +12,7 @@
 //! segment Add Vertex, over a vertex Delete Vertex, Alt/Option over a vertex
 //! Convert Vertex. Cmd/Ctrl makes it the Selection tool (handled by the viewer).
 
+use super::path_edit::set_vertices;
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_model::{BezierPath, PrimPath, PrimType, Value};
@@ -255,17 +256,39 @@ pub(super) fn frame(
                 start_vertex(state, cx, session, info, comp, view, pos, shift);
             }
             (Tool::AddVertex, Some(PathHit::Segment { path, segment, t })) => {
-                cx.invoke_with(
-                    "path.insert_vertex",
-                    json!({"path": paths[path].prim, "segment": segment, "t": t}),
-                );
+                let p = &paths[path];
+                if super::path_edit::edit_only_current_mask(cx, &p.prim) {
+                    set_vertices(
+                        cx,
+                        session,
+                        info,
+                        &p.prim,
+                        &bae_motion::path::split(&p.path, segment, t),
+                    );
+                } else {
+                    cx.invoke_with(
+                        "path.insert_vertex",
+                        json!({"path": p.prim, "segment": segment, "t": t}),
+                    );
+                }
             }
             (Tool::DeleteVertex, Some(PathHit::Vertex { path, index })) => {
-                if paths[path].path.vertices.len() > 1 {
-                    cx.invoke_with(
-                        "path.delete_vertex",
-                        json!({"path": paths[path].prim, "index": index}),
-                    );
+                let p = &paths[path];
+                if p.path.vertices.len() > 1 {
+                    if super::path_edit::edit_only_current_mask(cx, &p.prim) {
+                        set_vertices(
+                            cx,
+                            session,
+                            info,
+                            &p.prim,
+                            &bae_motion::path::remove(&p.path, index),
+                        );
+                    } else {
+                        cx.invoke_with(
+                            "path.delete_vertex",
+                            json!({"path": p.prim, "index": index}),
+                        );
+                    }
                 }
             }
             (Tool::ConvertVertex, Some(PathHit::Vertex { path, index })) => {
@@ -480,7 +503,7 @@ fn start_vertex(
     let selected = session.lock().selected_layers.clone();
     let target = Target::of(cx.stage, &info.path, &selected, mask);
     let to_comp = shape_tool::target_matrix(info, comp, &target);
-    let color = shape_tool::preview_color(cx.stage, &target);
+    let color = shape_tool::preview_color(cx, &target, info, session.lock().info.color);
     let center_new_anchor = matches!(target, Target::NewLayer)
         && super::prefs::ViewerPrefs::current(cx.resources).center_shape_anchor;
     let mut d = PenPath {
@@ -509,20 +532,6 @@ fn start_vertex(
         dragged: false,
     });
     state.drawing = Some(d);
-}
-
-fn set_vertices(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    info: &CompInfo,
-    prim: &PrimPath,
-    path: &BezierPath,
-) {
-    let time = session.lock().time(&info.path);
-    let mut params = serde_json::to_value(path).unwrap_or_default();
-    params["path"] = json!(prim);
-    params["time"] = json!(query::to_key_time(cx.stage, prim, time));
-    cx.invoke_with("path.set_vertices", params);
 }
 
 /// Write the open path to the model: the first vertex creates the shape or mask,
@@ -597,7 +606,8 @@ fn commit(
         Target::Mask(_) => "masks",
         _ => query::CONTENTS,
     };
-    let Some(layer) = shape_tool::run(cx, session, info, &d.target, g, false, options) else {
+    let Some(layer) = shape_tool::run(cx, session, info, &d.target, g, false, options, d.color)
+    else {
         return;
     };
     if let Ok(container) = layer.child(container_name) {

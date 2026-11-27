@@ -31,6 +31,20 @@ pub enum BaselineDirection {
     TateChuYoko,
 }
 
+/// How a text stroke's corners join (Character panel menu ▸ Line Join).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TextJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
 /// Start of a new style in Unicode scalar indices. Its end is the next start.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StyleRun<T> {
@@ -71,6 +85,17 @@ pub struct TextStyle {
     pub baseline_direction: BaselineDirection,
     #[serde(default)]
     pub baseline_option: BaselineOption,
+    /// Standard ligatures (Character panel menu ▸ Ligatures).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ligatures: bool,
+    /// Digits drawn as Arabic-Indic ones (Hindi Digits).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hindi_digits: bool,
+    /// Lines do not break inside this text (No Break).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_break: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub line_join: TextJoin,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -82,6 +107,17 @@ pub struct ParagraphStyle {
     pub first_line_indent: f64,
     pub space_before: f64,
     pub space_after: f64,
+    /// Punctuation hangs outside the margins (Roman Hanging Punctuation).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hanging_punctuation: bool,
+    /// Leading measured from the top of one line to the next (Top-to-Top
+    /// Leading); `false`: baseline to baseline (AE's Bottom-to-Bottom).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub top_leading: bool,
+    /// Lines balanced over the paragraph (Adobe Every-line Composer);
+    /// `false`: Single-line Composer.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub every_line: bool,
 }
 
 impl Default for ParagraphStyle {
@@ -93,6 +129,9 @@ impl Default for ParagraphStyle {
             first_line_indent: 0.,
             space_before: 0.,
             space_after: 0.,
+            hanging_punctuation: false,
+            top_leading: false,
+            every_line: false,
         }
     }
 }
@@ -203,6 +242,10 @@ impl TextDocument {
                 small_caps: false,
                 baseline_direction: BaselineDirection::Default,
                 baseline_option: BaselineOption::Normal,
+                ligatures: false,
+                hindi_digits: false,
+                no_break: false,
+                line_join: TextJoin::Miter,
             },
             runs: vec![],
             paragraph: ParagraphStyle::default(),

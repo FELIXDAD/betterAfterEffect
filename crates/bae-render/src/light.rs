@@ -99,6 +99,22 @@ pub struct Light {
     /// `None` lights every 3D layer of the comp. A layer no light reaches is
     /// unlit (not dark; measured in AE 26.2.1).
     pub scope_below: Option<usize>,
+    /// Environment lights with an image (AE's Advanced 3D): the source layer
+    /// lights 3D models from every direction ([`EnvironmentSource`]).
+    pub environment: Option<EnvironmentSource>,
+}
+
+/// The image of an environment light: an equirectangular (latitude /
+/// longitude) picture of everything around the scene, turned by the light's
+/// rotation. It lights 3D models (diffuse and reflections) and can show
+/// behind the layers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnvironmentSource {
+    /// The source layer: its index in [`crate::RenderComp::layers`].
+    pub layer: usize,
+    /// Background Visible: the image's opacity and blur behind the layers
+    /// (both 0–1).
+    pub background: Option<[f32; 2]>,
 }
 
 impl Light {
@@ -139,6 +155,23 @@ pub struct Lighting {
     /// Its receiver-space shadow map ([`crate::graph::ShadowMapNode`]): lit
     /// draws sample it instead of testing the casters.
     pub shadow_map: Option<crate::graph::NodeId>,
+    /// 3D models of its group that cast shadows on it (drawn into its shadow
+    /// map only: a layer with model casters always uses the map).
+    pub models: Arc<[ModelCaster]>,
+}
+
+/// A 3D model layer casting shadows on a lit layer.
+#[derive(Clone, Debug)]
+pub struct ModelCaster {
+    pub model: Arc<crate::model::Model>,
+    /// Model space → comp space.
+    pub matrix: DMat4,
+}
+
+impl PartialEq for ModelCaster {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.model, &other.model) && self.matrix == other.matrix
+    }
 }
 
 /// Largest side of a shadow map slot, in texels.
@@ -318,11 +351,12 @@ impl Lighting {
                 l.falloff_distance,
                 map_h as f32,
             ]);
-            let darkness = if l.casts_shadows && !self.casters.is_empty() {
-                l.shadow_darkness.clamp(0.0, 100.0) / 100.0
-            } else {
-                0.0
-            };
+            let darkness =
+                if l.casts_shadows && !(self.casters.is_empty() && self.models.is_empty()) {
+                    l.shadow_darkness.clamp(0.0, 100.0) / 100.0
+                } else {
+                    0.0
+                };
             // z: the light's shadow map slot (−1: test the casters), w: the
             // slot width in texels (the height is in the previous row's w).
             out.push([darkness, l.shadow_diffusion.max(0.0), slot, map_w as f32]);
@@ -696,6 +730,7 @@ mod tests {
             shadow_darkness: 100.0,
             shadow_diffusion: 0.0,
             scope_below: None,
+            environment: None,
         }
     }
 

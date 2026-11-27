@@ -172,11 +172,14 @@ const LINE: f32 = 13.0;
 impl Panel for InfoPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
-        let (readout, lines) = {
+        let (readout, mut lines) = {
             let mut s = session.lock();
             s.info.shown_at = ui.ctx().cumulative_frame_nr();
             (s.info.clone(), message_lines(cx.stage, &s))
         };
+        if let Some(progress) = crate::render_queue::panel_progress(cx.resources, cx.stage) {
+            lines.insert(0, progress);
+        }
         let rows = color_rows(self.mode, readout.color);
         let font = bae_ui::theme::body();
         let text = bae_ui::theme::color::TEXT;

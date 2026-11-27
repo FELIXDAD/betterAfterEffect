@@ -14,18 +14,11 @@ use bae_model::{
     layer_styles as styles, psd::LayerImage,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ImportKind {
-    #[default]
-    Footage,
-    Composition,
-    RetainSize,
-}
+pub use bae_model::psd::ImportKind;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Params {
@@ -74,7 +67,7 @@ impl Command for ImportPhotoshop {
             assets
         };
         if let Some(rel) = &p.folder {
-            parent = crate::import::folder_path(tx, &parent, rel)?;
+            parent = crate::import::folder_path(tx, &parent, rel, p.folder_label)?;
         }
         let (item, kind) = if p.kind == ImportKind::Footage {
             let layer = if let Some(sel) = p.selection {
@@ -183,8 +176,11 @@ fn footage(
             .run(
                 tx,
                 ImportParams {
+                    precompose: false,
+                    folder_label: p.folder_label,
                     parent: Some(parent.clone()),
                     comp: None,
+                    create_comp: false,
                     files: vec![file],
                 },
             )?

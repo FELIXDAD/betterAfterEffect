@@ -425,6 +425,14 @@ fn extract_range(container: &Path, offset: u64, len: u64, dest: &Path) -> Result
 /// Whether `path` is a frame of the sequence opened under `key`.
 fn same_sequence(key: &SourceKey, path: &Path) -> bool {
     use crate::sequence::parse_numbered_name;
+    if key.options.sequence == crate::source::SequenceMode::Alphabetical {
+        return key.path.parent() == path.parent()
+            && key
+                .path
+                .extension()
+                .zip(path.extension())
+                .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
+    }
     if key.options.sequence != crate::source::SequenceMode::Sequence
         || key.path.parent() != path.parent()
     {

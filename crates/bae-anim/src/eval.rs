@@ -504,6 +504,11 @@ pub(crate) struct CompiledLight {
     pub(crate) casts_shadows: bool,
     pub(crate) shadow_darkness: Prop,
     pub(crate) shadow_diffusion: Prop,
+    /// Environment light source layer (resolved with the comp's layers).
+    pub(crate) source: Option<usize>,
+    pub(crate) background_visible: bool,
+    pub(crate) background_opacity: Prop,
+    pub(crate) background_blur: Prop,
 }
 
 #[derive(Debug)]
@@ -626,6 +631,11 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         layer.parent = setting_ref(&lv, l::PARENT)
             .and_then(|p| index_of(&p))
             .filter(|&p| p != i);
+        if let Some(light) = &mut layer.light {
+            light.source = setting_ref(&lv, li::SOURCE)
+                .and_then(|p| index_of(&p))
+                .filter(|&p| p != i);
+        }
         if layer.track_matte != TrackMatte::None {
             layer.track_matte_layer = match setting_ref(&lv, l::TRACK_MATTE_LAYER) {
                 Some(p) => index_of(&p),
@@ -688,6 +698,7 @@ fn compile_layer(
     let kind = layer_kind(setting_str(v, lt, l::KIND).as_deref().unwrap_or("solid"));
     let three_d = setting_bool(v, lt, l::THREE_D);
     let switches = LayerSwitches {
+        quality: crate::LayerQuality::from_token(setting_str(v, lt, "quality").as_deref()),
         enabled: setting(v, lt, l::ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(true),
@@ -858,6 +869,10 @@ fn compile_layer(
         casts_shadows: setting_bool(v, lt, li::CASTS_SHADOWS),
         shadow_darkness: p(li::SHADOW_DARKNESS, Value::Float(100.0)),
         shadow_diffusion: p(li::SHADOW_DIFFUSION, Value::Float(0.0)),
+        source: None,
+        background_visible: setting_bool(v, lt, li::BACKGROUND_VISIBLE),
+        background_opacity: p(li::BACKGROUND_OPACITY, Value::Float(100.0)),
+        background_blur: p(li::BACKGROUND_BLUR, Value::Float(0.0)),
     });
 
     let lpath = v.path().clone();
@@ -1357,6 +1372,10 @@ impl CompiledComp {
                     shadow_diffusion: lg.shadow_diffusion.f64(&cx),
                     point_of_interest: poi,
                     world_matrix: wm,
+                    source: lg.source,
+                    background_visible: lg.background_visible,
+                    background_opacity: lg.background_opacity.f64(&cx),
+                    background_blur: lg.background_blur.f64(&cx),
                 });
             }
         }
@@ -2165,6 +2184,8 @@ impl CompiledLayer {
                 li::FALLOFF_DISTANCE => self.light.as_ref().map(|c| &c.falloff_distance),
                 li::SHADOW_DARKNESS => self.light.as_ref().map(|c| &c.shadow_darkness),
                 li::SHADOW_DIFFUSION => self.light.as_ref().map(|c| &c.shadow_diffusion),
+                li::BACKGROUND_OPACITY => self.light.as_ref().map(|c| &c.background_opacity),
+                li::BACKGROUND_BLUR => self.light.as_ref().map(|c| &c.background_blur),
                 _ => self
                     .options
                     .iter()
@@ -2248,6 +2269,8 @@ impl CompiledLayer {
                 &l.falloff_distance,
                 &l.shadow_darkness,
                 &l.shadow_diffusion,
+                &l.background_opacity,
+                &l.background_blur,
             ]);
         }
         all.into_iter()
@@ -2308,6 +2331,8 @@ impl CompiledLayer {
                     &l.falloff_distance,
                     &l.shadow_darkness,
                     &l.shadow_diffusion,
+                    &l.background_opacity,
+                    &l.background_blur,
                 ]
                 .iter()
                 .any(|p| p.has_expression())

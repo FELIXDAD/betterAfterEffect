@@ -174,6 +174,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         strip: Rect,
     ) {
+        let default_label = crate::prefs::marker_label(&crate::prefs::current(cx.resources), false);
         let bin = Rect::from_min_max(pos2(strip.right() - 18.0, strip.top()), strip.max);
         #[cfg(test)]
         {
@@ -183,7 +184,12 @@ impl TimelinePanel {
         self.markers_ui(ui, cx, session, info, axis, &info.path, marks);
         let p = ui.painter();
         p.rect_filled(bin, 2.0, color::PANEL);
-        paint_marker(p, bin.center().x, bin.bottom() - 1.0, color::TEXT_DIM);
+        paint_marker(
+            p,
+            bin.center().x,
+            bin.bottom() - 1.0,
+            marker_fill(default_label),
+        );
         let resp = ui
             .interact(bin, ui.id().with("marker_bin"), Sense::drag())
             .labeled(egui::WidgetType::Button, tr("Comp Marker Bin"))
@@ -198,7 +204,7 @@ impl TimelinePanel {
                 &ui.painter().with_clip_rect(marks),
                 pos.x,
                 strip.bottom(),
-                color::TEXT,
+                marker_fill(default_label),
             );
             if ui.input(|i| i.pointer.any_released()) {
                 self.drag = None;
@@ -208,7 +214,7 @@ impl TimelinePanel {
                         .snap(axis.t(pos.x) + Time(info.frame_duration().0 / 2));
                     cx.invoke_with(
                         "marker.add",
-                        json!({"owner": info.path, "time": t.clamp(Time::ZERO, info.duration)}),
+                        json!({"owner": info.path, "time": t.clamp(Time::ZERO, info.duration), "label": default_label}),
                     );
                 }
             }
@@ -413,7 +419,7 @@ impl MarkerDialog {
     }
 
     /// The dialog for a new marker on `owner` at comp time `time`.
-    pub fn new_marker(info: &CompInfo, owner: PrimPath, time: Time) -> Self {
+    pub fn new_marker(info: &CompInfo, owner: PrimPath, time: Time, label: usize) -> Self {
         Self {
             marker: None,
             owner,
@@ -421,7 +427,7 @@ impl MarkerDialog {
             time,
             duration: Time::ZERO,
             comment: String::new(),
-            label: 0,
+            label,
             protected_region: false,
             segment: false,
         }
@@ -506,7 +512,7 @@ pub(crate) fn parse_timecode(info: &CompInfo, s: &str) -> Option<i64> {
     Some(((hour * 60 + min) * 60 + sec) * fps + f)
 }
 
-pub(super) fn marker_body(ui: &mut Ui, d: &mut MarkerDialog) {
+pub(super) fn marker_body(ui: &mut Ui, d: &mut MarkerDialog, prefs: &bae_prefs::Preferences) {
     let info = d.info.clone();
     let label_w = vec2(90.0, 18.0);
     ui.horizontal(|ui| {
@@ -526,7 +532,10 @@ pub(super) fn marker_body(ui: &mut Ui, d: &mut MarkerDialog) {
     .labeled(egui::WidgetType::TextEdit, tr("Comment:"));
     ui.horizontal(|ui| {
         ui.add_sized(label_w, egui::Label::new(tr("Label:")));
-        let names: Vec<&str> = theme::LABELS.iter().map(|(n, _)| tr(n)).collect();
+        let names: Vec<_> = (0..theme::LABELS.len())
+            .map(|i| bae_ui::settings::label_name(prefs, i))
+            .collect();
+        let names: Vec<_> = names.iter().map(String::as_str).collect();
         widgets::dropdown(ui, "marker_label", &mut d.label, &names, 140.0);
     });
     if d.owner == d.info.path {
@@ -534,11 +543,11 @@ pub(super) fn marker_body(ui: &mut Ui, d: &mut MarkerDialog) {
     } else {
         // Layer markers: Comment Marker / Segmentation Marker (AE 26).
         ui.horizontal(|ui| {
-            if ui.radio(!d.segment, tr("Comment Marker")).clicked() {
-                d.segment = false;
-            }
-            if ui.radio(d.segment, tr("Segment Marker")).clicked() {
-                d.segment = true;
+            let before = d.segment;
+            ui.radio_value(&mut d.segment, false, tr("Comment Marker"));
+            ui.radio_value(&mut d.segment, true, tr("Segment Marker"));
+            if before != d.segment && d.label == crate::prefs::marker_label(prefs, before) {
+                d.label = crate::prefs::marker_label(prefs, d.segment);
             }
         });
     }

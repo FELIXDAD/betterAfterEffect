@@ -116,5 +116,74 @@ fn tools_follow_the_preferences() {
     let solid = h.layer("solid");
     h.select(&[&solid]);
     let r = h.draw(Tool::Ellipse, (100.0, 50.0), (300.0, 150.0));
-    assert_eq!(one(&r, "mask.create")["cycle_colors"], false);
+    let base = bae_prefs::Preferences::default().label_color(bae_motion::shape::mask_label(0));
+    let fixed = json!([
+        f64::from(base[0]) / 255.0,
+        f64::from(base[1]) / 255.0,
+        f64::from(base[2]) / 255.0,
+        1.0
+    ]);
+    assert_eq!(one(&r, "mask.create")["color"], fixed);
+    h.apply(&r);
+    let r = h.draw(Tool::Rectangle, (120.0, 70.0), (220.0, 125.0));
+    assert_eq!(one(&r, "mask.create")["color"], fixed);
+}
+
+#[test]
+fn contrasting_mask_uses_the_rendered_pixel_at_the_start_of_the_drag() {
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = H::new();
+    let registry = std::sync::Arc::new(bae_gpu::viewport::ViewportTextureRegistry::new());
+    h.resources.insert(gpu);
+    h.resources.insert(registry.clone());
+    h.viewer = CompositionViewer::new(None);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let mut prefs = bae_prefs::Preferences::default();
+    for i in 1..=16 {
+        prefs.set(&format!("labels.label_color_{i}"), "#ffffff");
+    }
+    prefs.set("labels.label_color_11", "#000000");
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
+    let solid = path(
+        &h.run(
+            "layer.create",
+            json!({"comp":h.comp,"kind":"solid","color":[1,1,1,1]}),
+        )["path"],
+    );
+    h.select(&[&solid]);
+    h.tools().lock().set(Tool::Rectangle);
+    let at = h.screen(180.0, 140.0);
+    h.move_to(at, Modifiers::NONE, Vec::new());
+    let timeout = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        for (i, entry) in registry.snapshot().into_iter().enumerate() {
+            if entry.texture.is_some() && entry.display_handle.is_none() {
+                registry.set_display_handle(entry.id, Some(i as u64 + 1));
+            }
+        }
+        h.frame(Vec::new(), Modifiers::NONE);
+        if h.session().lock().info.color == Some([255; 4]) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < timeout,
+            "viewer pixel {:?}",
+            h.session().lock().info.color
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let r = h.draw(Tool::Rectangle, (180.0, 140.0), (250.0, 175.0));
+    assert_eq!(one(&r, "mask.create")["color"], json!([0., 0., 0., 1.]));
+    let store = h
+        .resources
+        .get::<std::sync::Arc<bae_prefs::PrefsStore>>()
+        .unwrap();
+    let mut prefs = (*store.current()).clone();
+    prefs.set("appearance.use_contrasting_color_for_mask_path", false);
+    store.set(prefs).unwrap();
+    let r = h.draw(Tool::Ellipse, (180.0, 140.0), (250.0, 175.0));
+    assert_eq!(one(&r, "mask.create")["color"], json!([1., 1., 1., 1.]));
 }

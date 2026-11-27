@@ -120,9 +120,15 @@ pub struct HubConfig {
     pub active_tick: Duration,
     /// ...backing off to this while they are quiet (worst-case added latency).
     pub quiet_tick: Duration,
-    /// Poll interval while a project has no connections (hellos to the project
-    /// directory, presence expiry).
+    /// Poll interval while a project has no connections (presence expiry,
+    /// reopening a failed project directory). Writes the store held back are not
+    /// left waiting for it: they are flushed as soon as the last client leaves.
     pub empty_tick: Duration,
+    /// A project relay writes to its project directory at most this often
+    /// (spec 4.5: a few hundred milliseconds for shared-folder peers), so a drag
+    /// that reaches the hub as dozens of updates per second becomes a few
+    /// appends per second. Clients still get every update at once.
+    pub store_send_interval: Duration,
 }
 
 impl HubConfig {
@@ -138,6 +144,7 @@ impl HubConfig {
             active_tick: Duration::from_millis(1),
             quiet_tick: Duration::from_millis(10),
             empty_tick: Duration::from_millis(500),
+            store_send_interval: Duration::from_millis(300),
         }
     }
 

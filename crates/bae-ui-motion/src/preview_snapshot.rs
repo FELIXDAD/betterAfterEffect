@@ -32,6 +32,23 @@ impl PreviewSnapshot {
         }
     }
 
+    /// Stable across reopening the same project. Includes linked project versions.
+    pub(crate) fn disk_revision(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut state = std::collections::hash_map::DefaultHasher::new();
+        for (id, _, frontiers) in &self.layers {
+            id.hash(&mut state);
+            let mut ids: Vec<_> = frontiers.iter().map(|id| (id.peer, id.counter)).collect();
+            ids.sort_unstable();
+            ids.hash(&mut state);
+        }
+        for (name, project) in &self.external {
+            name.hash(&mut state);
+            project.disk_revision().hash(&mut state);
+        }
+        state.finish()
+    }
+
     pub(crate) fn restore(&self) -> Result<Stage, String> {
         let layers = self
             .layers

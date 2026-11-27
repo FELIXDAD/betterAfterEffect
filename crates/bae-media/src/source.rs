@@ -185,6 +185,8 @@ pub enum SequenceMode {
     /// Open the image sequence the file belongs to (AE: "PNG Sequence" on).
     /// Falls back to a single still if the name has no frame number.
     Sequence,
+    /// All stills with this extension in the same directory, in filename order.
+    Alphabetical,
 }
 
 /// Options for opening a file.
@@ -322,6 +324,14 @@ impl MediaFormats {
             return crate::psd::open(path, Some(layer));
         }
         let format = self.find(path)?;
+        if options.sequence == SequenceMode::Alphabetical && format.is_image() {
+            let seq = sequence::alphabetical_sequence(path)?;
+            return Ok(Box::new(ImageSequenceSource::open(
+                format,
+                seq,
+                options.sequence_frame_rate,
+            )?));
+        }
         if options.sequence == SequenceMode::Sequence
             && format.is_image()
             && let Some(seq) = sequence::detect_sequence(path)?

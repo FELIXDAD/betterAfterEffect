@@ -431,6 +431,12 @@ pub trait Encoder: Send {
         Err(MediaError::Unsupported("audio in this encoder".into()))
     }
 
+    /// No more audio follows (the movie's frames may still come): an
+    /// interleaving writer stops waiting for audio past its end.
+    fn end_audio(&mut self) -> Result<(), MediaError> {
+        Ok(())
+    }
+
     /// Frames written so far.
     fn frames_written(&self) -> u64;
 
