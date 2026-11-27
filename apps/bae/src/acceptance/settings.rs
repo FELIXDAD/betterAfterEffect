@@ -219,7 +219,7 @@ fn transparency_settings_change_the_checkerboard_cells() {
     assert_eq!(dialog.draft().color(keys::TRANSPARENCY_SECOND), second);
     h.get_by_label("OK").click();
     settle(&mut h);
-    h.get_by_label("Transparency Grid").click();
+    h.get_by_label("Toggle Transparency Grid").click();
     settle(&mut h);
     // One rectangle tiled with a 2×2 texture of the two colours; large
     // cells are 16 px, so it repeats every 32 px.
