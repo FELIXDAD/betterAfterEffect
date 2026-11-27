@@ -16,8 +16,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bae_model::loro::{
-    ContainerID, ExportMode, Index, JsonOpContent, JsonTreeOp, LoroDoc, LoroMap, LoroValue, TreeID,
-    ValueOrContainer, VersionVector,
+    ContainerID, ContainerTrait, ExportMode, Frontiers, ID, Index, JsonOpContent, JsonTreeOp,
+    LoroDoc, LoroMap, LoroValue, TreeID, ValueOrContainer, VersionVector,
 };
 use bae_model::{
     AttrSpec, AuthorId, ModelError, Op, PrimPath, PrimSpec, PrimTree, PrimType, Reference,
@@ -408,6 +408,44 @@ impl History {
         out
     }
 
+    /// For each of `ids`: the op that wrote its entry and the history
+    /// document's version at that op (the op included), so the entries of
+    /// checkpoints written by someone who already had another one are known to
+    /// be later. An entry written in the open (uncommitted) change comes after
+    /// everything in the document. Missing for entries that are not there or
+    /// whose op is not in the readable history.
+    pub(crate) fn written<'a>(
+        &self,
+        ids: impl IntoIterator<Item = &'a CheckpointId>,
+    ) -> FxHashMap<CheckpointId, (ID, VersionVector)> {
+        let map = self.checkpoints_map();
+        let all = self.doc.oplog_vv();
+        let mut out = FxHashMap::default();
+        for id in ids {
+            let Some(ValueOrContainer::Container(c)) = map.get(&id.0) else {
+                continue;
+            };
+            let ContainerID::Normal { peer, counter, .. } = c.id() else {
+                continue;
+            };
+            let op = ID::new(peer, counter);
+            let past = if all.includes_id(op) {
+                match self.doc.try_frontiers_to_vv(&Frontiers::from_id(op)) {
+                    Ok(Some(vv)) => vv,
+                    _ => continue,
+                }
+            } else if peer == self.doc.peer_id() {
+                let mut vv = all.clone();
+                vv.insert(peer, counter + 1);
+                vv
+            } else {
+                continue;
+            };
+            out.insert(id.clone(), (op, past));
+        }
+        out
+    }
+
     pub fn checkpoint(&self, id: &CheckpointId) -> Option<Checkpoint> {
         let ValueOrContainer::Container(c) = self.checkpoints_map().get(&id.0)? else {
             return None;
@@ -416,7 +454,9 @@ impl History {
     }
 
     /// Rename a checkpoint and optionally change its note; returns its ID,
-    /// which changes when it was an automatic snapshot.
+    /// which changes when it was an automatic snapshot ([`Checkpoint::kind`]
+    /// `Auto`; one an older client renamed is a named version already and is
+    /// renamed in place).
     ///
     /// Renaming an automatic snapshot keeps it (the history panel's "keep this
     /// snapshot"): it is written again as a named version under a new ID, with
@@ -439,13 +479,11 @@ impl History {
             return Err(unknown());
         };
         let mut map = c.into_map().map_err(|_| unknown())?;
+        let fields = map.get_deep_value();
+        let (cp, _) = parse_entry(&id.0, &fields).ok_or_else(unknown)?;
         let mut new_id = id.clone();
-        let auto = matches!(
-            map.get(K_KIND),
-            Some(ValueOrContainer::Value(LoroValue::String(k))) if k.as_str() == KIND_AUTO
-        );
-        if auto {
-            let LoroValue::Map(fields) = map.get_deep_value() else {
+        if cp.is_auto() {
+            let LoroValue::Map(fields) = fields else {
                 return Err(unknown());
             };
             new_id = CheckpointId::new();
@@ -457,6 +495,15 @@ impl History {
             }
             checkpoints.delete(&id.0)?;
             map = copy;
+        } else if map.get(K_KIND).is_some() && cp.kind == CheckpointKind::Named {
+            // An automatic snapshot an older client renamed (or gave a note):
+            // a named version already, renamed in place. Without the automatic
+            // keys it stays one whatever its name becomes.
+            for key in [K_KIND, K_AUTO_NAME, K_PREV] {
+                if map.get(key).is_some() {
+                    map.delete(key)?;
+                }
+            }
         }
         map.insert(K_NAME, name)?;
         if let Some(note) = note {

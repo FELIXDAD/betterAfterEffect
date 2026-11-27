@@ -1075,3 +1075,500 @@ fn reverting_to_an_automatic_snapshot_names_it_in_the_undo_label() {
         .unwrap();
     assert_eq!(named.revert_label(), "revert to 给客户的第 1 版");
 }
+
+/// A snapshot thins the older ones of its period in the commit that makes it.
+#[test]
+fn a_new_snapshot_thins_its_period_at_once() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    auto.retention = Retention {
+        tiers: vec![
+            RetentionTier {
+                until: MIN,
+                every: None,
+            },
+            RetentionTier {
+                until: DAY,
+                every: Some(HOUR),
+            },
+        ],
+    };
+    let mut c = Clock::new();
+    tick(&mut auto, &mut history, &stage, &alice, &c);
+    for minute in [10, 20, 30] {
+        touch(&mut stage, &alice, minute);
+        c.advance(10 * MIN);
+        let id = tick(&mut auto, &mut history, &stage, &alice, &c).expect("due");
+        let left: Vec<CheckpointId> = history.checkpoints().into_iter().map(|c| c.id).collect();
+        assert_eq!(left, [id], "minute {minute}");
+        assert_eq!(last_label(&history), "checkpoint.auto");
+    }
+}
+
+/// Bob's clock is right, Alice's runs two hours ahead, Carol's a day ahead.
+/// Alice snapshots a state at minute 20; Bob, who has not received her
+/// snapshot, snapshots the same state at minute 120. Hers looks newer (her
+/// clock) but was made 100 minutes earlier, so it expires first: it must not
+/// replace his, because Carol's snapshot, the newest by its time, does not
+/// include that state.
+#[test]
+fn a_snapshot_that_only_looks_newer_does_not_replace_a_later_one() {
+    let short = Retention {
+        tiers: vec![
+            RetentionTier {
+                until: HOUR,
+                every: None,
+            },
+            RetentionTier {
+                until: DAY,
+                every: Some(DAY),
+            },
+        ],
+    };
+    for (retention, until) in [(short, DAY), (Retention::default(), 30 * DAY)] {
+        let start = Clock::new();
+        let at = |t: Duration, skew: Duration| Clock {
+            wall: start.wall + t + skew,
+            mono: start.mono + t,
+        };
+        let who = [
+            author("user:alice"),
+            author("user:bob"),
+            author("user:carol"),
+        ];
+        let skew = [2 * HOUR, Duration::ZERO, DAY];
+        let (alice, bob, carol) = (0, 1, 2);
+        // One project everybody has (it syncs at once here); the histories
+        // do not.
+        let mut stage = client_stage(&base_snapshots());
+        let mut h: Vec<History> = (0..3).map(|_| History::new()).collect();
+        let mut autos: Vec<AutoSnapshots> = (0..3)
+            .map(|_| {
+                let mut a = AutoSnapshots::new(10 * MIN);
+                a.retention = retention.clone();
+                a
+            })
+            .collect();
+        let mut tick_at = |i: usize, h: &mut [History], stage: &Stage, t: Duration| {
+            tick(&mut autos[i], &mut h[i], stage, &who[i], &at(t, skew[i]))
+        };
+        for i in 0..3 {
+            assert_eq!(tick_at(i, &mut h, &stage, Duration::ZERO), None);
+        }
+        touch(&mut stage, &who[alice], 1);
+        let z = tick_at(carol, &mut h, &stage, 10 * MIN).expect("carol's");
+        touch(&mut stage, &who[alice], 2);
+        let y = tick_at(alice, &mut h, &stage, 20 * MIN).expect("alice's");
+        let s = tick_at(bob, &mut h, &stage, 120 * MIN).expect("bob's");
+        let (a, rest) = h.split_at_mut(1);
+        for _ in 0..2 {
+            for other in rest.iter_mut() {
+                merge(&mut a[0], other);
+            }
+        }
+        let v2 = h[bob].checkpoint(&s).unwrap().version;
+        assert!(!h[carol].checkpoint(&z).unwrap().version.includes(&v2));
+        assert!(h[alice].checkpoint(&y).unwrap().version.includes(&v2));
+        for i in 0..3 {
+            assert_eq!(tick_at(i, &mut h, &stage, 120 * MIN), None);
+        }
+
+        // Bob prunes a little later; Alice once hers is `until` old.
+        let t = 200 * MIN;
+        autos[bob]
+            .prune(
+                &mut h[bob],
+                &who[bob],
+                at(t, skew[bob]).wall,
+                at(t, skew[bob]).mono,
+            )
+            .unwrap();
+        let (a, b) = h.split_at_mut(1);
+        merge(&mut a[0], &mut b[0]);
+        let t = 20 * MIN + until;
+        let c = at(t, skew[alice]);
+        let gone = autos[alice]
+            .prune(&mut h[alice], &who[alice], c.wall, c.mono)
+            .unwrap();
+        assert_eq!(gone, std::slice::from_ref(&y), "until {until:?}");
+        assert!(
+            h[alice].checkpoint(&s).is_some(),
+            "until {until:?}: Bob's snapshot, 100 minutes younger, was deleted"
+        );
+        // It goes once it is that old itself (nothing newer includes it).
+        let t = 120 * MIN + until + MIN;
+        let c = at(t, skew[alice]);
+        let gone = autos[alice]
+            .prune(&mut h[alice], &who[alice], c.wall, c.mono)
+            .unwrap();
+        assert_eq!(gone, [s], "until {until:?}");
+        assert_eq!(h[alice].auto_snapshots().len(), 1);
+    }
+}
+
+/// Bob works alone for two days, then leaves. Alice opens the project for an
+/// hour once a week, each time with a new `AutoSnapshots`. Bob's snapshots
+/// age with hers, which were made after them: they stay while they are
+/// younger than 30 days and then go, instead of staying forever because each
+/// session first sees them as new.
+#[test]
+fn a_departed_collaborators_snapshots_still_expire() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let (alice, bob) = (author("user:alice"), author("user:bob"));
+    let mut c = Clock::new();
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    tick(&mut auto, &mut history, &stage, &bob, &c);
+    for step in 1..=2 * 24 * 6 {
+        touch(&mut stage, &bob, step);
+        c.advance(10 * MIN);
+        tick(&mut auto, &mut history, &stage, &bob, &c).expect("every interval");
+    }
+    let bobs = |h: &History| -> Vec<Checkpoint> { h.checkpoints_where(|s| s.author == bob) };
+    assert!(bobs(&history).len() > 20);
+    let left = c.wall_ms();
+
+    for week in 1..=12 {
+        c.advance(7 * DAY - HOUR);
+        let mut auto = AutoSnapshots::new(10 * MIN);
+        tick(&mut auto, &mut history, &stage, &alice, &c);
+        for minute in 1..=60 {
+            touch(&mut stage, &alice, minute);
+            c.advance(MIN);
+            tick(&mut auto, &mut history, &stage, &alice, &c);
+        }
+        auto.prune(&mut history, &alice, c.wall, c.mono).unwrap();
+        let bob_left = bobs(&history);
+        let age = Duration::from_millis((c.wall_ms() - left) as u64);
+        if age < 30 * DAY {
+            assert!(!bob_left.is_empty(), "week {week}: deleted early");
+        }
+        if week >= 6 {
+            assert!(
+                bob_left.is_empty(),
+                "week {week}: {} of Bob's snapshots, his last {age:?} old",
+                bob_left.len()
+            );
+        }
+    }
+    assert!(history.auto_snapshots().len() <= 6 + 24 + 30);
+}
+
+/// Ten snapshots that differ only in the layer stack; the stack is put back to
+/// the ninth arrangement, and all but the newest expire in one prune. The
+/// ninth one's cover must be among the remembered ones, or the unchanged
+/// project is snapshotted again.
+#[test]
+fn deleting_many_snapshots_at_once_does_not_bring_the_newest_back() {
+    let mut stage = client_stage(&base_snapshots());
+    stage.create_sublayer(sl("x/b"), 0).unwrap();
+    stage.create_sublayer(sl("x/c"), 0).unwrap();
+    let ids = [SublayerId::root(), sl("anim/a"), sl("x/b"), sl("x/c")];
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    auto.retention = Retention {
+        tiers: vec![RetentionTier {
+            until: 3 * HOUR,
+            every: None,
+        }],
+    };
+    let mut c = Clock::new();
+    tick(&mut auto, &mut history, &stage, &alice, &c);
+    let mut stacks = Vec::new();
+    for i in 0..10 {
+        let order = [i % 4, (i / 4 + 1 + i % 4) % 4];
+        stage.move_sublayer(&ids[order[0]], 3).unwrap();
+        stage.move_sublayer(&ids[order[1]], 0).unwrap();
+        if stacks.contains(&stage.layer_stack().to_vec()) {
+            stage.move_sublayer(&ids[i % 4], 1).unwrap();
+        }
+        assert!(!stacks.contains(&stage.layer_stack().to_vec()), "{i}");
+        stacks.push(stage.layer_stack().to_vec());
+        c.advance(10 * MIN);
+        tick(&mut auto, &mut history, &stage, &alice, &c).expect("a stack change");
+    }
+    // Back to the ninth arrangement; four hours later all but the newest
+    // expire at once.
+    for (k, id) in stacks[8].iter().enumerate() {
+        stage.move_sublayer(id, k).unwrap();
+    }
+    assert_eq!(stage.layer_stack(), stacks[8]);
+    c.advance(4 * HOUR);
+    let gone = auto.prune(&mut history, &alice, c.wall, c.mono).unwrap();
+    assert_eq!(gone.len(), 9);
+    c.advance(MIN);
+    assert_eq!(
+        tick(&mut auto, &mut history, &stage, &alice, &c),
+        None,
+        "the ninth one, deleted, holds the project as it is"
+    );
+}
+
+/// Layer stacks are each client's own. Bob's has the same sublayers as
+/// Alice's in another order and never changes; only Alice edits, in bursts.
+/// Neither makes a snapshot of a version a checkpoint (with the other's
+/// stack) already includes.
+#[test]
+fn another_clients_layer_stack_is_not_a_change() {
+    let mut net = Net::new(2);
+    for auto in &mut net.autos {
+        auto.retention = Retention::keep_all();
+    }
+    net.stages[1].move_sublayer(&sl("anim/a"), 1).unwrap();
+    assert_ne!(net.stages[0].layer_stack(), net.stages[1].layer_stack());
+    let mut c = Clock::new();
+    let (mut n, mut made, mut nothing_new) = (0, 0, 0);
+    for _burst in 0..5 {
+        for minute in 0..120 {
+            if minute < 30 {
+                n += 1;
+                let who = net.who[0].clone();
+                touch(&mut net.stages[0], &who, n);
+            }
+            net.sync(&[0, 1]);
+            for i in [0, 1] {
+                let current = ProjectVersion::current(&net.stages[i]);
+                let held = net.histories[i]
+                    .checkpoints()
+                    .iter()
+                    .any(|cp| cp.version.includes(&current));
+                if net.tick(i, &c).is_some() {
+                    made += 1;
+                    nothing_new += u32::from(held);
+                }
+            }
+            net.sync(&[0, 1]);
+            c.advance(MIN);
+        }
+    }
+    assert!(made >= 15, "{made}");
+    assert_eq!(nothing_new, 0, "of {made}");
+
+    // A stack change of one's own is a change.
+    net.stages[1].move_sublayer(&sl("anim/a"), 0).unwrap();
+    c.advance(HOUR);
+    assert!(net.tick(1, &c).is_some());
+}
+
+#[test]
+fn renaming_a_snapshot_an_older_client_renamed_keeps_its_id() {
+    let mut stage = client_stage(&base_snapshots());
+    let mut history = History::new();
+    let alice = author("user:alice");
+    let mut auto = AutoSnapshots::new(10 * MIN);
+    let mut c = Clock::new();
+    tick(&mut auto, &mut history, &stage, &alice, &c);
+    touch(&mut stage, &alice, 1);
+    c.advance(10 * MIN);
+    let id = tick(&mut auto, &mut history, &stage, &alice, &c).unwrap();
+    let auto_name = history.checkpoint(&id).unwrap().name;
+
+    // An older client renames it in place: a named version from then on.
+    let old = History::from_snapshot(&history.export_snapshot().unwrap()).unwrap();
+    raw_checkpoint(&old, &id).insert("name", "客户版").unwrap();
+    old.doc().commit();
+    history
+        .import(&old.export_updates(&history.version()).unwrap())
+        .unwrap();
+    assert_eq!(history.checkpoint(&id).unwrap().kind, CheckpointKind::Named);
+
+    // Two people rename it concurrently: the same ID, last writer wins.
+    let mut copies: Vec<History> = (0..2)
+        .map(|_| History::from_snapshot(&history.export_snapshot().unwrap()).unwrap())
+        .collect();
+    for (h, name) in copies.iter_mut().zip(["A", "B"]) {
+        assert_eq!(h.rename_checkpoint(&id, &alice, name, None).unwrap(), id);
+    }
+    let (a, b) = copies.split_at_mut(1);
+    merge(&mut a[0], &mut b[0]);
+    for h in &copies {
+        let named = h.named_checkpoints();
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].id, id);
+        assert_eq!(named[0].name, copies[0].named_checkpoints()[0].name);
+    }
+
+    // Given its automatic name back, it stays a named version.
+    let h = &mut copies[0];
+    h.rename_checkpoint(&id, &alice, &auto_name, Some(""))
+        .unwrap();
+    let cp = h.checkpoint(&id).unwrap();
+    assert_eq!((cp.kind, cp.name), (CheckpointKind::Named, auto_name));
+}
+
+/// Random collaborators whose clocks are from 50 minutes to a day apart, with
+/// short retentions (mostly the same everywhere), going offline, and in turns
+/// editing, reordering their layer stacks (four sublayers) and keeping
+/// snapshots for an hour, then leaving the project alone for two while
+/// pruning by hand. After every minute, on every client: no snapshot it has
+/// seen made disappeared before it was the shortest retention old (in real
+/// time) while no checkpoint includes its version, and no kept (renamed)
+/// snapshot disappeared. Then everyone idles online: in the second half nobody
+/// writes. A few seconds; `AUTO_SIM_SEEDS=<n>` (from `AUTO_SIM_START`) runs
+/// more.
+#[test]
+fn random_collaborators_keep_every_snapshot_until_it_expires() {
+    let var = |k: &str, d: u64| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let start = var("AUTO_SIM_START", 0);
+    for seed in start..start + var("AUTO_SIM_SEEDS", 8) {
+        random_collaborators(seed);
+    }
+}
+
+fn random_collaborators(seed: u64) {
+    struct Made {
+        id: CheckpointId,
+        by: usize,
+        t: Duration,
+        version: ProjectVersion,
+        written: VersionVector,
+    }
+    let mut rng = Rng::new(seed);
+    let n = 3 + rng.below(2);
+    let mut net = Net::new(n);
+    for stage in &mut net.stages {
+        stage.create_sublayer(sl("x/b"), 0).unwrap();
+        stage.create_sublayer(sl("x/c"), 0).unwrap();
+    }
+    // A right clock, one 50 minutes behind, one a day ahead (whose old
+    // snapshots look newest), maybe one two hours ahead. Clocks differ by
+    // more than anyone is offline plus a duplicate window: concurrent
+    // duplicates are only made on clocks that agree (see `prune_plan`).
+    const DAY_MS: i64 = 24 * 60 * 60_000;
+    let mut skews: Vec<i64> = vec![0, -50 * 60_000, DAY_MS, 120 * 60_000];
+    skews.truncate(n);
+    for k in (1..n).rev() {
+        skews.swap(k, rng.below(k + 1));
+    }
+    let retention = |rng: &mut Rng| {
+        let last = [10, 15, 30, 60][rng.below(4)] * MIN;
+        let every = [None, Some(MIN), Some(5 * MIN), Some(HOUR), Some(DAY)][rng.below(5)];
+        Retention {
+            tiers: vec![
+                RetentionTier {
+                    until: last / [2, 3][rng.below(2)],
+                    every: None,
+                },
+                RetentionTier { until: last, every },
+            ],
+        }
+    };
+    // Mostly the same settings everywhere.
+    let shared = rng.chance(70).then(|| retention(&mut rng));
+    for auto in &mut net.autos {
+        auto.interval = [1, 3, 10][rng.below(3)] * MIN;
+        auto.retention = shared.clone().unwrap_or_else(|| retention(&mut rng));
+    }
+    let until = net
+        .autos
+        .iter()
+        .map(|a| a.retention.tiers[1].until)
+        .min()
+        .unwrap();
+    let base = Clock::new();
+    let clock = |t: Duration, i: usize| Clock {
+        wall: UNIX_EPOCH + Duration::from_millis((T0_MS + skews[i] + t.as_millis() as i64) as u64),
+        mono: base.mono + t,
+    };
+    let mut offline_until = vec![Duration::ZERO; n];
+    let p_edit = [5, 20, 50][rng.below(3)];
+    let mut made: Vec<Made> = Vec::new();
+    let mut kept: Vec<(CheckpointId, VersionVector)> = Vec::new();
+    let mut edits = 0;
+    let fail = |msg: String| panic!("seed {seed} (skews {skews:?}): {msg}");
+    let steps = 360;
+    let idle = 180;
+    for step in 0..steps + idle {
+        let t = Duration::from_secs(60 * step as u64);
+        let busy = step < steps;
+        // An hour of work, then two of quiet.
+        let working = busy && step % 180 < 60;
+        let online: Vec<usize> = (0..n).filter(|&i| !busy || offline_until[i] <= t).collect();
+        let before: Vec<VersionVector> = net.histories.iter().map(History::version).collect();
+        for i in 0..n {
+            if busy {
+                // The one a day ahead goes away for up to four hours, the
+                // others for up to 20 minutes.
+                let away = if skews[i] == DAY_MS { 240 } else { 20 };
+                if offline_until[i] <= t && rng.chance(2) {
+                    offline_until[i] = t + Duration::from_secs(60 * (1 + rng.below(away) as u64));
+                }
+            }
+            if working {
+                if rng.chance(p_edit) {
+                    edits += 1;
+                    let who = net.who[i].clone();
+                    touch(&mut net.stages[i], &who, edits);
+                }
+                if rng.chance(5) {
+                    let len = net.stages[i].layer_stack().len();
+                    let id = net.stages[i].layer_stack()[rng.below(len)].clone();
+                    net.stages[i].move_sublayer(&id, rng.below(len)).unwrap();
+                }
+                let autos = net.histories[i].auto_snapshots();
+                if rng.chance(1) && !autos.is_empty() {
+                    let pick = &autos[rng.below(autos.len())];
+                    let who = net.who[i].clone();
+                    let id = net.histories[i]
+                        .rename_checkpoint(&pick.id, &who, "kept", None)
+                        .unwrap();
+                    kept.push((id, net.histories[i].version()));
+                }
+            }
+            if busy && rng.chance(3) {
+                let (c, who) = (clock(t, i), net.who[i].clone());
+                net.autos[i]
+                    .prune(&mut net.histories[i], &who, c.wall, c.mono)
+                    .unwrap();
+            }
+            if let Some(id) = net.tick(i, &clock(t, i)) {
+                let cp = net.histories[i].checkpoint(&id).unwrap();
+                made.push(Made {
+                    id,
+                    by: i,
+                    t,
+                    version: cp.version,
+                    written: net.histories[i].version(),
+                });
+            }
+        }
+        net.sync(&online);
+        if !busy && step >= steps + idle / 2 {
+            for i in 0..n {
+                let me = net.histories[i].doc().peer_id();
+                if before[i].get(&me) != net.histories[i].version().get(&me) {
+                    fail(format!("client {i} wrote while idle at minute {step}"));
+                }
+            }
+        }
+        for (i, h) in net.histories.iter().enumerate() {
+            let has = h.version();
+            let present = h.checkpoints();
+            for (id, vv) in &kept {
+                if has.includes_vv(vv) && !present.iter().any(|c| c.id == *id) {
+                    fail(format!("client {i}: kept {id} was deleted"));
+                }
+            }
+            for a in made.iter().filter(|a| has.includes_vv(&a.written)) {
+                if t - a.t < until && !present.iter().any(|c| c.version.includes(&a.version)) {
+                    fail(format!(
+                        "client {i} at minute {step}: {} by client {} at minute {} gone after {:?} with nothing including it",
+                        a.id,
+                        a.by,
+                        a.t.as_secs() / 60,
+                        t - a.t
+                    ));
+                }
+            }
+        }
+    }
+    assert!(made.len() > 5, "seed {seed}: {}", made.len());
+}
