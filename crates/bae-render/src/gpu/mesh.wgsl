@@ -16,6 +16,10 @@ struct Light {
     c: vec4<f32>,
     // cos outer, cos inner, falloff distance.
     k: vec4<f32>,
+    // Comp space → the light's shadow map clip space.
+    shadow: mat4x4<f32>,
+    // Shadow map layer (−1: none), shadow darkness, depth bias, texel size.
+    s: vec4<f32>,
 }
 
 struct Frame {
@@ -53,6 +57,9 @@ struct Material {
 @group(2) @binding(0) var t_env: texture_2d<f32>;
 @group(2) @binding(1) var t_irr: texture_2d<f32>;
 @group(2) @binding(2) var s_env: sampler;
+// Light-view depth of the models that cast shadows (one layer per light).
+@group(2) @binding(3) var t_shadow: texture_depth_2d_array;
+@group(2) @binding(4) var s_shadow: sampler_comparison;
 
 struct VsIn {
     @location(0) pos: vec3<f32>,
@@ -105,6 +112,25 @@ fn smooth01(e0: f32, e1: f32, x: f32) -> f32 {
 }
 
 const PI: f32 = 3.14159265;
+
+// How much of a light reaches `world` past the models casting shadows
+// (3×3 percentage-closer filtering of its shadow map).
+fn shadowed(l: Light, world: vec3<f32>) -> f32 {
+    let c = l.shadow * vec4<f32>(world, 1.0);
+    if c.w <= 0.0 { return 1.0; }
+    let ndc = c.xyz / c.w;
+    let uv = vec2<f32>(0.5 + 0.5 * ndc.x, 0.5 - 0.5 * ndc.y);
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || ndc.z > 1.0 { return 1.0; }
+    let layer = i32(l.s.x);
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let at = uv + vec2<f32>(f32(x), f32(y)) * l.s.w;
+            lit += textureSampleCompareLevel(t_shadow, s_shadow, at, layer, ndc.z - l.s.z);
+        }
+    }
+    return lit / 9.0;
+}
 
 // Equirectangular uv of a direction (see env.wgsl).
 fn equirect(d: vec3<f32>) -> vec2<f32> {
@@ -181,6 +207,9 @@ fn fs_mesh(i: VsOut, @builtin(front_facing) front: bool) -> FsOut {
         }
         if kind == 3u {
             atten *= smooth01(l.k.x, l.k.y, dot(l.d.xyz, -to_light));
+        }
+        if l.s.x >= 0.0 {
+            atten *= 1.0 - l.s.y * (1.0 - shadowed(l, i.world));
         }
         let h = normalize(to_light + v);
         let nh = max(dot(n, h), 0.0);

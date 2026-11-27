@@ -213,6 +213,10 @@ pub struct MeshModel {
     pub opacity: f32,
     /// An environment light with a picture (diffuse light and reflections).
     pub environment: Option<EnvironmentInput>,
+    /// Material Options: it casts shadows on the models (and itself).
+    pub casts_shadows: bool,
+    /// Material Options: the models' shadows fall on it.
+    pub accepts_shadows: bool,
 }
 
 /// Where a 3D plane passes behind the 3D models drawn under it
@@ -1722,6 +1726,9 @@ impl Builder<'_, '_> {
                     lights,
                     opacity: layer.opacity.clamp(0.0, 1.0),
                     environment,
+                    casts_shadows: layer.material.casts_shadows != crate::light::ShadowMode::Off,
+                    accepts_shadows: layer.material.accepts_shadows
+                        != crate::light::ShadowMode::Off,
                 }],
                 camera,
                 comp_size: [comp.width, comp.height],
