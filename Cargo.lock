@@ -540,6 +540,7 @@ dependencies = [
  "bae-app",
  "bae-effects",
  "bae-gpu",
+ "bae-media",
  "bae-model",
  "bae-motion",
  "bae-package",
