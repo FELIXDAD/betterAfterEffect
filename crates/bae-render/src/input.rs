@@ -295,6 +295,8 @@ pub struct RenderLayer {
     /// Advanced 3D Extrusion Depth of a 3D text or shape layer, in layer
     /// pixels (0: flat): drawn as a solid ([`crate::model::extrude`]).
     pub extrusion: f64,
+    /// Its bevel (Geometry Options), when extruded.
+    pub bevel: Option<crate::model::extrude::Bevel>,
     /// 保留基础透明度: the layer only shows where the layers below are opaque.
     pub preserve_transparency: bool,
     /// Track matte (AE 23.0+ model: any layer of the same comp).
@@ -464,6 +466,7 @@ impl RenderLayer {
             blend_mode: BlendMode::Normal,
             quality: bae_anim::LayerQuality::Best,
             extrusion: 0.0,
+            bevel: None,
             preserve_transparency: false,
             track_matte: None,
             visible: true,
@@ -517,6 +520,10 @@ impl RenderLayer {
         self.blend_mode.hash(h);
         self.quality.hash(h);
         self.extrusion.to_bits().hash(h);
+        if let Some(b) = &self.bevel {
+            (b.style, b.inward).hash(h);
+            [b.depth, b.hole_scale].map(f64::to_bits).hash(h);
+        }
         self.preserve_transparency.hash(h);
         self.track_matte.hash(h);
         self.visible.hash(h);

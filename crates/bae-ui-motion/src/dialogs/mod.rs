@@ -231,6 +231,29 @@ pub(crate) fn import_placeholder(cx: &PanelContext<'_>) {
     }
 }
 
+/// File ▸ Replace Footage ▸ Solid… / Placeholder…: Solid Settings or New
+/// Placeholder for the item that takes `item`'s place.
+pub(crate) fn replace_footage_with(
+    cx: &PanelContext<'_>,
+    session: &SharedSession,
+    item: PrimPath,
+    solid: bool,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if solid {
+        remember(cx.resources, &mut d);
+        let s = SolidSettings::replace_item(cx.stage, session, &d.solid, item);
+        d.open = Some(Dialog::SolidSettings(Box::new(s)));
+    } else {
+        let p = placeholder::NewPlaceholder::replacing(item);
+        d.open = Some(Dialog::NewPlaceholder(Box::new(p)));
+    }
+}
+
 /// File ▸ Import ▸ Solid…: Solid Settings for a new solid item.
 pub(crate) fn import_solid(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);

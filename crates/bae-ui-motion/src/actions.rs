@@ -79,6 +79,10 @@ pub mod ids {
     /// File > Import > Solid... / Placeholder...: a new solid or placeholder item.
     pub const IMPORT_SOLID: &str = "motion.file.import_solid";
     pub const IMPORT_PLACEHOLDER: &str = "motion.file.import_placeholder";
+    /// File ▸ Replace Footage ▸ Solid… / Placeholder…: a new solid or
+    /// placeholder takes the selected footage item's place.
+    pub const REPLACE_WITH_SOLID: &str = "motion.file.replace_footage_solid";
+    pub const REPLACE_WITH_PLACEHOLDER: &str = "motion.file.replace_footage_placeholder";
     /// File > New Comp from Selection... (Alt+\).
     pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
@@ -403,6 +407,11 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::IMPORT_FILE, "Import File"),
     (ids::IMPORT_SOLID, "Solid..."),
     (ids::IMPORT_PLACEHOLDER, "Placeholder..."),
+    (ids::REPLACE_WITH_SOLID, "Replace Footage: Solid..."),
+    (
+        ids::REPLACE_WITH_PLACEHOLDER,
+        "Replace Footage: Placeholder...",
+    ),
     (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
@@ -1308,6 +1317,25 @@ fn clean_up(cx: &mut PanelContext<'_>, session: &SharedSession, id: &str) {
     crate::dialogs::alert(cx, tr(title), message.replace("{n}", &n.to_string()));
 }
 
+/// The footage item File ▸ Replace Footage acts on: the first footage or solid
+/// selected in the Project panel, else the selected layer's source.
+fn footage_to_replace(stage: &bae_model::Stage, session: &SharedSession) -> Option<PrimPath> {
+    let asset = |p: &PrimPath| {
+        stage
+            .prim(p)
+            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+    };
+    let s = session.lock();
+    if let Some(item) = s.selected_items.iter().find(|p| asset(p)) {
+        return Some(item.clone());
+    }
+    let layer = s.selected_layers.first()?;
+    let source = stage
+        .prim(layer)
+        .and_then(|v| v.value("source").and_then(|v| v.as_prim_ref()).cloned())?;
+    asset(&source).then_some(source)
+}
+
 /// File ▸ Add Footage to Comp: the selected Project items (not folders) as
 /// layers of the active comp, the first one on top (AE).
 fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -1772,6 +1800,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             let prefs = crate::prefs::current(cx.resources);
             let still = crate::import::ImportDefaults::of(&prefs).still_duration;
             crate::dialogs::comp_from_selection(cx, items, still);
+            return true;
+        }
+        ids::REPLACE_WITH_SOLID | ids::REPLACE_WITH_PLACEHOLDER => {
+            if let Some(item) = footage_to_replace(stage, session) {
+                crate::dialogs::replace_footage_with(
+                    cx,
+                    session,
+                    item,
+                    id == ids::REPLACE_WITH_SOLID,
+                );
+            }
             return true;
         }
         ids::IMPORT_SOLID => {
@@ -3258,6 +3297,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Open Layer Source", "打开图层源"),
     ("Add Footage to Comp", "将素材添加到合成"),
     ("Edit Original...", "编辑原稿..."),
+    ("Replace Footage: Solid...", "替换素材：纯色..."),
+    ("Replace Footage: Placeholder...", "替换素材：占位符..."),
     ("Reveal Layer Source in Project", "在项目中显示图层源"),
     ("Remember Interpretation", "记住解释"),
     ("Apply Interpretation", "应用解释"),
