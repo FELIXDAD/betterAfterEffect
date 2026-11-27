@@ -421,7 +421,10 @@ impl DirTransport {
 
     /// Attach to `project` without writing anything, for a folder whose
     /// `updates/` this user cannot write ([`DirTransport::open`] fails with
-    /// [`SyncError::Io`] of kind `PermissionDenied` or `ReadOnlyFilesystem`).
+    /// [`SyncError::Io`] of kind `PermissionDenied` or `ReadOnlyFilesystem`,
+    /// and a file of one's own cannot be created there either:
+    /// `PermissionDenied` alone can also be a lock file that is being
+    /// deleted, see `docs/spec/sync.md` 7.5).
     /// Everyone's logs are read as usual, this client's own (from earlier
     /// sessions) like the others'. Nothing is written: sending edits
     /// (`Updates`, `Snapshot`) fails, our presence is not published, no lock is
@@ -438,6 +441,42 @@ impl DirTransport {
             return Err(SyncError::NotADirectory(root));
         }
         Ok(Self::new(root, client, config, None))
+    }
+
+    /// Whether `client` may write in the `updates/` folder of `project`:
+    /// creates and deletes a file of its own there (`<client>.tmp-<random>`,
+    /// which the cleanup of §4.7 removes if the delete fails). `Ok(false)`:
+    /// creating it was refused (`PermissionDenied`, `ReadOnlyFilesystem`), or
+    /// `updates/` does not exist (so [`open`](Self::open) could not create
+    /// it). Other errors are returned as they are.
+    ///
+    /// [`open`](Self::open) failing with `PermissionDenied` does not say that
+    /// much on its own: on Windows (and SMB shares served by it) opening a
+    /// lock file that another client's cleanup deleted while holding it open
+    /// gives that error until the deletion completes, after any wait. Blocks
+    /// like `open` (a few round trips to the file server).
+    pub(crate) fn probe_writable(project: &Path, client: &ClientId) -> io::Result<bool> {
+        let probe = project
+            .join(UPDATES)
+            .join(format!("{client}{TMP_MARK}{}", new_generation()));
+        match OpenOptions::new().write(true).create_new(true).open(&probe) {
+            Ok(f) => {
+                drop(f);
+                let _ = fs::remove_file(&probe);
+                Ok(true)
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::PermissionDenied
+                        | io::ErrorKind::ReadOnlyFilesystem
+                        | io::ErrorKind::NotFound
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     fn new(root: PathBuf, client: ClientId, config: DirConfig, lock: Option<File>) -> Self {

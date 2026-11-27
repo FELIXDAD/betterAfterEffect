@@ -154,7 +154,9 @@ pub struct Backoff {
     pub stable_after: Duration,
     /// Retry failures that need attention ([`Failure`]: bad token, no access,
     /// client ID in use) this often anyway, e.g. in case the other session
-    /// with our client ID quit. `None`: only on [`Connection::retry`].
+    /// with our client ID quit. `None`: only on [`Connection::retry`]. Also
+    /// how often a shared-folder link that is read-only checks whether the
+    /// folder can be written now (and if so connects again, writable).
     pub failed_retry: Option<Duration>,
 }
 
@@ -413,12 +415,89 @@ struct Worker {
     wake: Arc<dyn Fn() + Send + Sync>,
 }
 
-/// I/O errors that mean "you may not write here".
+/// I/O errors that may mean "you may not write here" (or a lock file that
+/// is being deleted, see [`folder_writable`]).
 fn read_only_error(e: &std::io::Error) -> bool {
     matches!(
         e.kind(),
         std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
     )
+}
+
+/// Open the shared folder for writing (blocks).
+fn open_folder(
+    path: &Path,
+    client: &ClientId,
+    config: &DirConfig,
+) -> Result<DirTransport, SyncError> {
+    #[cfg(test)]
+    if fault::deny_open(path) {
+        let lock = path.join("updates").join(format!("{client}.lock"));
+        return Err(SyncError::io(&lock)(
+            std::io::ErrorKind::PermissionDenied.into(),
+        ));
+    }
+    DirTransport::open(path, client.clone(), config.clone())
+}
+
+/// Whether `client` may write in the folder: a file of its own can be created
+/// in `updates/` (blocks). [`DirTransport::open`] failing with access denied
+/// does not tell: on Windows and SMB shares served by it, opening a lock file
+/// that is "delete pending" (another client's cleanup deleted it while
+/// holding it open, spec 4.7) fails that way too, also after `open`'s wait.
+fn folder_writable(path: &Path, client: &ClientId) -> std::io::Result<bool> {
+    #[cfg(test)]
+    if fault::deny_probe(path) {
+        return Ok(false);
+    }
+    DirTransport::probe_writable(path, client)
+}
+
+/// Test faults of shared folders, by path: [`DirTransport::open`] failing
+/// with access denied (a lock file that stays delete pending), and creating
+/// any file in `updates/` failing too (a folder this user cannot write).
+#[cfg(test)]
+mod fault {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    #[derive(Clone, Copy, Debug, Default)]
+    pub(super) struct Denied {
+        /// This many more `open`s fail (`u32::MAX`: every one).
+        pub open: u32,
+        /// The write probe fails.
+        pub probe: bool,
+    }
+
+    static FOLDERS: Mutex<Vec<(PathBuf, Denied)>> = Mutex::new(Vec::new());
+
+    fn folders() -> MutexGuard<'static, Vec<(PathBuf, Denied)>> {
+        FOLDERS.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(super) fn set(path: &Path, denied: Denied) {
+        let mut list = folders();
+        list.retain(|(p, _)| p != path);
+        list.push((path.to_owned(), denied));
+    }
+
+    pub(super) fn deny_open(path: &Path) -> bool {
+        let mut list = folders();
+        let Some((_, d)) = list.iter_mut().find(|(p, _)| p == path) else {
+            return false;
+        };
+        if d.open == 0 {
+            return false;
+        }
+        if d.open != u32::MAX {
+            d.open -= 1;
+        }
+        true
+    }
+
+    pub(super) fn deny_probe(path: &Path) -> bool {
+        folders().iter().any(|(p, d)| p == path && d.probe)
+    }
 }
 
 impl Worker {
@@ -433,15 +512,21 @@ impl Worker {
                 // Our own links to this folder let go of the lock first.
                 Releasing::wait(path, &client);
                 // Write access = we can create our lock file in `updates/`.
-                let (dir, access) =
-                    match DirTransport::open(path, client.clone(), self.folder.clone()) {
-                        Ok(dir) => (dir, Access::Write),
-                        Err(SyncError::Io { source, .. }) if read_only_error(&source) => (
-                            DirTransport::open_read_only(path, client, self.folder.clone())?,
-                            Access::Read,
-                        ),
-                        Err(e) => return Err(e),
-                    };
+                // Denied: read-only only if we cannot create another file
+                // there either; otherwise it was the lock file (one being
+                // deleted), and a later attempt gets it.
+                let (dir, access) = match open_folder(path, &client, &self.folder) {
+                    Ok(dir) => (dir, Access::Write),
+                    Err(e) => {
+                        let denied =
+                            matches!(&e, SyncError::Io { source, .. } if read_only_error(source));
+                        if !denied || !matches!(folder_writable(path, &client), Ok(false)) {
+                            return Err(e);
+                        }
+                        let dir = DirTransport::open_read_only(path, client, self.folder.clone())?;
+                        (dir, Access::Read)
+                    }
+                };
                 let tick = self.io_tick.unwrap_or(FOLDER_TICK);
                 Ok(Link {
                     transport: ThreadedTransport::spawn(dir, tick, wake),
@@ -492,6 +577,17 @@ enum Phase {
     },
     /// Only while closing or dropping.
     Closed,
+}
+
+/// Whether a shared folder linked read-only can be written now (spec 7.5).
+enum WriteCheck {
+    /// Not linked read-only to a folder, or no checks (`failed_retry` is
+    /// `None`).
+    Idle,
+    /// Check at this time.
+    At(Instant),
+    /// A background thread is checking.
+    Running(Receiver<bool>),
 }
 
 /// Everything [`ConnectionStatus::generation`] tracks.
@@ -602,6 +698,9 @@ pub struct Connection {
     /// [`SessionConfig::send_data`] as configured: the session sends data
     /// while this is set and the remote grants more than [`Access::Read`].
     send_data: bool,
+    /// A shared folder linked read-only: whether it can be written now is
+    /// checked every [`Backoff::failed_retry`].
+    write_check: WriteCheck,
     phase: Phase,
     access: Access,
     /// Failed attempts in a row since the last stable link.
@@ -649,6 +748,7 @@ impl Connection {
             config,
             session,
             send_data,
+            write_check: WriteCheck::Idle,
             phase: Phase::Closed,
             access: Access::Unknown,
             failures: 0,
@@ -685,7 +785,10 @@ impl Connection {
     }
 
     /// The last access level the remote granted ([`Access::Unknown`] before
-    /// the first link). While [`Access::Read`], local edits are not sent.
+    /// the first link). While [`Access::Read`], local edits are not sent; a
+    /// shared folder linked read-only is checked every
+    /// [`Backoff::failed_retry`] and linked again, writable, once it can be
+    /// written.
     pub fn access(&self) -> Access {
         self.access
     }
@@ -764,6 +867,7 @@ impl Connection {
         if let Some(e) = failed {
             self.lost(e, now);
         }
+        self.check_writable(now);
         self.unsynced = stuck || !self.session.unsynced(docs).is_empty();
         let (changed, presence) = self.refresh(out.presence_changed);
         out.status_changed = changed;
@@ -920,6 +1024,10 @@ impl Connection {
                 self.session.reset();
                 self.session.config_mut().send_data = self.send_data && link.access.can_write();
                 self.access = link.access;
+                self.write_check = match (&self.target, link.access) {
+                    (Target::Folder(_), Access::Read) => self.next_write_check(now),
+                    _ => WriteCheck::Idle,
+                };
                 self.in_use_since = None;
                 // Ours now: no longer counts as being let go.
                 let Link {
@@ -1035,6 +1143,71 @@ impl Connection {
         self.session.forget_unconfirmed();
         self.retire(transport);
         self.attempt_failed(e, now);
+    }
+
+    /// While linked read-only to a shared folder: every
+    /// [`Backoff::failed_retry`], check on a background thread whether the
+    /// folder can be written now (its permissions changed, or the link was
+    /// made read-only when it should not have been); if so, connect again,
+    /// writable. The edits made meanwhile then go out.
+    fn check_writable(&mut self, now: Instant) {
+        let path = match &self.target {
+            Target::Folder(path) => path.clone(),
+            #[cfg(feature = "hub")]
+            Target::Hub { .. } => return,
+        };
+        if !matches!(self.phase, Phase::Linked { .. }) || self.access != Access::Read {
+            self.write_check = WriteCheck::Idle;
+            return;
+        }
+        self.write_check = match std::mem::replace(&mut self.write_check, WriteCheck::Idle) {
+            WriteCheck::Idle => WriteCheck::Idle,
+            WriteCheck::At(t) if now < t => WriteCheck::At(t),
+            WriteCheck::At(_) => {
+                let (tx, rx) = mpsc::channel();
+                let client = self.config.client.clone();
+                let wake = self.config.wake.clone();
+                let spawned = std::thread::Builder::new()
+                    .name("bae-sync-probe".into())
+                    .spawn(move || {
+                        let writable = folder_writable(&path, &client).unwrap_or(false);
+                        if tx.send(writable).is_ok() {
+                            wake();
+                        }
+                    });
+                match spawned {
+                    Ok(_) => WriteCheck::Running(rx),
+                    Err(_) => self.next_write_check(now),
+                }
+            }
+            WriteCheck::Running(rx) => match rx.try_recv() {
+                Ok(true) => {
+                    self.reconnect(now);
+                    WriteCheck::Idle
+                }
+                Ok(false) | Err(TryRecvError::Disconnected) => self.next_write_check(now),
+                Err(TryRecvError::Empty) => WriteCheck::Running(rx),
+            },
+        };
+    }
+
+    fn next_write_check(&self, now: Instant) -> WriteCheck {
+        self.config
+            .backoff
+            .failed_retry
+            .map_or(WriteCheck::Idle, |d| WriteCheck::At(now + d))
+    }
+
+    /// Drop the link (off this thread) and connect again at once. Not a
+    /// failure: the backoff stays as it is.
+    fn reconnect(&mut self, now: Instant) {
+        let Phase::Linked { transport, .. } = std::mem::replace(&mut self.phase, Phase::Closed)
+        else {
+            return;
+        };
+        self.session.forget_unconfirmed();
+        self.retire(transport);
+        self.connect_now(now);
     }
 
     /// Drop a link off this thread (`ThreadedTransport` joins its I/O thread,
@@ -1157,6 +1330,9 @@ impl Connection {
                     // Sent edits wait for the link's I/O: unsynced if it
                     // stays stuck.
                     at = at.min(now + (self.config.io_stall - stalled));
+                }
+                if let WriteCheck::At(t) = self.write_check {
+                    at = at.min(t);
                 }
                 Some(at)
             }
@@ -1433,6 +1609,109 @@ mod tests {
         wait_for("online once the old link let go", || {
             new.pump(&mut docs);
             new.is_online()
+        });
+    }
+
+    /// A folder with `updates/`, and a connection config that retries fast.
+    fn folder_fixture(id: &str) -> (tempfile::TempDir, PathBuf, ConnectionConfig) {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_owned();
+        std::fs::create_dir_all(dir.join("updates")).unwrap();
+        let mut config = ConnectionConfig::new(ClientId::new(id).unwrap(), quiet());
+        config.folder = DirConfig {
+            poll_interval: Duration::from_millis(20),
+            watch: false,
+            ..DirConfig::default()
+        };
+        config.backoff = Backoff {
+            first: Duration::from_millis(50),
+            jitter: 0.0,
+            ..Backoff::default()
+        };
+        (tmp, dir, config)
+    }
+
+    /// Opening a folder we may write fails with access denied once (on
+    /// Windows/SMB: our lock file is "delete pending" for longer than the
+    /// lock wait, after another client's cleanup deleted it): a file of our
+    /// own can be created in `updates/`, so it is not taken for a read-only
+    /// folder; the attempt is retried and the link is writable.
+    #[test]
+    fn a_denied_lock_in_a_writable_folder_is_retried_not_read_only() {
+        let (_tmp, dir, config) = folder_fixture("lock");
+        fault::set(
+            &dir,
+            fault::Denied {
+                open: 1,
+                probe: false,
+            },
+        );
+        let mut c = Connection::start(Target::Folder(dir.clone()), config);
+        let mut docs = MemDocs::new();
+        let mut offline = false;
+        wait_for("online", || {
+            c.pump(&mut docs);
+            assert_ne!(c.access(), Access::Read, "{:?}", c.status());
+            offline |= matches!(c.status().state, ConnectionState::Offline { .. });
+            c.is_online()
+        });
+        assert!(offline, "the denied attempt went offline");
+        assert_eq!(c.access(), Access::Write);
+        assert_eq!(c.connect_attempts(), 2);
+        // The probe left nothing behind.
+        let left: Vec<_> = std::fs::read_dir(dir.join("updates"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .filter(|n| n.to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// A folder linked read-only checks every `failed_retry` whether it can
+    /// be written now; once it can, the connection connects again, writable,
+    /// and the edit made meanwhile goes out.
+    #[test]
+    fn a_read_only_folder_link_becomes_writable_once_it_can_write() {
+        let (_tmp, dir, mut config) = folder_fixture("upgrade");
+        config.backoff.failed_retry = Some(Duration::from_millis(100));
+        fault::set(
+            &dir,
+            fault::Denied {
+                open: u32::MAX,
+                probe: true,
+            },
+        );
+        let mut c = Connection::start(Target::Folder(dir.clone()), config);
+        let mut docs = MemDocs::new();
+        wait_for("online read-only", || {
+            c.pump(&mut docs);
+            c.is_online()
+        });
+        assert_eq!(c.access(), Access::Read);
+        assert!(!c.session.config().send_data);
+        let root = DocKey::sublayer(&SublayerId::root());
+        edit(&mut docs, &root, 1);
+        // Still not writable: checked a few times, the link stays.
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(400) {
+            c.pump(&mut docs);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(c.is_online());
+        assert_eq!(c.access(), Access::Read);
+        assert!(c.status().unsynced);
+        assert_eq!(c.connect_attempts(), 1);
+        // Writable now.
+        fault::set(&dir, fault::Denied::default());
+        wait_for("online writable, the edit written", || {
+            c.pump(&mut docs);
+            c.is_online() && c.access() == Access::Write && !c.status().unsynced
+        });
+        assert_eq!(c.connect_attempts(), 2);
+        wait_for("the edit in our log", || {
+            c.pump(&mut docs);
+            dir.join("updates/root/upgrade.log").is_file()
         });
     }
 

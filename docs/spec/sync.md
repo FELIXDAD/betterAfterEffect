@@ -440,7 +440,12 @@ closing.wait(超时); // 退出时等关闭完成
 ### 7.5 读写权限
 
 - Hub：握手响应里的 `x-bae-access`（3.1）。旧 Hub 不发，`access` 是 `Unknown`，照常发送修改，由 Hub 决定收不收。
-- 共享目录：连接线程上 `DirTransport::open` 在 `updates/` 里建锁文件，失败且错误是 `PermissionDenied` / `ReadOnlyFilesystem` 时改用 `DirTransport::open_read_only`（4.5），`access` 为 `Read`；否则为 `Write`。`open` 遇到 `PermissionDenied` 会先重试 2 秒（可能是清理者刚删掉、还处于"等待删除"的锁文件，4.7），所以连接写不了的目录要多等这 2 秒；这发生在连接线程上，不卡 `pump`。只读打开的目录不清理（4.5）。
+- 共享目录：连接线程上 `DirTransport::open` 在 `updates/` 里建锁文件，成功时 `access` 为 `Write`。失败且错误是 `PermissionDenied` / `ReadOnlyFilesystem` 时还不能断定目录不能写：Windows 和它提供的 SMB 共享上，被别人的清理删掉、还处于"等待删除"状态的锁文件（4.7）打开时也是 `PermissionDenied`，等过 `open` 的 2 秒也可能还是这样。所以再在 `updates/` 里建一个自己的探测文件（`<client-id>.tmp-<随机>`，建好马上删；万一删不掉，4.7 的清理按临时文件删）：
+  - 也建不了（或者 `updates/` 不存在、建不出来）：改用 `DirTransport::open_read_only`（4.5），`access` 为 `Read`。
+  - 建得了：目录能写，是锁文件本身打不开。这次尝试按普通失败处理（`Offline`，按退避重试），不当成只读。
+  - 探测本身出了别的错：同样按普通失败处理。
+  `open` 遇到 `PermissionDenied` 会先重试 2 秒，所以连接写不了的目录要多等这 2 秒；这些都在连接线程上，不卡 `pump`。只读打开的目录不清理（4.5）。
+- 只读的共享目录链路每隔 `Backoff::failed_retry`（默认 60 秒；`None` 不检查）在后台线程上再探测一次能不能写（同样建、删一个探测文件）。能写了（权限改了，或者当初判断错了）就在后台线程丢掉只读链路，立即重新连接（可写；不算失败，退避不变），只读期间的修改随之写进日志。探测还没结果时不开新的探测；NAS 卡住时探测线程一直等，`pump` 不受影响。
 - `Read` 时会话的 `send_data` 关掉（2.4 第 5 步）：不发任何修改，`Hello` 和在线状态照发（共享目录只读时在线状态不写），照常接收；本地修改留在 `unsynced` 和 `Closing::unsynced` 里，状态栏如实显示。应用应在 `Read` 时禁用编辑。`Write` / `Unknown` 时用配置里的 `send_data`（默认 `true`）。Hub 对只读连接只收不太大的消息（`read_only_max_incoming`，3.1）：只读客户端本来就不发数据，本地改了多少都不会被断开（`a_read_only_token_reads_but_sends_no_edits`：上限 64 KiB、本地改了 256 KiB，连接一直不断）。
 - 还没做：不发 `x-bae-access` 的旧 Hub 不会再用 `GET /v1/status` 查一次。
 
@@ -471,6 +476,7 @@ closing.wait(超时); // 退出时等关闭完成
 - 错误令牌、没有令牌（401）、令牌不能开这个工程（403）、只读令牌开不存在的工程（404）、工程 ID 不合法（400）：`Failed`，之后 300 ms 内不再尝试，`retry()` 只试一次。
 - 只读令牌：`access = Read`；收得到别人的修改；自己的修改不发出去（`bytes_sent = 0`），`unsynced` 为真；在线状态照常可见；Hub 的只读上限设成 64 KiB、本地改了 256 KiB 也不被断开（只连了一次）。配置里 `send_data = false` 的客户端在可写的共享目录上同样什么都不写，`access` 仍是 `Write`，`Closing::unsynced` 列出改过的文档（`a_viewer_sends_no_edits_where_it_could`）。共享目录 `updates/` 不可写时同样，什么文件都不写（Unix；root 不受权限限制时跳过，测试时用去掉 `CAP_DAC_OVERRIDE` 的 root 跑过）。
 - 关闭：最后一次修改被 `min_send_interval` 推迟时也能送到（共享目录 300 ms；Hub 测试里设成 1 秒，去掉 `flush` 就收不到），"离开"立即可见，`Closing` 成功；之后加入 Hub 的人也拿到。Hub 确认关闭这一点由 `tests/hub.rs` 验证（`ThreadedTransport(HubTransport)` 关闭时 20 MiB 的最后一条已经送到）；回环上直接丢弃也能送到，这里区分不出来。
+- 共享目录打开时锁文件被拒（Windows/SMB 上"等待删除"的锁文件，测试钩子模拟）而目录能写：不当成只读，先 `Offline`、重试后可写连上，探测文件不留下；只读连上的目录变成可写后，下一次探测（测试里 100 ms）重新连接，`access` 变成 `Write`，只读期间的修改写进日志；还不能写时链路不动、只连了一次（单元测试）。
 - 共享目录还不存在：按退避重试，出现后加入并写进去。同一个 `ClientId` 已经在用：先照常重试 2 秒，然后 `Failed`、不再自动重试，对方退出后 `retry()` 成功。丢弃或关闭后立即重新分享同一个目录（6 轮）不报冲突；旧链路的 I/O 卡在 NAS 读里超过 2 秒宽限时，新连接等它放开再连上，不报 `ClientIdInUse`（单元测试）。
 - 连接只接受 TCP、永不握手的地址：500 ms 里每次 `pump` 不到 0.1 ms（上限 250 ms），状态一直是 `Connecting`，`close` 也立即返回。连接线程已经做好链路、I/O 线程卡在读里时 `close` 或丢弃，调用线程不等（单元测试）。
 - 收到第一条消息、连接尝试结束时调用 `wake`；只在被唤醒时 `pump` 也能连上。只在被唤醒时 `pump` 的应用：共享目录还不存在时照样按退避重试，出现后连上；拖动的最后一步被 `min_send_interval` 推迟，也由闹钟唤醒发出（去掉闹钟就超时）。收满 `max_messages_per_pump` 的 `pump` 不在调用线程上调用 `wake`。
