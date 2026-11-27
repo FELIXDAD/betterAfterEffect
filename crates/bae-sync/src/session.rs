@@ -358,9 +358,11 @@ pub struct SyncSession {
     /// until it may have become smaller (see [`TooLarge`]) or `reset`.
     too_large: BTreeMap<DocKey, TooLarge>,
     /// Documents whose snapshot did not fit in one message, with the local
-    /// version then: a snapshot only grows, so their snapshot requests are
-    /// not answered (nor kept) until `reset`, or until the document is
-    /// replaced (its version no longer includes this one, see [`TooLarge`]).
+    /// version then: a snapshot is the whole history plus the current state
+    /// and seldom gets smaller, so their snapshot requests are not answered
+    /// (nor kept) until `reset`, or until the document is replaced (its
+    /// version no longer includes this one, see [`TooLarge`]), rather than
+    /// exporting the whole document again on every request.
     snapshot_too_large: BTreeMap<DocKey, VersionVector>,
     stats: SyncStats,
     presence: Option<PresenceState>,
@@ -578,10 +580,12 @@ impl SyncSession {
     /// dependencies. This side cannot tell those from a slow transfer.
     /// Meanwhile a `crate::Connection` still shows online and nothing
     /// unsynced (that is about local edits). So show listed documents as
-    /// "not received yet" while online, and as not received (not coming)
-    /// only on lack of progress: e.g. no document data arrived for several
-    /// minutes ([`SyncStats::bytes_received`] unchanged) while some stay
-    /// listed.
+    /// "not received yet" while online. Lack of progress is a hint at best:
+    /// [`SyncStats::bytes_received`] grows only when a whole message has
+    /// arrived, and a large layer is one message, so it stays flat for the
+    /// whole of that transfer (up to the hub's `max_message`, 256 MiB, over
+    /// the link's speed: about 7 minutes at 5 Mbit/s). Only the hub knows
+    /// that it skipped a document, and logs it.
     pub fn behind(&self, docs: &dyn DocSet) -> Vec<DocKey> {
         let Some(remote) = &self.confirmed else {
             return Vec::new();
@@ -625,6 +629,18 @@ impl SyncSession {
             .collect()
     }
 
+    /// Our presence did not fit in one message on this link
+    /// ([`SyncError::MessageTooLarge`] without a document, reported once in
+    /// [`PumpOutcome::errors`]): it is not sent, so the others see our last
+    /// presence that fitted until it expires, then not us. False again once
+    /// a smaller one went out, after we cleared it, or after
+    /// [`reset`](Self::reset). A changed presence that still does not fit
+    /// is not reported again, so show this state (e.g. "others cannot see
+    /// your selection: it is too large") rather than one notice per error.
+    pub fn presence_too_large(&self) -> bool {
+        self.presence_too_large && self.presence.is_some()
+    }
+
     /// Documents of `docs` with changes the remote lacks that are not sent
     /// because they do not fit in one message on this link
     /// ([`Transport::max_message_size`], [`SyncError::MessageTooLarge`]; e.g.
@@ -655,9 +671,9 @@ impl SyncSession {
             .collect()
     }
 
-    /// Whether `doc`'s snapshot is known not to fit in one message on this
-    /// link: it did not, and the document is still the one it was then (a
-    /// snapshot only grows).
+    /// Whether `doc`'s snapshot is taken not to fit in one message on this
+    /// link: it did not, and the document is still the one it was then (it
+    /// seldom gets smaller, see `snapshot_too_large`).
     fn snapshot_too_large(&self, docs: &dyn DocSet, doc: &DocKey) -> bool {
         self.snapshot_too_large.get(doc).is_some_and(|then| {
             docs.version(doc)
@@ -926,10 +942,14 @@ impl SyncSession {
     ///
     /// A snapshot that does not fit in one message
     /// ([`SyncError::MessageTooLarge`]) is reported in `out.errors` and not
-    /// counted as sent. A snapshot holds the whole history, so it only grows:
-    /// later requests for that document are not answered on this link (not
-    /// exported again on every request) until [`reset`](Self::reset), or
-    /// until the document is replaced under the same key.
+    /// counted as sent. A snapshot holds the whole history plus the current
+    /// state, so it seldom gets smaller (only when removed or overwritten
+    /// values free more state than the ops since added): later requests for
+    /// that document are not answered on this link (not exported again on
+    /// every request) until [`reset`](Self::reset), or until the document is
+    /// replaced under the same key. Snapshot requests come from shared
+    /// folders (compaction, takeover, repair: spec 4.3); over a hub link
+    /// they do not occur.
     fn send_snapshot(
         &mut self,
         docs: &dyn DocSet,
@@ -2086,8 +2106,10 @@ mod tests {
         };
         let mut s = session(Some(&name));
         let start = Instant::now();
+        assert!(!s.presence_too_large());
         let out = s.pump_at(&mut docs, &mut t, start).unwrap();
         assert_eq!(too_large(&out.errors), 1, "{:?}", out.errors);
+        assert!(s.presence_too_large());
         assert!(
             matches!(t.sent[..], [Message::Hello { .. }]),
             "{:?}",
@@ -2118,6 +2140,7 @@ mod tests {
         });
         s.pump_at(&mut docs, &mut t, start + heartbeat * 5).unwrap();
         assert_eq!(presence_sent(&mut t), 1);
+        assert!(!s.presence_too_large());
         s.pump_at(&mut docs, &mut t, start + heartbeat * 6).unwrap();
         assert_eq!(presence_sent(&mut t), 1);
         // Too large again after one fitted: reported again.
@@ -2128,7 +2151,14 @@ mod tests {
         let out = s.pump_at(&mut docs, &mut t, start + heartbeat * 7).unwrap();
         assert_eq!(too_large(&out.errors), 1, "{:?}", out.errors);
         assert_eq!(presence_sent(&mut t), 0);
-        // A new link (maybe with a larger limit) tries it again at once.
+        // A new link starts over: tried again at once, and reported again
+        // while it still does not fit.
+        s.reset();
+        assert!(!s.presence_too_large());
+        let out = s.pump_at(&mut docs, &mut t, start + heartbeat * 7).unwrap();
+        assert_eq!(too_large(&out.errors), 1, "{:?}", out.errors);
+        assert_eq!(presence_sent(&mut t), 0);
+        // One with a larger limit takes it.
         s.reset();
         t.max = None;
         s.pump_at(&mut docs, &mut t, start + heartbeat * 7).unwrap();
@@ -2140,6 +2170,7 @@ mod tests {
         assert_eq!(too_large(&out.errors), 1, "{:?}", out.errors);
         t.sent.clear();
         s.clear_presence();
+        assert!(!s.presence_too_large());
         s.pump_at(&mut docs, &mut t, start + heartbeat * 8).unwrap();
         assert!(
             t.sent

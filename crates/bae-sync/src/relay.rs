@@ -188,6 +188,9 @@ impl Relay {
         {
             for p in &mut self.peers {
                 let _ = p.transport.send(leave.clone());
+                // It left: a presence of its that did not fit is no longer
+                // being skipped, and a later one is reported again.
+                p.presence_too_large.remove(client);
             }
         }
         true

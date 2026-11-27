@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use bae_model::loro::{ExportMode, LoroDoc, VersionVector};
 use bae_sync::{
-    ClientId, DocKey, DocSet, Imported, MemDocs, MemoryTransport, Message, PresenceState, Relay,
-    SessionConfig, SyncError, SyncSession, Transport,
+    ClientId, DocKey, DocSet, Imported, MemDocs, MemoryTransport, Message, PeerHandle,
+    PresenceState, Relay, SessionConfig, SyncError, SyncSession, Transport,
 };
 use common::*;
 
@@ -343,88 +343,161 @@ fn an_oversized_snapshot_is_not_exported_on_every_request() {
     assert_eq!(p.a.exports.get(), exports + 3);
 }
 
-/// A collaborator's presence that does not fit in one message to a client (a
-/// very long selection, a link that takes little): the relay skips it for
-/// that client and reports it once, and the client stays connected. Before,
-/// the relay dropped the client; it reconnected, got the same presence and
-/// was dropped again for as long as the selection stayed.
-#[test]
-fn a_presence_that_does_not_fit_is_skipped_by_the_relay() {
-    let mut relay = Relay::new(ClientId::new("hub").unwrap());
-    let mut sessions = Vec::new();
-    let mut links = Vec::new();
-    let mut handles = Vec::new();
-    let mut docs = Vec::new();
-    for (i, limited) in [false, false, true].into_iter().enumerate() {
-        let (mine, theirs) = MemoryTransport::pair();
-        handles.push(if limited {
-            relay.connect(Box::new(Limited(theirs)))
-        } else {
-            relay.connect(Box::new(theirs))
-        });
-        links.push(mine);
-        docs.push(MemDocs::new());
-        let mut config = SessionConfig::new(ClientId::new(&format!("p{i}")).unwrap());
-        config.hello_interval = Some(Duration::from_secs(5));
-        sessions.push(SyncSession::new(config));
-    }
-    let t0 = Instant::now();
-    let mut now = Duration::ZERO;
-    // Pumps everyone twice; returns what the relay reported.
-    let mut step = |sessions: &mut Vec<SyncSession>, dt: Duration| {
-        now += dt;
-        let mut too_large = Vec::new();
-        for _ in 0..2 {
-            for i in 0..sessions.len() {
-                let out = sessions[i]
-                    .pump_at(&mut docs[i], &mut links[i], t0 + now)
-                    .unwrap();
-                assert!(out.errors.is_empty(), "{:?}", out.errors);
-            }
-            let out = relay.pump_at(t0 + now);
-            assert!(out.disconnected.is_empty(), "{:?}", out.disconnected);
-            too_large.extend(out.errors);
+/// Clients of one relay, pumped on simulated time. The relay's end of a
+/// `limited` client's link takes at most [`LIMIT`] bytes per message, like
+/// a hub link to a client that said it takes that little.
+struct Net {
+    relay: Relay,
+    sessions: Vec<Option<SyncSession>>,
+    links: Vec<MemoryTransport>,
+    docs: Vec<MemDocs>,
+    handles: Vec<PeerHandle>,
+    t0: Instant,
+    now: Duration,
+}
+
+impl Net {
+    fn new() -> Net {
+        Net {
+            relay: Relay::new(ClientId::new("hub").unwrap()),
+            sessions: Vec::new(),
+            links: Vec::new(),
+            docs: Vec::new(),
+            handles: Vec::new(),
+            t0: Instant::now(),
+            now: Duration::ZERO,
         }
-        too_large
-    };
-    let names = |s: &SyncSession| -> Vec<String> {
+    }
+
+    /// A client `p<name>` joins; returns its index.
+    fn join(&mut self, name: &str, limited: bool) -> usize {
+        let (mine, theirs) = MemoryTransport::pair();
+        self.handles.push(if limited {
+            self.relay.connect(Box::new(Limited(theirs)))
+        } else {
+            self.relay.connect(Box::new(theirs))
+        });
+        self.links.push(mine);
+        self.docs.push(MemDocs::new());
+        let mut config = SessionConfig::new(ClientId::new(name).unwrap());
+        config.hello_interval = Some(Duration::from_secs(5));
+        self.sessions.push(Some(SyncSession::new(config)));
+        self.sessions.len() - 1
+    }
+
+    /// Client `i` drops its connection.
+    fn leave(&mut self, i: usize) {
+        self.sessions[i] = None;
+        self.relay.disconnect(self.handles[i]);
+    }
+
+    fn session(&mut self, i: usize) -> &mut SyncSession {
+        self.sessions[i].as_mut().unwrap()
+    }
+
+    /// Pumps everyone twice; returns what the relay reported. Nobody may be
+    /// dropped and no client may report anything.
+    fn step(&mut self, dt: Duration) -> Vec<(PeerHandle, SyncError)> {
+        self.now += dt;
+        let now = self.t0 + self.now;
+        let mut errors = Vec::new();
+        for _ in 0..2 {
+            for (i, session) in self.sessions.iter_mut().enumerate() {
+                if let Some(s) = session {
+                    let out = s
+                        .pump_at(&mut self.docs[i], &mut self.links[i], now)
+                        .unwrap();
+                    assert!(out.errors.is_empty(), "{:?}", out.errors);
+                }
+            }
+            let out = self.relay.pump_at(now);
+            assert!(out.disconnected.is_empty(), "{:?}", out.disconnected);
+            errors.extend(out.errors);
+        }
+        errors
+    }
+
+    fn names(&self, i: usize) -> Vec<String> {
+        let s = self.sessions[i].as_ref().unwrap();
         s.presence().into_iter().map(|p| p.state.name).collect()
-    };
-    let presence = |name: &str, selected: usize| PresenceState {
+    }
+}
+
+/// A presence with `selected` layers selected (about 30 bytes each).
+fn presence(name: &str, selected: usize) -> PresenceState {
+    PresenceState {
         name: name.to_owned(),
         selection: (0..selected)
             .map(|i| p(&format!("/comps/main/layers/layer_{i:05}")))
             .collect(),
         ..PresenceState::default()
-    };
-
-    // About 100 KiB of selection: more than the third client takes.
-    sessions[0].set_presence(presence("alice", 3000));
-    sessions[1].set_presence(presence("bob", 0));
-    let mut too_large = step(&mut sessions, Duration::from_millis(10));
-    assert_eq!(names(&sessions[1]), ["alice"]);
-    assert_eq!(names(&sessions[2]), ["bob"]);
-    assert!(
-        matches!(
-            &too_large[..],
-            [(h, SyncError::MessageTooLarge { doc: None, max: LIMIT, .. })] if *h == handles[2]
-        ),
-        "{too_large:?}"
-    );
-    // Heartbeats keep it going to the others, and are neither sent to the
-    // third client nor reported again; nobody is dropped.
-    for _ in 0..6 {
-        too_large.extend(step(&mut sessions, Duration::from_secs(5)));
     }
-    assert_eq!(too_large.len(), 1, "{too_large:?}");
-    assert_eq!(names(&sessions[1]), ["alice"]);
-    assert_eq!(names(&sessions[2]), ["bob"]);
-    // A smaller selection reaches it.
-    sessions[0].set_presence(presence("alice", 3));
-    too_large.extend(step(&mut sessions, Duration::from_millis(10)));
-    assert_eq!(names(&sessions[2]), ["alice", "bob"]);
+}
+
+/// `errors` are exactly one presence that did not fit for client `i`.
+fn presence_skipped_for(net: &Net, i: usize, errors: &[(PeerHandle, SyncError)]) -> bool {
+    matches!(
+        errors,
+        [(h, SyncError::MessageTooLarge { doc: None, max: LIMIT, .. })] if *h == net.handles[i]
+    )
+}
+
+/// A collaborator's presence that does not fit in one message to a client (a
+/// very long selection, a link that takes little): the relay skips it for
+/// that client and reports it once, and the client stays connected. Before,
+/// the relay dropped the client; it reconnected, got the same presence and
+/// was dropped again for as long as the selection stayed. The same when a
+/// client joins and the relay greets it with everyone's presence, and after
+/// the collaborator left and came back.
+#[test]
+fn a_presence_that_does_not_fit_is_skipped_by_the_relay() {
+    let mut net = Net::new();
+    let alice = net.join("alice", false);
+    let bob = net.join("bob", false);
+    let carol = net.join("carol", true);
+
+    // About 100 KiB of selection: more than carol takes.
+    net.session(alice).set_presence(presence("alice", 3000));
+    net.session(bob).set_presence(presence("bob", 0));
+    let errors = net.step(Duration::from_millis(10));
+    assert_eq!(net.names(bob), ["alice"]);
+    assert_eq!(net.names(carol), ["bob"]);
+    assert!(presence_skipped_for(&net, carol, &errors), "{errors:?}");
+    // Heartbeats keep it going to the others, and are neither sent to
+    // carol nor reported again; nobody is dropped.
+    for _ in 0..6 {
+        let errors = net.step(Duration::from_secs(5));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+    assert_eq!(net.names(bob), ["alice"]);
+    assert_eq!(net.names(carol), ["bob"]);
+
+    // Someone who joins is greeted with everyone's presence: the one that
+    // does not fit is skipped for them too, reported once.
+    let dave = net.join("dave", true);
+    let errors = net.step(Duration::from_millis(10));
+    assert!(presence_skipped_for(&net, dave, &errors), "{errors:?}");
+    assert_eq!(net.names(dave), ["bob"]);
+
+    // A smaller selection reaches them.
+    net.session(alice).set_presence(presence("alice", 3));
+    let errors = net.step(Duration::from_millis(10));
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(net.names(carol), ["alice", "bob"]);
+    assert_eq!(net.names(dave), ["alice", "bob"]);
     // Too large again after one fitted: reported again.
-    sessions[0].set_presence(presence("alice", 3000));
-    too_large.extend(step(&mut sessions, Duration::from_millis(10)));
-    assert_eq!(too_large.len(), 2, "{too_large:?}");
+    net.session(alice).set_presence(presence("alice", 3000));
+    let errors = net.step(Duration::from_millis(10));
+    assert_eq!(errors.len(), 2, "{errors:?}");
+
+    // Alice leaves and comes back with it: reported again (the relay
+    // forgot what it skipped of hers when she left).
+    net.leave(alice);
+    net.step(Duration::from_millis(10));
+    assert_eq!(net.names(carol), ["bob"]);
+    let alice = net.join("alice", false);
+    net.session(alice).set_presence(presence("alice", 3000));
+    let errors = net.step(Duration::from_millis(10));
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert_eq!(net.names(bob), ["alice"]);
 }

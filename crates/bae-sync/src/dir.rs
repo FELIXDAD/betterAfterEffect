@@ -54,9 +54,7 @@ pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(2);
 const LOCK_RETRY: Duration = Duration::from_millis(50);
 /// `len: u32` + 8 checksum bytes.
 const RECORD_HEADER: usize = 12;
-/// Larger lengths mean a corrupt record, so `send` refuses a larger message
-/// ([`Transport::max_message_size`]): written, it would stop every reader of
-/// the log at it (and over 4 GiB its length does not fit in the header).
+/// Larger lengths mean a corrupt record.
 const MAX_RECORD: usize = 1 << 30;
 const MAX_HEADER: usize = 64 * 1024;
 const MAX_DEPTH: usize = 16;
@@ -1890,15 +1888,7 @@ impl Transport for DirTransport {
         self.notes_seq
     }
 
-    /// One record of a log (1 GiB): a document whose update
-    /// or snapshot is larger is skipped by the session (spec 2.4 step 3)
-    /// instead of being written where no reader gets past it.
-    fn max_message_size(&self) -> Option<usize> {
-        Some(MAX_RECORD)
-    }
-
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
-        crate::transport::check_size(&msg, Some(MAX_RECORD))?;
         if self.is_read_only() {
             return match &msg {
                 Message::Hello { versions, .. } => self.on_hello(versions.clone()),
@@ -2595,51 +2585,6 @@ mod tests {
         let mut bad = log.clone();
         bad[full + RECORD_HEADER] ^= 1;
         assert_eq!(parse_records(&bad).0.len(), 2);
-    }
-
-    /// A message over one record (1 GiB) is refused before anything is
-    /// written: as a record it would stop every reader of the log, and its
-    /// length would not fit in the header over 4 GiB (a panic). The session
-    /// skips the document instead (spec 2.4 step 3). Unix only: the zeroed
-    /// 1 GiB buffer is never touched there, so it costs no memory.
-    #[cfg(unix)]
-    #[test]
-    fn a_message_over_one_record_is_refused() {
-        let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(UPDATES)).unwrap();
-        let mut t = transport(tmp.path(), "a", DirConfig::default());
-        assert_eq!(t.max_message_size(), Some(MAX_RECORD));
-        let doc = DocKey::parse("root").unwrap();
-        for big in [
-            Message::Updates {
-                doc: doc.clone(),
-                version: VersionVector::new(),
-                data: vec![0; MAX_RECORD],
-            },
-            Message::Snapshot {
-                doc: doc.clone(),
-                version: VersionVector::new(),
-                data: vec![0; MAX_RECORD],
-            },
-        ] {
-            match t.send(big) {
-                Err(SyncError::MessageTooLarge {
-                    doc: Some(d), max, ..
-                }) => {
-                    assert_eq!((d, max), (doc.clone(), MAX_RECORD));
-                }
-                r => panic!("{r:?}"),
-            }
-        }
-        assert!(!t.log_path(&doc).exists());
-        // The link goes on.
-        t.send(Message::Updates {
-            doc: doc.clone(),
-            version: VersionVector::new(),
-            data: b"small".to_vec(),
-        })
-        .unwrap();
-        assert!(t.log_path(&doc).exists());
     }
 
     fn header(doc: &str) -> Vec<u8> {

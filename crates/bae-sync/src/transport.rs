@@ -129,8 +129,7 @@ pub trait Transport {
     /// fit, or its presence, and sends the rest, `docs/spec/sync.md` §2.4; a
     /// `Hello` that does not fit fails its pump like a link error). A hub
     /// link's is its `HubLimits::max_message`, or less if the hub said it
-    /// takes less; a shared folder's is the largest record its logs can hold
-    /// (1 GiB). Must not change while the transport is in use
+    /// takes less. Must not change while the transport is in use
     /// ([`crate::ThreadedTransport`] reads it once). The default, `None`: no
     /// limit.
     fn max_message_size(&self) -> Option<usize> {

@@ -355,8 +355,9 @@ pub struct ConnectionStatus {
     /// Others online (0 unless online).
     pub peers: usize,
     /// Increases whenever any of the above changes (the countdown in
-    /// `Offline::retry_in` aside) or someone's presence changes: redraw when
-    /// it differs from the one last drawn.
+    /// `Offline::retry_in` aside), someone's presence changes, or whether
+    /// ours reaches the others ([`Connection::presence_too_large`]): redraw
+    /// when it differs from the one last drawn.
     pub generation: u64,
 }
 
@@ -387,12 +388,14 @@ pub struct ConnectionOutcome {
     /// `session().too_large(docs)` lists it ([`SyncSession::too_large`]). It
     /// is tried again only when it may fit now (the remote got more of it
     /// another way, or the document was replaced; spec 2.4 step 3), and
-    /// reported again if it still does not; a snapshot answer that does not
-    /// fit is only reported, once per link. So show what
-    /// `session().too_large(docs)` lists, e.g. "this layer is too large to
-    /// sync through the hub", rather than one notice per error. Our presence
-    /// that does not fit (a very long selection; no `doc`) is reported the
-    /// same way and not shown to the others until a smaller one fits.
+    /// reported again if it still does not; every reconnect starts over (a
+    /// new link may take more), so it is reported again then too. A snapshot
+    /// answer that does not fit is only reported, once per link. So show
+    /// what `session().too_large(docs)` lists, e.g. "this layer is too large
+    /// to sync through the hub", rather than one notice per error. Our
+    /// presence that does not fit (a very long selection; no `doc`) is
+    /// reported once per link and not again for a changed one that still
+    /// does not fit: show [`Connection::presence_too_large`] instead.
     pub errors: Vec<SyncError>,
 }
 
@@ -705,6 +708,7 @@ struct StatusKey {
     peers: usize,
     /// Changes of [`Connection::link_notes`].
     notes: u64,
+    presence_too_large: bool,
 }
 
 /// Calls `wake` at the earliest deadline it was given: pumps that are due
@@ -989,6 +993,14 @@ impl Connection {
             })
             .cloned()
             .collect()
+    }
+
+    /// While online, our presence does not fit in one message on the link
+    /// ([`SyncSession::presence_too_large`]): the others do not see us or
+    /// our selection until a smaller one fits. A change of it changes
+    /// [`ConnectionStatus::generation`].
+    pub fn presence_too_large(&self) -> bool {
+        self.is_online() && self.session.presence_too_large()
     }
 
     /// Documents of `docs` the remote has ops of that we lack, while online
@@ -1555,6 +1567,7 @@ impl Connection {
             unsynced: self.unsynced,
             peers: self.peer_count(),
             notes: self.notes_changes,
+            presence_too_large: self.presence_too_large(),
         }
     }
 
@@ -2390,6 +2403,65 @@ mod tests {
             .map(|r| r.as_ref().map_err(ToString::to_string).copied());
         assert_eq!(result, Some(Ok(())));
         assert_eq!(*took.lock().unwrap(), ["a", "a"]);
+    }
+
+    /// Our presence that does not fit in one message on the link (a very
+    /// long selection) does not fail the link: the connection stays online,
+    /// `presence_too_large` says the others do not see us, and the status
+    /// generation changes when that starts and when a smaller one fits.
+    #[test]
+    fn a_presence_that_does_not_fit_keeps_the_link_and_is_shown() {
+        let mut docs = MemDocs::new();
+        let link = Limited {
+            hello: Some(Message::hello(ClientId::new("hub").unwrap(), Vec::new())),
+            max: 4000,
+            took: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut c = bare("presence", quiet());
+        linked(
+            &mut c,
+            ThreadedTransport::spawn(link, Duration::from_millis(1), || {}),
+        );
+        wait_for("online", || {
+            c.pump(&mut docs);
+            c.is_online()
+        });
+        assert!(!c.presence_too_large());
+        let before = c.status().generation;
+        let presence = |name: String| crate::PresenceState {
+            name,
+            ..crate::PresenceState::default()
+        };
+        c.set_presence(presence("n".repeat(5000)));
+        let mut errors = Vec::new();
+        wait_for("the presence to be refused", || {
+            errors.extend(c.pump(&mut docs).errors);
+            c.presence_too_large()
+        });
+        for _ in 0..5 {
+            errors.extend(c.pump(&mut docs).errors);
+        }
+        assert!(c.is_online());
+        assert!(
+            matches!(
+                &errors[..],
+                [SyncError::MessageTooLarge {
+                    doc: None,
+                    max: 4000,
+                    ..
+                }]
+            ),
+            "{errors:?}"
+        );
+        let refused = c.status().generation;
+        assert!(refused > before);
+        c.set_presence(presence("short".to_owned()));
+        wait_for("the smaller presence to go out", || {
+            c.pump(&mut docs);
+            !c.presence_too_large()
+        });
+        assert!(c.status().generation > refused);
+        assert!(c.is_online());
     }
 
     /// A document the remote has more of than we do is listed by `behind`
