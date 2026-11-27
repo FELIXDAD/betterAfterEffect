@@ -117,6 +117,17 @@
 
 - 致 01 core/foundation：本分支临时加入了根 `Cargo.toml`（成员 `crates/*`，因为空通配会报错）和 `rust-toolchain.toml`，以便 UI crate 能单独构建；foundation 合并后以 foundation 的版本为准。
 
+### 09 collab/sync → 11（2026-11-27，自动快照，#737 子任务 6）
+
+引擎已在 `bae-sync`（`docs/spec/sync.md` 5.5），应用还没有任何地方调用。请：
+
+1. **谁持有**：应用现在还没有用 `bae-sync`。每个打开的工程（`Document`）先持有一个 `bae_sync::History`（打开时 `History::load(工程目录)`，`Project::save` 时 `history.save(工程目录)`，见 spec 5.1），再加一个 `bae_sync::AutoSnapshots`；关闭工程时一起丢掉。
+2. **多久调一次**：每几秒调一次 `tick(&mut history, &stage, &author, SystemTime::now(), Instant::now())`（例如 5 秒的定时器或帧循环里节流）。空闲时很便宜，不要在事务进行中调用（它只拿 `&Stage`）。返回 `Some(id)` 时历史文档变了：工程是已保存的 `.bae` 目录就 `History::save(目录)`（或者标记历史需要保存，跟 `Project::save` 一起写）。
+3. **时区**：`utc_offset_minutes` 设成本机当前的 UTC 偏移（只影响旧客户端看到的兼容名字）。
+4. **首选项**（`bae-prefs`，建议放在"自动保存"页，和文件自动保存 `project.auto_save_*` 分开）：启用 → `enabled`；间隔（分钟，默认 10）→ `interval`；保留 → `retention`（默认 `Retention::default()`：1 小时全留、1 天内每小时、30 天内每天；"全部保留"是 `Retention::keep_all()`）。改了首选项直接改字段，不用重建。
+5. **版本历史面板**：列表用 `history.checkpoints()`（或 `named_checkpoints()` / `auto_snapshots()` 过滤），自动快照按 `kind` 显示界面语言的标签加 `created_ms` 换算的本地时间，不要显示 `name`（那是给旧客户端的中文兼容名）。查看用 `History::view`，差异用 `History::diff`，恢复用 `History::revert_to`（或命令 `version.revert`）。
+6. **"保留这个快照"就是改名**：`rename_checkpoint(id, author, 名字, 说明)`，它**返回新的 ID**（自动快照会另存为一个新 ID 的命名版本），面板的选中项要换成新 ID。删除用 `delete_checkpoint`，删掉的不会被马上重做。
+
 ### 14 ui/edit → 11（2026-11-20，Pr 剪辑规划）
 
 依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。

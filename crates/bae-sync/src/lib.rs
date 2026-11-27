@@ -18,6 +18,8 @@
 //! - [`History`]: named versions ([`Checkpoint`]), read-only views of any version
 //!   ([`history::view_at`]) and per-prim differences with authors
 //!   ([`history::diff`]). Sync it with the stage through [`ProjectDocs`].
+//!   [`AutoSnapshots`] makes automatic snapshots in it while the project
+//!   changes, pruned by a [`Retention`] policy.
 //!
 //! This crate has no GPU, window or platform dependencies.
 
@@ -49,8 +51,9 @@ pub use dir::{DirConfig, DirStats, DirTransport, LOG_FORMAT, LOG_VERSION};
 pub use docs::{DocSet, Imported, MemDocs};
 pub use error::SyncError;
 pub use history::{
-    Checkpoint, CheckpointId, History, PrimChange, PrimDiff, ProjectDocs, ProjectVersion,
-    RevertScope, VersionJson, VersionView,
+    AutoSnapshotStats, AutoSnapshots, Checkpoint, CheckpointId, CheckpointKind, History,
+    PrimChange, PrimDiff, ProjectDocs, ProjectVersion, Retention, RetentionTier, RevertScope,
+    VersionJson, VersionView,
 };
 #[cfg(feature = "hub")]
 pub use hub::{HubLimits, HubTransport};

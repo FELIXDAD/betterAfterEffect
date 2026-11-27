@@ -467,8 +467,42 @@ async fn agent_builds_animates_renders_and_proposes() {
             .stage
             .has_prim(&PrimPath::new("/notes").unwrap())
     );
+    {
+        // The app makes an automatic snapshot.
+        let mut ws = workspace.lock();
+        let ws = &mut *ws;
+        let mut auto = bae_sync::AutoSnapshots::new(std::time::Duration::ZERO);
+        let user = bae_model::AuthorId::new("user:felix").unwrap();
+        auto.tick(
+            &mut ws.history,
+            &ws.project.stage,
+            &user,
+            std::time::SystemTime::now(),
+            std::time::Instant::now(),
+        )
+        .unwrap()
+        .expect("changed since v1");
+    }
+    // Named versions by default; automatic snapshots on request.
     let list = ok_json(&call(&client, "history_list", json!({})).await);
+    assert_eq!(list["checkpoints"].as_array().unwrap().len(), 1, "{list}");
     assert_eq!(list["checkpoints"][0]["name"], "v1");
+    assert_eq!(list["checkpoints"][0]["kind"], "named");
+    let all = ok_json(&call(&client, "history_list", json!({"kind": "all"})).await);
+    assert_eq!(all["checkpoints"].as_array().unwrap().len(), 2, "{all}");
+    let auto = ok_json(&call(&client, "history_list", json!({"kind": "auto"})).await);
+    let snapshot = &auto["checkpoints"][0];
+    assert_eq!(snapshot["kind"], "auto", "{auto}");
+    assert_eq!(auto["checkpoints"].as_array().unwrap().len(), 1, "{auto}");
+    let old = text_of(
+        &call(
+            &client,
+            "stage_describe",
+            json!({"checkpoint": snapshot["id"], "detail": "brief"}),
+        )
+        .await,
+    );
+    assert!(old.starts_with("Automatic snapshot"), "{old}");
 
     // Module commands are tools too, and their times accept frames.
     let tools = client.list_all_tools().await.unwrap();
