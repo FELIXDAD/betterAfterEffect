@@ -230,6 +230,8 @@ pub(crate) struct GpuPreview {
     changes: StageChanges,
     sources_gen: Option<u64>,
     solid_reload: u64,
+    /// Edit ▸ Purge generation last applied (`Session::purge`).
+    purged: u64,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
@@ -309,6 +311,7 @@ impl GpuPreview {
             changes: StageChanges::default(),
             sources_gen: None,
             solid_reload: 0,
+            purged: 0,
             last: None,
             rect: None,
             target: None,
@@ -376,6 +379,18 @@ impl GpuPreview {
         {
             self.last = None;
         }
+    }
+
+    /// Edit ▸ Purge ▸ Image Cache Memory / All Memory: drop the rendered frames
+    /// (and reopen the footage) once per purge `generation`.
+    pub(super) fn purge(&mut self, generation: u64) {
+        if self.purged == generation {
+            return;
+        }
+        self.engine.renderer.reload_footage();
+        self.engine.anim.clear_compiled();
+        self.last = None;
+        self.purged = generation;
     }
 
     pub(super) fn reload_solid(&mut self, generation: u64, item: &bae_model::PrimPath) {

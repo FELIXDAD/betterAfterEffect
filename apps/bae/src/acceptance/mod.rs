@@ -317,6 +317,13 @@ impl Gui {
                 );
             }
             ids::HELP => {}
+            // As `Shell::purge`, without the disk cache's question.
+            "motion.edit.purge" => {
+                let what = inv.params.get("what").and_then(|w| w.as_str());
+                if matches!(what, Some("undo" | "all_memory" | "memory_and_disk_cache")) {
+                    self.doc.clear_undo();
+                }
+            }
             _ => {
                 // As `Shell::dispatch`: a failure is explained in the status bar
                 // until the next change.
