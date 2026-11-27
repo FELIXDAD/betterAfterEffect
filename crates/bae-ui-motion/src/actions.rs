@@ -14,6 +14,7 @@ use crate::common;
 use crate::session::{KeyClipboard, Pending, Reveal, SharedSession};
 
 pub mod ids {
+    pub const CACHE_WHEN_IDLE: &str = "motion.comp.cache_frames_when_idle";
     pub const PLAY: &str = "motion.play";
     pub const GO_START: &str = "motion.go_start";
     pub const GO_END: &str = "motion.go_end";
@@ -323,6 +324,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EXPONENTIAL_SCALE, "Exponential Scale"),
     (ids::SEQUENCE_LAYERS, "Sequence Layers..."),
     (ids::PLAY, "Play/Stop"),
+    (ids::CACHE_WHEN_IDLE, "Cache Frames When Idle"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
     ("motion.file.find", "Find"),
@@ -1272,6 +1274,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let id = inv.id.as_str();
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
+    }
+    if id == ids::CACHE_WHEN_IDLE {
+        if let Some(store) = cx.resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
+            let mut prefs = (*store.current()).clone();
+            let key = bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE;
+            prefs.set(key, !prefs.bool(key));
+            if let Err(error) = store.set(prefs) {
+                tracing::warn!(%error, "could not save idle cache setting");
+            }
+        }
+        return true;
     }
     if id == ids::TRACK_MOTION {
         let layer = session.lock().selected_layers.first().cloned();

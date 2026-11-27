@@ -473,7 +473,7 @@ const COMPOSITION: &[Node] = &[
         "Preview",
         &[
             it(10682369, "Play Current Preview", "motion.play", "", B, Done),
-            it(10682370, "Cache Frames When Idle", "motion.comp.cache_frames_when_idle", "", B, Later),
+            it(10682370, "Cache Frames When Idle", "motion.comp.cache_frames_when_idle", "", B, Done),
             SEP,
             it(10682372, "Audio", "motion.comp.preview_audio", "", B, Later),
         ],

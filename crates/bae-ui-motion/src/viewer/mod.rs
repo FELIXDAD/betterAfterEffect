@@ -81,6 +81,8 @@ const ZOOM_STEPS: [f32; 13] = [
 
 /// Zoom to 100 % (/ in the Composition panel).
 pub(crate) const ZOOM_100: &str = "motion.viewer.zoom_100";
+/// View ▸ Fit up to 100% (Alt/Option+/).
+pub(crate) const FIT_UP_TO_100: &str = "motion.viewer.fit_up_to_100";
 
 /// The next zoom step above (`up`) or below `mag`.
 pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
@@ -232,8 +234,11 @@ pub struct CompositionViewer {
     preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
-    /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
+    /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` =
+    /// fitted to the panel.
     zoom: Option<f32>,
+    /// Fitted with AE's Fit (any magnification) rather than Fit up to 100%.
+    fit_all: bool,
     /// Legacy magnification: the part of a wheel notch not yet stepped.
     wheel_rest: f32,
     pan: Vec2,
@@ -306,16 +311,10 @@ pub struct CompositionViewer {
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
     /// The current time and since when it has not changed (idle prefetch).
-    idle: Option<(Time, std::time::Instant)>,
+    idle: Option<(PrimPath, Time, u64, std::time::Instant)>,
     /// A camera tool drag.
     camera_drag: Option<camera_tool::CameraDrag>,
 }
-
-/// How long the current time stays put before the frames playback would
-/// start with are prepared.
-const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300);
-/// Frames prepared from where playback would start.
-const PREFETCH_FRAMES: i64 = 6;
 
 impl CompositionViewer {
     fn has_3d_layers(&mut self, stage: &bae_model::Stage, path: &bae_model::PrimPath) -> bool {
@@ -382,8 +381,12 @@ impl CompositionViewer {
         let fit = ((area.width() - 24.0) / w)
             .min((area.height() - 24.0) / h)
             .max(0.01);
-        // AE "Fit up to 100%".
-        let fit = fit.min(1.0 / ppp);
+        // AE's Fit, or Fit up to 100% (the default).
+        let fit = if self.fit_all {
+            fit
+        } else {
+            fit.min(1.0 / ppp)
+        };
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let origin = area.center() - vec2(w, h) * scale / 2.0 + self.pan;
         // At native size a fractional texture edge blends adjacent texels.
@@ -822,11 +825,18 @@ impl Panel for CompositionViewer {
             }
             "viewer.fit" => {
                 self.zoom = None;
+                self.fit_all = true;
                 self.pan = Vec2::ZERO;
                 true
             }
             ZOOM_100 => {
                 self.pending_100 = true;
+                true
+            }
+            FIT_UP_TO_100 => {
+                self.zoom = None;
+                self.fit_all = false;
+                self.pan = Vec2::ZERO;
                 true
             }
             _ => crate::actions::handle(action, cx, &session),
@@ -934,6 +944,11 @@ impl Panel for CompositionViewer {
             Some(ViewRequest::Center) => self.pan = Vec2::ZERO,
             Some(ViewRequest::Actual) => {
                 self.zoom = Some(1.0);
+                self.pan = Vec2::ZERO;
+            }
+            Some(ViewRequest::FitUpTo100) => {
+                self.zoom = None;
+                self.fit_all = false;
                 self.pan = Vec2::ZERO;
             }
             None => {}
@@ -1045,7 +1060,7 @@ impl Panel for CompositionViewer {
                 gpu.playback.stop();
             }
             ui.painter().rect_filled(area, 0.0, Color32::BLACK);
-            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session, None);
             return;
         }
         // Paint.
@@ -1123,6 +1138,7 @@ impl Panel for CompositionViewer {
                 gpu.reload_solid(*generation, item);
             }
             if editing {
+                self.idle = None;
                 gpu.playback.stop();
             } else {
                 let range = playback.as_ref().map_or(
@@ -1191,31 +1207,43 @@ impl Panel for CompositionViewer {
                     // A cold start: wait until the first playback frame is ready.
                     session.lock().hold_first_frame(shown_now);
                 }
-                // Idle (the current time still for a moment): prepare the first
-                // frames playback would show, so pressing play shows them at
-                // once while the pipeline fills.
-                if playback.is_none() {
+                let prefs = crate::prefs::current(cx.resources);
+                let source_focused = cx
+                    .focused_panel
+                    .is_some_and(|id| matches!(id.kind(), "footage" | "layer"));
+                if playback.is_none()
+                    && !source_focused
+                    && prefs.bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
+                {
                     let now = std::time::Instant::now();
-                    match self.idle {
-                        Some((at, since)) if at == time => {
-                            if now.duration_since(since) >= IDLE_PREFETCH {
-                                let (from, range) = session.lock().play_start(&info);
-                                let rate = info.frame_rate;
-                                let first = rate.time_to_frame(from);
-                                let times = (0..PREFETCH_FRAMES)
-                                    .map(|k| rate.frame_to_time(first + k))
-                                    .filter(|t| *t != time && range.contains(*t))
-                                    .collect();
-                                gpu.playback.prefetch(times);
-                            } else {
-                                ui.ctx().request_repaint_after(IDLE_PREFETCH);
-                            }
+                    let revision = cx.stage.revision();
+                    let active = ui.input(|i| !i.raw.events.is_empty());
+                    let since = match &self.idle {
+                        Some((comp, t, rev, since))
+                            if !active && comp == &info.path && *t == time && *rev == revision =>
+                        {
+                            *since
                         }
                         _ => {
-                            self.idle = Some((time, now));
-                            ui.ctx().request_repaint_after(IDLE_PREFETCH);
+                            self.idle = Some((info.path.clone(), time, revision, now));
+                            now
                         }
-                    }
+                    };
+                    let delay = std::time::Duration::from_secs(
+                        prefs.int("previews.idle_delay_before_caching") as u64,
+                    );
+                    let elapsed = now.duration_since(since);
+                    let plan = if !active && elapsed >= delay {
+                        crate::playback::idle::Plan::from_prefs(&prefs, &info, time)
+                    } else {
+                        ui.ctx()
+                            .request_repaint_after(delay.saturating_sub(elapsed));
+                        None
+                    };
+                    gpu.playback.prefetch(plan);
+                } else {
+                    self.idle = None;
+                    gpu.playback.prefetch(None);
                 }
                 gpu.playback.publish_ranges(&session, info.frame_rate);
             }
@@ -1245,7 +1273,7 @@ impl Panel for CompositionViewer {
                 color::TEXT_STRONG,
             );
             self.banner.ui(ui, cx, &session, area);
-            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session, None);
             return;
         }
 
@@ -1872,15 +1900,68 @@ impl Panel for CompositionViewer {
             crate::effects::apply(cx, &[layer], &fx.0);
         }
 
+        // 3D Reference Axes: the world axes as the view's camera sees them.
+        let opts = session.lock().view_options;
+        if opts.axes
+            && opts.layer_controls
+            && comp.layers.iter().any(render::is_3d)
+            && let Some((camera, _)) = view.camera.as_ref()
+        {
+            reference_axes(&ui.painter_at(area), area, &camera.world);
+        }
         self.banner.ui(ui, cx, &session, area);
         self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
-        bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+        let camera = comp.camera.and_then(|i| comp.layers.get(i));
+        let camera = camera.map(|l| l.name.clone());
+        bar::bottom_bar(
+            ui,
+            cx,
+            bar,
+            self,
+            &info,
+            time,
+            mag,
+            &session,
+            camera.as_deref(),
+        );
         self.esc_taken = self.shape.is_some()
             || self.pen.busy()
             || self.select.busy()
             || self.select.free.is_some()
             || ui.ctx().text_edit_focused()
             || egui::Popup::is_any_open(ui.ctx());
+    }
+}
+
+/// The 3D Reference Axes in `area`'s lower-left corner: world X (red), Y
+/// (green) and Z (blue) as seen by a camera with `world` (camera → comp).
+fn reference_axes(painter: &egui::Painter, area: Rect, world: &DMat4) {
+    let origin = pos2(area.left() + 28.0, area.bottom() - 28.0);
+    let to_camera = world.inverse();
+    let axes = [
+        (
+            bae_anim::glam::DVec3::X,
+            "X",
+            Color32::from_rgb(230, 70, 70),
+        ),
+        (
+            bae_anim::glam::DVec3::Y,
+            "Y",
+            Color32::from_rgb(90, 200, 90),
+        ),
+        (
+            bae_anim::glam::DVec3::Z,
+            "Z",
+            Color32::from_rgb(80, 140, 240),
+        ),
+    ];
+    for (axis, name, color) in axes {
+        // Camera space: +x right, +y down (screen), +z away.
+        let d = to_camera.transform_vector3(axis).normalize_or_zero();
+        let tip = origin + vec2(d.x as f32, d.y as f32) * 18.0;
+        painter.line_segment([origin, tip], Stroke::new(1.5, color));
+        let label = origin + vec2(d.x as f32, d.y as f32) * 25.0;
+        painter.text(label, Align2::CENTER_CENTER, name, theme::small(), color);
     }
 }
 

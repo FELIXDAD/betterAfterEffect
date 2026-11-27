@@ -210,7 +210,7 @@
 | Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
 | Preview ▸ Play Current Preview | 10682369 | `motion.play` |  | Space | Space | B | ✅ |
-| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ⏸ |
+| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ✅ |
 | Preview ▸ Audio | 10682372 | `motion.comp.preview_audio` |  |  |  | B | ⏸ |
 | Save Frame As ▸ File... | 15335425 | `motion.comp.save_frame_as_file` |  | Ctrl+Alt+S | Cmd+Opt+S | B | ✅ |
 | Save Frame As ▸ Photoshop Layers... | 15335427 | `motion.comp.save_frame_as_photoshop_layers` |  |  |  | B | ⏸ |
@@ -1025,7 +1025,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | `FitItemView` | `viewer.fit` |  | Shift+/ | Shift+/ | effect_controls | A | ✅ |
-| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | effect_controls | A | ☐ |
+| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | effect_controls | A | ✅ |
 | `NOP` | `motion.panel.nop` |  |  |  | effect_controls | B | Ⓐ |
 | `OpenComp` | `motion.panel.toggle_viewer_timeline` |  | \\ | \\ | effect_controls | B | ☐ |
 | `SelectNext` | `motion.panel.select_next` | `{"add":false}` | Down | Down | effect_controls | B | ☐ |
@@ -1055,7 +1055,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | `FitItemView` | `viewer.fit` |  | Shift+/ | Shift+/ | composition | A | ✅ |
-| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | composition | A | ☐ |
+| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | composition | A | ✅ |
 | `SelectNextMask` | `motion.layer.select_next_mask` |  | Alt+\` | Opt+\` | composition | A | ⏸ |
 | `SelectPreviousMask` | `motion.layer.select_previous_mask` |  | Alt+Shift+\` | Opt+Shift+\` | composition | A | ⏸ |
 | `Zoom100Percent` | `motion.viewer.zoom_100` |  | / | / | composition | A | ☐ |

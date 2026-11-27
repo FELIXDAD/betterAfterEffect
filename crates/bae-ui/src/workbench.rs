@@ -1413,6 +1413,7 @@ impl Host<'_, '_> {
             self.requests,
         );
         cx.focused = focused;
+        cx.focused_panel = self.focused.as_ref();
         f(panel.as_mut(), &mut cx)
     }
 }

@@ -35,6 +35,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Play/Stop (Shift + Numpad 0)",
         "播放/停止（Shift + 小键盘 0）",
     ),
+    ("Cache Frames When Idle", "空闲时缓存帧"),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
     ("Set Frame", "设置帧"),
     ("Track Motion", "跟踪运动"),
