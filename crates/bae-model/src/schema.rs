@@ -859,7 +859,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
             choice(
                 "kind",
                 "footage",
-                &["footage", "solid", "placeholder", "sequence"],
+                &["footage", "solid", "placeholder", "sequence", "model"],
             ),
             string("file:relative"),
             string("file:original"),

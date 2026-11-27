@@ -131,6 +131,30 @@ fn probe_file(
     seen: &mut HashSet<PathBuf>,
     out: &mut Probed,
 ) {
+    // 3D models (glTF / GLB / OBJ): read in the background from now on.
+    if bae_render::model::is_model_file(path) {
+        if !seen.insert(path.to_path_buf()) {
+            return;
+        }
+        let _ = bae_render::model::get(path, false);
+        let mut attrs = std::collections::BTreeMap::new();
+        attrs.insert("kind".to_owned(), bae_model::Value::Enum("model".into()));
+        attrs.insert("width".to_owned(), bae_model::Value::Int(1000));
+        attrs.insert("height".to_owned(), bae_model::Value::Int(1000));
+        if let Some(d) = defaults.still_duration {
+            attrs.insert("duration".into(), bae_model::Value::Time(d));
+        }
+        if let Some([still, _, _]) = defaults.labels {
+            attrs.insert("label".into(), bae_model::Value::Int(still));
+        }
+        out.files.push(ImportFile {
+            path: path.to_string_lossy().into_owned(),
+            name: Some(file_name(path)),
+            attrs,
+            folder: folder.map(str::to_owned),
+        });
+        return;
+    }
     if is_photoshop(path) {
         if seen.insert(path.to_owned()) {
             out.photoshop

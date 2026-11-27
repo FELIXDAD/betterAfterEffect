@@ -1221,7 +1221,7 @@ impl TimelinePanel {
         let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
         let top = rect.top() - line as f32 * ROW_H;
-        let field = Rect::from_min_max(
+        let mut field = Rect::from_min_max(
             pos2(axis.left + 4.0, top),
             pos2(rect.right() - 4.0, top + lines as f32 * ROW_H),
         );
@@ -1229,6 +1229,17 @@ impl TimelinePanel {
             Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
             _ => expr.source.clone(),
         };
+        let mut editor_rows = lines;
+        if expr.enabled
+            && let Some(error) =
+                crate::expr_menu::inline_error(ui, cx.resources, path, attr, &buf, &expr.source)
+        {
+            let annotation =
+                Rect::from_min_max(pos2(field.left(), field.bottom() - ROW_H), field.max);
+            field.max.y = annotation.top();
+            editor_rows = editor_rows.saturating_sub(1).max(1);
+            crate::expr_menu::error_line(ui, annotation, &error);
+        }
         // Just added: the field takes the focus with the whole text selected.
         let focus = {
             let mut s = session.lock();
@@ -1263,7 +1274,7 @@ impl TimelinePanel {
             field,
             field_id,
             &mut buf,
-            Some(lines),
+            Some(editor_rows),
         );
         let r = shown.response.response.labeled(
             egui::WidgetType::TextEdit,

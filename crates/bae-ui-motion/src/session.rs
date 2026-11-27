@@ -443,6 +443,8 @@ pub struct Session {
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,
+    /// Character panel menu ▸ Use Smart Quotes turned off.
+    pub(crate) straight_quotes: bool,
     /// Viewer selection at a specific source-text frame, retained across panel focus changes.
     pub(crate) text_selection: Option<(PrimPath, Time, std::ops::Range<usize>)>,
     /// The footage item the Footage panel shows.
