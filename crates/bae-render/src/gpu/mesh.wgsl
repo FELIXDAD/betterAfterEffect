@@ -1,8 +1,11 @@
 // 3D model layers (graph::MeshNode): triangles through the comp's camera with
 // a depth buffer (reversed: 1 near, 0 far), shaded with the metallic-roughness
 // model (GGX) under the comp's lights. Lights follow the Classic 3D records of
-// light.rs (kind, falloff, cone); a diffuse of 100 % matches Lambert. Without
-// lights the model is lit from the camera so its shape reads.
+// light.rs (kind, falloff, cone); a diffuse of 100 % matches Lambert. An
+// environment light with a picture (exec/env.rs) adds image-based light:
+// diffuse from its irradiance map, reflections from its mip chain (rougher
+// surfaces read smaller levels). Without lights the model is lit from the
+// camera so its shape reads.
 
 struct Light {
     // Position (comp space) and kind (0 ambient, 1 parallel, 2 point, 3 spot).
@@ -27,6 +30,10 @@ struct Frame {
     eye: vec4<f32>,
     // x: display-encode the shading (a non-linear working space).
     out: vec4<f32>,
+    // Comp directions → environment picture directions.
+    env_rot: mat4x4<f32>,
+    // Environment light colour × intensity and its level count (0: none).
+    env: vec4<f32>,
     lights: array<Light, 8>,
 }
 
@@ -43,6 +50,9 @@ struct Material {
 @group(1) @binding(0) var<uniform> m: Material;
 @group(1) @binding(1) var t_base: texture_2d<f32>;
 @group(1) @binding(2) var s_base: sampler;
+@group(2) @binding(0) var t_env: texture_2d<f32>;
+@group(2) @binding(1) var t_irr: texture_2d<f32>;
+@group(2) @binding(2) var s_env: sampler;
 
 struct VsIn {
     @location(0) pos: vec3<f32>,
@@ -85,6 +95,21 @@ fn smooth01(e0: f32, e1: f32, x: f32) -> f32 {
 
 const PI: f32 = 3.14159265;
 
+// Equirectangular uv of a direction (see env.wgsl).
+fn equirect(d: vec3<f32>) -> vec2<f32> {
+    let n = normalize(d);
+    return vec2<f32>(0.5 + atan2(n.x, n.z) / (2.0 * PI), 0.5 + asin(clamp(n.y, -1.0, 1.0)) / PI);
+}
+
+// Split-sum environment BRDF, analytic fit (Karis 2014): the share of the
+// reflected picture that leaves toward the eye.
+fn env_brdf(f0: vec3<f32>, rough: f32, nv: f32) -> vec3<f32> {
+    let r = rough * vec4<f32>(-1.0, -0.0275, -0.572, 0.022) + vec4<f32>(1.0, 0.0425, 1.04, -0.04);
+    let a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
+    let ab = vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+    return f0 * ab.x + ab.y;
+}
+
 @fragment
 fn fs_mesh(i: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     var base = m.base;
@@ -103,8 +128,19 @@ fn fs_mesh(i: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     let kg = (rough + 1.0) * (rough + 1.0) / 8.0;
     var color = m.emissive.rgb;
     let count = u32(f.eye.w);
-    if count == 0u {
+    let levels = f.env.w;
+    if count == 0u && levels == 0.0 {
         color += base.rgb * (0.25 + 0.75 * nv);
+    }
+    if levels > 0.0 {
+        let irr = textureSampleLevel(t_irr, s_env, equirect((f.env_rot * vec4<f32>(n, 0.0)).xyz), 0.0).rgb;
+        let r = reflect(-v, n);
+        // The GGX lobe's width in level-0 texels picks the level.
+        let width = f32(textureDimensions(t_env).x);
+        let lod = clamp(log2(max(rough * rough * width / PI, 1.0)), 0.0, levels - 1.0);
+        let pre = textureSampleLevel(t_env, s_env, equirect((f.env_rot * vec4<f32>(r, 0.0)).xyz), lod).rgb;
+        let fe = env_brdf(f0, rough, nv);
+        color += ((1.0 - fe) * (1.0 - metallic) * base.rgb * irr + fe * pre) * f.env.rgb;
     }
     for (var li = 0u; li < count; li++) {
         let l = f.lights[li];

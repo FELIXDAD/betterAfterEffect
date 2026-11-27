@@ -12,7 +12,11 @@ use serde_json::Value as Json;
 
 use crate::host::{self, RunState};
 
-const PRELUDE: &str = include_str!("prelude.js");
+const PRELUDE: &str = concat!(
+    include_str!("prelude.js"),
+    "\n",
+    include_str!("scriptui.js")
+);
 
 /// File name of the user's script in QuickJS stack traces (to find the line).
 const SCRIPT_FILE: &str = "script";
@@ -252,6 +256,68 @@ impl Program<'_> {
             }
         }
     }
+}
+
+pub(crate) fn interactive_file(
+    source: String,
+    dock: bool,
+    endpoint: crate::interactive::Endpoint,
+    limit: Duration,
+) -> Result<Json, String> {
+    use crate::interactive::Request;
+    use std::sync::{Arc, Mutex, mpsc};
+    let rt = Runtime::new().map_err(|e| e.to_string())?;
+    rt.set_memory_limit(MEMORY_LIMIT);
+    rt.set_max_stack_size(JS_STACK);
+    let deadline = Arc::new(Mutex::new(Instant::now() + limit));
+    let timer = deadline.clone();
+    rt.set_interrupt_handler(Some(Box::new(move || {
+        Instant::now() >= *timer.lock().unwrap()
+    })));
+    let context = Context::full(&rt).map_err(|e| e.to_string())?;
+    context.with(|ctx| {
+        let generation = std::rc::Rc::new(Cell::new(0_u64));
+        let epoch = generation.clone();
+        let host_epoch = generation.clone();
+        let requests = endpoint.requests.clone();
+        let run = || -> rquickjs::Result<Json> {
+            ctx.globals().set("__generation", Function::new(ctx.clone(), move || epoch.get())?)?;
+            ctx.globals().set("__host", Function::new(ctx.clone(), move |ctx: Ctx<'_>, method: String, args: String| {
+                let (reply, receive) = mpsc::sync_channel(0);
+                let args = serde_json::from_str(&args).map_err(|e| rquickjs::Exception::throw_message(&ctx, &format!("{e}")))?;
+                if requests.send(Request::Host(method, args, reply)).is_err() { return throw(&ctx, "script closed"); }
+                match receive.recv() {
+                    Ok((result, n)) => {
+                        host_epoch.set((host_epoch.get() & !0xffff_ffff) | u64::from(n));
+                        result.map(|v| v.to_string()).map_err(|e| rquickjs::Exception::throw_message(&ctx, &e))
+                    }
+                    Err(_) => throw(&ctx, "script closed")
+                }
+            })?)?;
+            ctx.globals().set("__uiWait", Function::new(ctx.clone(), move |ctx: Ctx<'_>, tree: String| {
+                let tree = serde_json::from_str(&tree).map_err(|e| rquickjs::Exception::throw_message(&ctx, &format!("{e}")))?;
+                if endpoint.requests.send(Request::Display(tree)).is_err() {return throw(&ctx, "script closed");}
+                let event = endpoint.events.recv().map_err(|_| rquickjs::Exception::throw_message(&ctx, "script closed"))?;
+                *deadline.lock().unwrap() = Instant::now() + limit;
+                generation.set((generation.get() & !0xffff_ffff) + (1 << 32));
+                Ok(event.to_string())
+            })?)?;
+            let host = host_code().map_err(|e| rquickjs::Exception::throw_message(&ctx, &e))?;
+            host.api.load(&ctx)?.eval()?.1.finish::<()>()?;
+            // `alert` keeps the prelude's report entry: it returns nothing, so it never suspends
+            // the run and splits its undo step.
+            ctx.eval::<(), _>("globalThis.confirm = (m,d,t) => __scriptQuestion('confirm',m,d,t); globalThis.prompt = (m,d,t) => __scriptQuestion('prompt',m,d,t);")?;
+            let program = if dock {
+                format!("var __dock = new Panel(); (function(){{{}\n}}).call(__dock);", strip_directives(&source))
+            } else {source};
+            let result = Program::File(&program).eval(&ctx, host)?;
+            ctx.eval::<(), _>(if dock { "__finishUI(__dock)" } else { "__finishUI(null)" })?;
+            if result.is_object() { return Ok(Json::Null); }
+            let text = ctx.json_stringify(result)?.map(|s| s.to_string()).transpose()?;
+            Ok(serde_json::from_str(text.as_deref().unwrap_or("null")).unwrap_or(Json::Null))
+        };
+        run().catch(&ctx).map_err(|e| describe(e, None))
+    })
 }
 
 pub(crate) fn execute(

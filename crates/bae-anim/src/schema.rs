@@ -134,6 +134,11 @@ pub mod light {
     pub const CASTS_SHADOWS: &str = "light:casts_shadows";
     pub const SHADOW_DARKNESS: &str = "light:shadow_darkness";
     pub const SHADOW_DIFFUSION: &str = "light:shadow_diffusion";
+    /// Environment light: the layer whose image lights the scene.
+    pub const SOURCE: &str = "light:source";
+    pub const BACKGROUND_VISIBLE: &str = "light:background_visible";
+    pub const BACKGROUND_OPACITY: &str = "light:background_opacity";
+    pub const BACKGROUND_BLUR: &str = "light:background_blur";
 }
 
 /// `Mask` prim attributes.
