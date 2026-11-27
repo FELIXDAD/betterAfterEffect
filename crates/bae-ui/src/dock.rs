@@ -434,6 +434,10 @@ pub enum DropZone {
 #[derive(Clone, Debug, Default)]
 pub struct TabInfo {
     pub title: String,
+    /// What screen readers and menus call the tab when the title alone is
+    /// short (AE's Timeline tab shows only the comp name: "Comp 1" is
+    /// "Timeline Comp 1"); `None`: the title.
+    pub name: Option<String>,
     /// Label color swatch before the title (Effect Controls, comps, timelines).
     pub label: Option<Color32>,
     /// Lock toggle on viewer tabs; `None` hides it.
@@ -458,6 +462,18 @@ impl TabInfo {
     pub fn label(mut self, c: Color32) -> Self {
         self.label = Some(c);
         self
+    }
+
+    /// Shows `title` on the tab and keeps the current title as its name.
+    pub fn shown_as(mut self, title: impl Into<String>) -> Self {
+        let full = std::mem::replace(&mut self.title, title.into());
+        self.name = Some(full);
+        self
+    }
+
+    /// The tab's name for screen readers and menus.
+    pub fn spoken(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.title)
     }
 
     pub fn close_submenu(mut self) -> Self {
@@ -891,7 +907,7 @@ impl Dock {
                 .iter()
                 .map(|s| {
                     let [a, b] = s.between.clone().map(|p| {
-                        p.map(|p| tr(&host.tab(&p).title).to_owned())
+                        p.map(|p| tr(host.tab(&p).spoken()).to_owned())
                             .unwrap_or_default()
                     });
                     crate::a11y::context(&[tr("Resize Panels"), &format!("{a} / {b}")])
@@ -1088,7 +1104,7 @@ impl Dock {
             let tab_id = self.id.with(("tab", panel));
             let resp = ui
                 .interact(tab_rect, tab_id, Sense::click_and_drag())
-                .labeled_toggle(egui::WidgetType::SelectableLabel, tr(&info.title), active);
+                .labeled_toggle(egui::WidgetType::SelectableLabel, tr(info.spoken()), active);
             let hovered = resp.hovered();
 
             if resp.clicked() || resp.secondary_clicked() {
@@ -1121,7 +1137,7 @@ impl Dock {
                 .interact(close_rect, tab_id.with("close"), Sense::click())
                 .labeled(
                     egui::WidgetType::Button,
-                    &crate::a11y::context(&[tr(&info.title), tr("Close Panel")]),
+                    &crate::a11y::context(&[tr(info.spoken()), tr("Close Panel")]),
                 );
             if (active && info.viewer) || hovered || close_resp.hovered() {
                 let c = if close_resp.hovered() {
@@ -1153,7 +1169,7 @@ impl Dock {
                     .interact(r, tab_id.with("lock"), Sense::click())
                     .labeled_toggle(
                         egui::WidgetType::Checkbox,
-                        &crate::a11y::context(&[tr(&info.title), tr("Lock")]),
+                        &crate::a11y::context(&[tr(info.spoken()), tr("Lock")]),
                         locked,
                     );
                 let icon = if locked { Icon::Lock } else { Icon::Unlock };
@@ -1184,7 +1200,7 @@ impl Dock {
                     .interact(mr.expand(3.0), tab_id.with("menu"), Sense::click())
                     .labeled(
                         egui::WidgetType::Button,
-                        &crate::a11y::context(&[tr(&info.title), tr("Panel Menu")]),
+                        &crate::a11y::context(&[tr(info.spoken()), tr("Panel Menu")]),
                     );
                 let mc = if menu_resp.hovered() {
                     color::TEXT_STRONG
@@ -1238,7 +1254,7 @@ impl Dock {
                     &frame
                         .tabs
                         .first()
-                        .map(|p| tr(&host.tab(p).title).to_owned())
+                        .map(|p| tr(host.tab(p).spoken()).to_owned())
                         .unwrap_or_default(),
                     tr("More Panels"),
                 ]),
@@ -1400,7 +1416,11 @@ impl Dock {
             let id = self.id.with(("tab", panel));
             let resp = ui
                 .interact(header, id, Sense::click_and_drag())
-                .labeled_toggle(egui::WidgetType::CollapsingHeader, tr(&info.title), is_open);
+                .labeled_toggle(
+                    egui::WidgetType::CollapsingHeader,
+                    tr(info.spoken()),
+                    is_open,
+                );
             if resp.clicked() {
                 if is_open {
                     self.actions.push(Action::Collapse(frame.id, i));
@@ -1450,7 +1470,7 @@ impl Dock {
                 );
                 let menu_resp = ui.interact(mr, id.with("menu"), Sense::click()).labeled(
                     egui::WidgetType::Button,
-                    &crate::a11y::context(&[tr(&info.title), tr("Panel Menu")]),
+                    &crate::a11y::context(&[tr(info.spoken()), tr("Panel Menu")]),
                 );
                 let mc = if menu_resp.hovered() {
                     color::TEXT_STRONG
@@ -1472,7 +1492,7 @@ impl Dock {
                     .interact(handle, id.with("stack-resize"), Sense::drag())
                     .labeled(
                         egui::WidgetType::ResizeHandle,
-                        &crate::a11y::context(&[tr("Resize Panels"), tr(&info.title)]),
+                        &crate::a11y::context(&[tr("Resize Panels"), tr(info.spoken())]),
                     );
                 if hr.hovered() || hr.dragged() {
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
@@ -1566,7 +1586,7 @@ impl Dock {
             let title = fl
                 .frame
                 .active_panel()
-                .map(|p| tr(&host.tab(p).title).to_owned())
+                .map(|p| tr(host.tab(p).spoken()).to_owned())
                 .unwrap_or_default();
             let mut builder = ViewportBuilder::default()
                 .with_title(title)
@@ -1860,7 +1880,7 @@ fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl Pane
     // The panel is a named region for screen readers; widgets inside it are
     // told apart within it (issue #128). Tests find a widget's panel through
     // its author id.
-    let title = tr(&host.tab(panel).title).to_owned();
+    let title = tr(host.tab(panel).spoken()).to_owned();
     let pane = child.unique_id();
     child.ctx().accesskit_node_builder(pane, |node| {
         node.set_role(egui::accesskit::Role::Pane);

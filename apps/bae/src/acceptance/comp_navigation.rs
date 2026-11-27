@@ -196,6 +196,8 @@ fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
     let saved_child_time = h.state().now();
     assert_ne!(saved_child_time, Time::from_seconds(1.0));
     double_click_at(&mut h, parent);
+    // Two comps open now: the comp tab row is back, the rows moved down.
+    let name = row(&h, "Child").center();
     double_click_at(&mut h, name);
     assert_eq!(h.state().active_comp(), Some(child));
     assert_eq!(h.state().now(), saved_child_time);
@@ -217,7 +219,8 @@ fn tab_menu_and_toolbar_navigate_direct_parents_and_children() {
     );
     key(&mut h, Modifiers::NONE, Key::Escape);
     double_click_at(&mut h, layer);
-    assert!(find_text(&h, "Timeline Child").is_some());
+    // AE's Timeline tab shows the comp; its name says "Timeline".
+    assert!(h.query_all_by_label("Timeline Child").next().is_some());
     assert!(find_text(&h, "Composition Child").is_some());
     send(&mut h, Event::PointerMoved(pointer));
     key(&mut h, Modifiers::NONE, Key::Tab);
@@ -230,7 +233,7 @@ fn tab_menu_and_toolbar_navigate_direct_parents_and_children() {
             .is_none()
     );
     click_at(&mut h, parent.center());
-    assert!(find_text(&h, "Timeline Parent").is_some());
+    assert!(h.query_all_by_label("Timeline Parent").next().is_some());
     assert!(find_text(&h, "Composition Parent").is_some());
 
     let menu = h
