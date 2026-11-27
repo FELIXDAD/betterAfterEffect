@@ -1055,8 +1055,11 @@ impl SyncSession {
         let max_backlog = self.config.max_backlog.filter(|_| flow);
         let mut keys = docs.doc_keys();
         if !self.too_large.is_empty() || !self.snapshot_too_large.is_empty() {
-            self.too_large.retain(|k, _| keys.contains(k));
-            self.snapshot_too_large.retain(|k, _| keys.contains(k));
+            // A set: searching `keys` for each memo would cost documents x
+            // memos on every pump when many documents do not fit.
+            let present: BTreeSet<&DocKey> = keys.iter().collect();
+            self.too_large.retain(|k, _| present.contains(k));
+            self.snapshot_too_large.retain(|k, _| present.contains(k));
         }
         if let Some(next) = self.next_doc.take()
             && let Some(i) = keys.iter().position(|k| *k == next)
@@ -1844,5 +1847,117 @@ mod tests {
         assert!(out.errors.is_empty(), "{:?}", out.errors);
         assert_eq!(t.data_sent(), ["a"]);
         assert!(s.unsynced(&docs).is_empty());
+    }
+
+    /// `n` documents without Loro, each with an update of `size` bytes and
+    /// one peer of its own, so a pump does little but the session's own
+    /// bookkeeping.
+    struct Synthetic {
+        versions: BTreeMap<DocKey, VersionVector>,
+        size: usize,
+    }
+
+    impl Synthetic {
+        fn new(n: usize, size: usize) -> Self {
+            let versions = (0..n)
+                .map(|i| {
+                    let mut vv = VersionVector::new();
+                    vv.insert(i as PeerID + 1, 1);
+                    (key(&format!("layer{i:05}")), vv)
+                })
+                .collect();
+            Synthetic { versions, size }
+        }
+    }
+
+    impl DocSet for Synthetic {
+        fn doc_keys(&self) -> Vec<DocKey> {
+            self.versions.keys().cloned().collect()
+        }
+
+        fn version(&self, doc: &DocKey) -> Option<VersionVector> {
+            self.versions.get(doc).cloned()
+        }
+
+        fn export_updates(&self, _: &DocKey, _: &VersionVector) -> Result<Vec<u8>, SyncError> {
+            Ok(vec![0; self.size])
+        }
+
+        fn export_snapshot(&self, _: &DocKey) -> Result<Vec<u8>, SyncError> {
+            Ok(vec![0; self.size])
+        }
+
+        fn import(&mut self, _: &DocKey, _: &[u8]) -> Result<Imported, SyncError> {
+            Ok(Imported::Done(None))
+        }
+    }
+
+    /// Refuses document data over `max` bytes (a hub link's limit) and takes
+    /// everything else, however large (a `Hello` listing every document).
+    struct DataLimited {
+        inbox: VecDeque<Message>,
+        max: usize,
+    }
+
+    impl Transport for DataLimited {
+        fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+            if matches!(msg, Message::Updates { .. } | Message::Snapshot { .. }) {
+                crate::transport::check_size(&msg, Some(self.max))?;
+            }
+            Ok(())
+        }
+
+        fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+            Ok(self.inbox.pop_front())
+        }
+    }
+
+    /// Many documents that do not fit at once (a hub with a small limit and
+    /// a newcomer that lacks many large layers): each pump checks what is
+    /// remembered of them against the documents, and that stays about
+    /// linear in the number of documents. Looked up in the list of
+    /// documents one memo at a time, it cost documents x memos per pump on
+    /// the thread that owns the stage: 8 times the documents took more than
+    /// 50 times as long (about 10 now). Measured as the fastest of a few pumps each, so a
+    /// busy machine does not make it fail.
+    #[test]
+    fn many_documents_that_do_not_fit_do_not_make_pumps_quadratic() {
+        let per_pump = |n: usize, runs: usize| {
+            let mut docs = Synthetic::new(n, 600);
+            let mut config = SessionConfig::new(ClientId::new("app").unwrap());
+            config.hello_interval = None;
+            let mut s = SyncSession::new(config);
+            let mut t = DataLimited {
+                inbox: VecDeque::new(),
+                max: 300,
+            };
+            t.inbox.push_back(Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                client: ClientId::new("hub").unwrap(),
+                versions: Vec::new(),
+                seq: 1,
+                ack: None,
+            });
+            let out = s.pump(&mut docs, &mut t).unwrap();
+            assert_eq!(out.errors.len(), n);
+            assert_eq!(s.too_large.len(), n);
+            (0..runs)
+                .map(|_| {
+                    let start = Instant::now();
+                    let out = s.pump(&mut docs, &mut t).unwrap();
+                    let took = start.elapsed();
+                    assert!(out.errors.is_empty(), "{:?}", out.errors);
+                    took
+                })
+                .min()
+                .unwrap()
+        };
+        let small = per_pump(1000, 20);
+        let large = per_pump(8000, 10);
+        let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-9);
+        assert!(
+            ratio < 30.0,
+            "8 times the documents took {ratio:.0} times as long ({small:?}, {large:?})"
+        );
     }
 }
