@@ -358,6 +358,23 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
         .map_or(0, |v| v as i64)
 }
 
+/// Timeline switch painting and menu toggles share the single undoable edit.
+pub(crate) fn set_layer_switch(
+    cx: &mut PanelContext<'_>,
+    layers: impl serde::Serialize,
+    attr: &str,
+    value: bae_model::Value,
+) {
+    let mut params = json!({"layers": layers, "attr": attr, "value": value});
+    if matches!(attr, "frame_blending" | "motion_blur") {
+        params["enable_comp_switch"] = json!(
+            crate::prefs::current(cx.resources)
+                .bool("previews.auto_enable_frame_blending_motion_blur")
+        );
+    }
+    cx.invoke_with("layer.set_attr", params);
+}
+
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
     (ids::INTERPRET_FOOTAGE, "Interpret Footage: Main..."),
@@ -2951,10 +2968,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
             // AE: on for all unless every one is on already.
             let on = !targets.iter().all(|l| switch_on(stage, l, attr));
-            cx.invoke_with(
-                "layer.set_attr",
-                json!({"layers": targets, "attr": attr, "value": {"type": "bool", "value": on}}),
-            );
+            set_layer_switch(cx, targets, attr, bae_model::Value::Bool(on));
         }
         ids::UNLOCK_ALL_LAYERS | ids::SHOW_ALL_VIDEO | ids::HIDE_OTHER_VIDEO => {
             let all = query::comp_layers(stage, &info.path);
