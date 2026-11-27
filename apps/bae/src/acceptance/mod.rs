@@ -46,6 +46,7 @@ mod layers;
 mod layout;
 mod liquify;
 mod marker_label_preferences;
+mod media_panels;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
