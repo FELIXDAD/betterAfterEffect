@@ -654,6 +654,12 @@ enum Phase {
     Closed,
 }
 
+/// `transport`'s notes and their `notes_seq`, if that moved since `seen`.
+fn fresh_notes(transport: &ThreadedTransport, seen: u64) -> Option<(u64, LinkNotes)> {
+    let seq = transport.notes_seq();
+    (seq != seen).then(|| (seq, transport.notes()))
+}
+
 /// Whether a shared folder linked read-only can be written now (spec 7.5).
 enum WriteCheck {
     /// Not linked read-only to a folder, or no checks (`failed_retry` is
@@ -913,15 +919,16 @@ impl Connection {
         &self.link_notes
     }
 
-    /// Copy the link's notes if they changed.
+    /// Copy the current link's notes if they changed.
     fn take_notes(&mut self) {
         let fresh = match &self.phase {
-            Phase::Linked { transport, .. } => {
-                let seq = transport.notes_seq();
-                (seq != self.notes_seen).then(|| (seq, transport.notes()))
-            }
+            Phase::Linked { transport, .. } => fresh_notes(transport, self.notes_seen),
             _ => None,
         };
+        self.keep_notes(fresh);
+    }
+
+    fn keep_notes(&mut self, fresh: Option<(u64, LinkNotes)>) {
         if let Some((seq, notes)) = fresh {
             self.notes_seen = seq;
             if notes != self.link_notes {
@@ -1006,9 +1013,6 @@ impl Connection {
         self.advance(now);
         let mut failed = None;
         let mut stuck = false;
-        // Before the pump: notes copied before a message arrived come with
-        // it (the shared folder's first scan, with its `Hello`).
-        self.take_notes();
         if let Phase::Linked {
             transport, since, ..
         } = &mut self.phase
@@ -1035,6 +1039,10 @@ impl Connection {
                 Err(e) => failed = Some(e),
             }
         }
+        // After the pump: the link's thread copies its notes before it hands
+        // on a message, so they are here with every message this pump took
+        // (the shared folder's first scan, with its `Hello`).
+        self.take_notes();
         if let Some(e) = failed {
             self.lost(e, now);
         }
@@ -1144,7 +1152,8 @@ impl Connection {
             // The link is gone: what it did not confirm may not have arrived.
             self.session.forget_unconfirmed();
         }
-        self.take_notes();
+        let fresh = fresh_notes(&transport, self.notes_seen);
+        self.keep_notes(fresh);
         let unsynced = self.unsynced_docs(docs);
         let pacing = Pacing {
             max_backlog: self.session.config().max_backlog,
