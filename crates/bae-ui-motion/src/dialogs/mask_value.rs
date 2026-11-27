@@ -18,6 +18,7 @@ use super::fields;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Shape,
+    ShapePath,
     Feather,
     Opacity,
     Expansion,
@@ -27,6 +28,7 @@ impl Kind {
     fn title(self) -> &'static str {
         match self {
             Kind::Shape => "Mask Shape",
+            Kind::ShapePath => "Path",
             Kind::Feather => "Mask Feather",
             Kind::Opacity => "Mask Opacity",
             Kind::Expansion => "Mask Expansion",
@@ -90,7 +92,7 @@ impl MaskValue {
         kind: Kind,
     ) -> Option<Self> {
         let first = masks.first()?;
-        let masks: Vec<(PrimPath, Time)> = if kind == Kind::Shape {
+        let masks: Vec<(PrimPath, Time)> = if matches!(kind, Kind::Shape | Kind::ShapePath) {
             vec![(first.clone(), query::to_key_time(stage, first, now))]
         } else {
             masks
@@ -107,7 +109,7 @@ impl MaskValue {
             },
             Kind::Opacity => [num("opacity", 100.0), 0.0],
             Kind::Expansion => [num("expansion", 0.0), 0.0],
-            Kind::Shape => [0.0, 0.0],
+            Kind::Shape | Kind::ShapePath => [0.0, 0.0],
         };
         let path = match sample("path") {
             Some(Value::Bezier(p)) => Some(p),
@@ -205,7 +207,7 @@ impl MaskValue {
                     );
                 });
             }
-            Kind::Shape => {
+            Kind::Shape | Kind::ShapePath => {
                 dialog::group(ui, tr("Bounding Box"), |ui| {
                     // AE: Top and Bottom, Left and Right in pairs.
                     for (i, label, x) in [
@@ -311,7 +313,7 @@ impl MaskValue {
             Kind::Feather => ("feather", Value::Vec2(self.values)),
             Kind::Opacity => ("opacity", Value::Float(self.values[0].clamp(0.0, 100.0))),
             Kind::Expansion => ("expansion", Value::Float(self.values[0])),
-            Kind::Shape => match self.shape_path() {
+            Kind::Shape | Kind::ShapePath => match self.shape_path() {
                 Some(p) => ("path", Value::Bezier(p)),
                 None => return Vec::new(),
             },

@@ -37,6 +37,7 @@ fn playhead_has_priority_after_preview_stops() {
                 rate,
                 range,
                 looping,
+                0,
                 1,
                 &h.ctx,
             ) {
@@ -64,6 +65,64 @@ fn playhead_has_priority_after_preview_stops() {
     let short = TimeRange::new(rate.frame_to_time(5), rate.frame_to_time(8));
     get(&mut worker, &h, 7, short, true);
     get(&mut worker, &h, 5, short, true);
+}
+
+#[test]
+fn cache_before_playback_renders_the_skipped_range_from_current_time() {
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = super::Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let registry = Arc::new(ViewportTextureRegistry::new());
+    let mut worker = PlaybackPreview::new(gpu, registry);
+    let rate = FrameRate::FPS_30;
+    let current = rate.frame_to_time(4);
+    let range = TimeRange::new(current, rate.frame_to_time(5));
+    let mut pass = crate::session::CachePass {
+        first: 4,
+        next: 4,
+        step: 2,
+        base: 0,
+        frames: 8,
+    };
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        worker.poll(
+            &h.stage,
+            &h.resources,
+            &comp,
+            current,
+            rate,
+            range,
+            false,
+            1,
+            4,
+            &h.ctx,
+        );
+        if worker.fill_cache(&mut pass, rate, 1920 * 1080 * 4 / 16) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "cache stalled at frame {}",
+            pass.next
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(pass.next, 12);
+    worker.publish_ranges(&h.session(), rate);
+    let session = h.session();
+    let s = session.lock();
+    let (_, _, ranges) = s.cached_preview.as_ref().unwrap();
+    for frame in 0..8 {
+        assert_eq!(
+            ranges
+                .iter()
+                .any(|span| span.contains(rate.frame_to_time(frame))),
+            frame % 2 == 0
+        );
+    }
 }
 
 /// Consume consecutive worker frames as fast as possible. Shell registration is
@@ -110,6 +169,7 @@ fn playback_worker_4k() {
                         rate,
                         range,
                         false,
+                        0,
                         1,
                         &h.ctx,
                     )
@@ -143,6 +203,7 @@ fn playback_worker_4k() {
                     rate,
                     cached,
                     true,
+                    0,
                     1,
                     &h.ctx,
                 )
@@ -333,6 +394,7 @@ fn measure_cadence(
             rate,
             info.work_area,
             true,
+            0,
             1,
             &h.ctx,
         );

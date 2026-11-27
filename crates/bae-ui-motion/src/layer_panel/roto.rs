@@ -10,6 +10,7 @@ struct StrokeInput {
     time: Time,
     radius: f64,
     background: bool,
+    refine: bool,
     points: Vec<[f64; 2]>,
 }
 
@@ -44,17 +45,16 @@ impl Brush {
         tool: Tool,
     ) {
         let fx = layer.effects.iter().find(|e| e.match_name == ROTO);
-        if tool != Tool::RotoBrush
+        let refine = tool == Tool::RefineEdge;
+        if (refine && fx.is_none())
             || fx.is_some_and(|e| e.param(FROZEN).and_then(Value::as_prim_ref).is_some())
         {
             self.cancel_stroke();
             return;
         }
-        if self
-            .stroke
-            .as_ref()
-            .is_some_and(|s| s.layer != layer.path || s.time != layer.layer_time)
-        {
+        if self.stroke.as_ref().is_some_and(|s| {
+            s.layer != layer.path || s.time != layer.layer_time || s.refine != refine
+        }) {
             self.cancel_stroke();
         }
         let radius = crate::tools::shared(cx.resources)
@@ -70,13 +70,26 @@ impl Brush {
                 ui.id().with(("roto", layer.path.as_str())),
                 Sense::click_and_drag(),
             )
-            .labeled(egui::WidgetType::Other, tr("Roto Brush Canvas"));
+            .labeled(
+                egui::WidgetType::Other,
+                tr(if refine {
+                    "Refine Edge Canvas"
+                } else {
+                    "Roto Brush Canvas"
+                }),
+            );
         let bg = ui.input(|i| i.modifiers.alt);
         self.ring = response.hover_pos().map(|p| {
             (
                 p,
                 (radius as f32 * view.scale).max(1.),
-                if bg { Color32::RED } else { Color32::GREEN },
+                if refine {
+                    Color32::LIGHT_BLUE
+                } else if bg {
+                    Color32::RED
+                } else {
+                    Color32::GREEN
+                },
             )
         });
         let loc = |p| (view.to_comp(p) + min).to_array();
@@ -92,6 +105,7 @@ impl Brush {
                 time: layer.layer_time,
                 radius,
                 background: bg,
+                refine,
                 points: vec![loc(p)],
             });
         }
@@ -129,7 +143,14 @@ impl Brush {
                 });
             let value = preview.effects[index]
                 .params
-                .entry(format!("{STROKES:04}"))
+                .entry(format!(
+                    "{:04}",
+                    if s.refine {
+                        bae_vision::EDGE_STROKES
+                    } else {
+                        STROKES
+                    }
+                ))
                 .or_insert_with(|| Value::FloatList(Vec::new()));
             if let Value::FloatList(data) = value {
                 bae_vision::append_stroke(
@@ -141,7 +162,13 @@ impl Brush {
             }
             ui.ctx().request_repaint();
         } else {
-            cx.invoke_with("roto.stroke",json!({"layer":s.layer,"time":s.time,"radius":s.radius,"background":s.background,"points":s.points}));
+            cx.invoke_with(
+                "roto.stroke",
+                json!({
+                    "layer": s.layer, "time": s.time, "radius": s.radius,
+                    "background": s.background, "refine": s.refine, "points": s.points
+                }),
+            );
             self.stroke = None;
         }
     }
@@ -179,10 +206,15 @@ impl Brush {
                 .max_rect(rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
+        // Nothing to freeze before the first stroke.
+        let strokes = !bae_vision::segments(fx.param(bae_vision::STROKES)).is_empty();
         if let Some(job) = &self.job {
             child.label(format!("{} / {}", job.done, job.frames));
         } else if child
-            .button(tr(if frozen { "Unfreeze" } else { "Freeze" }))
+            .add_enabled(
+                frozen || strokes,
+                egui::Button::new(tr(if frozen { "Unfreeze" } else { "Freeze" })),
+            )
             .clicked()
         {
             self.message.clear();
