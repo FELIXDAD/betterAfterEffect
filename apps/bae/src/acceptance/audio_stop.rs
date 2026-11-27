@@ -133,7 +133,8 @@ fn every_way_playback_stops_silences_the_sound_at_once() {
 
     play(&mut h, &first);
     let head = timeline_header(&h).expect("timeline header");
-    let tick = find_texts(&h, |t| t == "01f" || t == "1s" || t == "0:00:01:00")
+    // AE 26's ruler labels (#844): 01:00f under a second's step, 01s above.
+    let tick = find_texts(&h, |t| t == "01:00f" || t == "01s" || t == "0:00:01:00")
         .into_iter()
         .find(|r| r.left() > head.right())
         .unwrap_or_else(|| panic!("no ruler label in {:?}", painted_texts(&h)));
