@@ -165,27 +165,8 @@ impl Project {
     /// Start the relay for the project directory `dir` (which must exist) and
     /// wait until what it holds is loaded. Blocks.
     pub fn open(id: ProjectId, dir: PathBuf, config: &HubConfig) -> Result<Arc<Project>, HubError> {
-        let (events, rx) = mpsc::channel();
-        let waker = Waker {
-            events: events.clone(),
-            pending: Arc::new(AtomicBool::new(false)),
-        };
-        let status = Arc::new(Mutex::new(ProjectStatus::default()));
+        let (ctx, events, status) = RelayThread::new(id.clone(), dir, config);
         let (ready_tx, ready_rx) = mpsc::channel();
-        let ctx = RelayThread {
-            id: id.clone(),
-            dir,
-            ticks: Ticks {
-                active: config.active_tick,
-                quiet: config.quiet_tick.max(config.active_tick),
-                empty: config.empty_tick,
-            },
-            store_send_interval: config.store_send_interval,
-            client_backlog: config.limits.max_backlog,
-            rx,
-            waker,
-            status: status.clone(),
-        };
         let thread = std::thread::Builder::new()
             .name(format!("hub-{id}"))
             .spawn(move || ctx.run(ready_tx))
@@ -375,16 +356,66 @@ enum Load {
     Shutdown,
 }
 
+/// A relay whose project directory is connected and loaded (or still
+/// loading, after `LOAD_TIMEOUT`).
+struct Started {
+    relay: Relay,
+    store: PeerHandle,
+    notes: StoreNotes,
+}
+
 impl RelayThread {
+    /// The relay thread of the project directory `dir`, the sender of its
+    /// events and its status.
+    fn new(
+        id: ProjectId,
+        dir: PathBuf,
+        config: &HubConfig,
+    ) -> (RelayThread, mpsc::Sender<Event>, Arc<Mutex<ProjectStatus>>) {
+        let (events, rx) = mpsc::channel();
+        let waker = Waker {
+            events: events.clone(),
+            pending: Arc::new(AtomicBool::new(false)),
+        };
+        let status = Arc::new(Mutex::new(ProjectStatus::default()));
+        let thread = RelayThread {
+            id,
+            dir,
+            ticks: Ticks {
+                active: config.active_tick,
+                quiet: config.quiet_tick.max(config.active_tick),
+                empty: config.empty_tick,
+            },
+            store_send_interval: config.store_send_interval,
+            client_backlog: config.limits.max_backlog,
+            rx,
+            waker,
+            status: status.clone(),
+        };
+        (thread, events, status)
+    }
+
     fn run(self, ready: mpsc::Sender<Result<(), HubError>>) {
-        let mut relay = Relay::new(hub_client());
-        let store = match open_store(&self.dir, &self.waker) {
-            Ok(s) => s,
+        let started = match self.start() {
+            Ok(Some(s)) => s,
+            Ok(None) => return,
             Err(e) => {
-                let _ = ready.send(Err(e.into()));
+                let _ = ready.send(Err(e));
                 return;
             }
         };
+        if ready.send(Ok(())).is_err() {
+            return;
+        }
+        self.serve(started.relay, Some(started.store), started.notes);
+    }
+
+    /// Connect the project directory and load what it holds; warn about
+    /// documents it will not write (before the project is ready). `None`:
+    /// shut down while loading.
+    fn start(&self) -> Result<Option<Started>, HubError> {
+        let mut relay = Relay::new(hub_client());
+        let store = open_store(&self.dir, &self.waker)?;
         let store_handle = relay.connect_with(
             Box::new(store),
             store_config(&relay, self.store_send_interval),
@@ -407,16 +438,14 @@ impl RelayThread {
                 project = %self.id,
                 "project still loading; accepting connections anyway"
             ),
-            Load::StoreFailed(e) => {
-                let _ = ready.send(Err(e.into()));
-                return;
-            }
-            Load::Shutdown => return,
+            Load::StoreFailed(e) => return Err(e.into()),
+            Load::Shutdown => return Ok(None),
         }
-        if ready.send(Ok(())).is_err() {
-            return;
-        }
-        self.serve(relay, Some(store_handle), store_notes);
+        Ok(Some(Started {
+            relay,
+            store: store_handle,
+            notes: store_notes,
+        }))
     }
 
     /// Pump until the project directory has delivered everything it holds (its
@@ -670,11 +699,43 @@ mod tests {
         out
     }
 
+    /// Log output of a `tracing` subscriber, for tests.
+    #[derive(Clone, Default)]
+    struct CapturedLog(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CapturedLog {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl CapturedLog {
+        /// Warnings and errors, written here.
+        fn subscriber(&self) -> impl tracing::Subscriber + Send + Sync + 'static {
+            let log = self.clone();
+            tracing_subscriber::fmt()
+                .with_writer(move || log.clone())
+                .with_ansi(false)
+                .with_max_level(tracing::Level::WARN)
+                .finish()
+        }
+
+        fn text(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
     /// The hub's own log of a document is of a newer format (a newer bae-hub
-    /// ran on this data directory, then this one): the project opens, the
-    /// log is left as it is, and the status (`/v1/projects`) lists the
-    /// document as not saved; the load logs a warning. Edits to it are taken
-    /// and not written.
+    /// ran on this data directory, then this one): the load warns about it
+    /// (project and document) before the project is ready, the project
+    /// opens, the log is left as it is, and the status (`/v1/projects`)
+    /// lists the document as not saved. Edits to it are taken and not
+    /// written.
     #[test]
     fn a_newer_format_own_log_is_reported_at_load() {
         let tmp = tempfile::tempdir().unwrap();
@@ -690,7 +751,28 @@ mod tests {
         let bytes = [record(header.as_bytes()), b"newer records".to_vec()].concat();
         fs::write(&log, &bytes).unwrap();
         let config = HubConfig::new(tmp.path());
-        let project = Project::open(ProjectId::new("film").unwrap(), dir, &config).unwrap();
+
+        // The start of the relay thread, as `Project::open` runs it before
+        // the project is ready (on this thread, to capture its log).
+        let id = ProjectId::new("film").unwrap();
+        let (thread, _events, _status) = RelayThread::new(id.clone(), dir.clone(), &config);
+        let warnings = CapturedLog::default();
+        let started = tracing::subscriber::with_default(warnings.subscriber(), || thread.start());
+        let started = started.unwrap().expect("loaded");
+        assert_eq!(started.notes.not_saved, [DocKey::parse("anim/a").unwrap()]);
+        let text = warnings.text();
+        assert!(
+            text.contains("WARN")
+                && text.contains("project=film")
+                && text.contains("anim/a")
+                && text.contains("newer format version"),
+            "{text}"
+        );
+        // Let go of the directory.
+        drop(started);
+        drop(thread);
+
+        let project = Project::open(id, dir, &config).unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);
         while project.status().not_saved.is_empty() {
             assert!(Instant::now() < deadline, "not reported");

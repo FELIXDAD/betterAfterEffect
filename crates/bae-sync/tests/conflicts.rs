@@ -1046,10 +1046,13 @@ fn the_catch_up_timeout_starts_when_the_catch_up_begins() {
     a.apply(t1 + S, set(&title(), "opacity", 10.0));
     b.apply(t1 + S, set(&layer("x"), "opacity", 11.0));
     settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
-    // Offline for hours: nothing of the others arrived, the mark stays.
+    // Offline for hours, checked all along (an app that checks every frame):
+    // nothing of the others arrived, the mark stays.
     let t2 = t1 + 3600 * 5 * S;
-    assert!(a.tracker.check_at(&a.stage, t2).is_empty());
-    assert!(a.tracker.offline_since().is_some());
+    for t in [t1 + 2 * S, t1 + 60 * S, t2] {
+        assert!(a.tracker.check_at(&a.stage, t).is_empty());
+        assert!(a.tracker.offline_since().is_some(), "dropped while offline");
+    }
 
     // Back: Bob's edit arrives, the app never calls `caught_up`.
     connect(&mut relay, &mut a);
@@ -1068,6 +1071,126 @@ fn the_catch_up_timeout_starts_when_the_catch_up_begins() {
     let na = a.take_notices();
     assert_eq!(na.len(), 1, "{na:#?}");
     assert_eq!(na[0].ours, value(20.0));
+}
+
+/// Drop `c`'s link; the hub forgets the connection too.
+fn drop_link(relay: &mut Relay, c: &mut Client) {
+    let handle = relay
+        .peers()
+        .iter()
+        .find(|(_, id)| id.as_ref().map(ClientId::as_str) == Some(c.name.as_str()))
+        .expect("connected")
+        .0;
+    relay.disconnect(handle);
+    c.link = None;
+}
+
+/// A catch-up the link drops again before it completes (flaky Wi-Fi): the
+/// next `connection_lost` restarts the timeout. Neither the checks while
+/// offline again nor the ops the interrupted catch-up brought start it, so
+/// the reconnect an hour later still ends in a summary of the whole time.
+#[test]
+fn an_interrupted_catch_up_restarts_the_timeout() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.tracker.config_mut().catch_up_timeout = Some(30 * S);
+    a.tracker.connection_lost_at(&a.stage, t1);
+    drop_link(&mut relay, &mut a);
+    a.apply(t1 + S, set(&title(), "opacity", 10.0));
+    b.apply(t1 + S, set(&layer("x"), "opacity", 11.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
+
+    // Back: Bob's ops arrive (the catch-up began), and the link drops again
+    // before the app saw it caught up.
+    let t2 = t1 + 60 * S;
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t2);
+    assert!(a.tracker.offline_since().is_some());
+    a.tracker.connection_lost_at(&a.stage, t2 + 2 * S);
+    drop_link(&mut relay, &mut a);
+
+    // Offline for an hour, checked all along. Bob overrides Alice's edit.
+    a.apply(t2 + 3 * S, set(&title(), "scale", 5.0));
+    b.bump(t2 + 3 * S, 5);
+    b.apply(t2 + 3 * S, set(&title(), "scale", 7.0));
+    settle(&mut relay, &mut [&mut b], t2 + 3 * S);
+    for t in [40, 600, 3599] {
+        assert!(a.tracker.check_at(&a.stage, t2 + t * S).is_empty());
+        assert!(
+            a.tracker.offline_since().is_some(),
+            "dropped offline at +{t} s"
+        );
+    }
+
+    // Back again: the summary covers both offline stretches.
+    let t3 = t2 + 3600 * S;
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t3);
+    assert!(a.session.is_caught_up(&a.stage));
+    assert!(a.take_notices().is_empty(), "left to the summary");
+    let caught = a
+        .tracker
+        .caught_up_at(&a.stage, t3)
+        .unwrap()
+        .expect("a summary");
+    let s = caught.summary;
+    let brief = |e: &bae_sync::OfflineEdit| (e.attr.clone(), e.ours.clone());
+    assert_eq!(
+        s.overridden.iter().map(brief).collect::<Vec<_>>(),
+        [("scale".to_owned(), value(5.0))]
+    );
+    assert!(
+        s.kept
+            .iter()
+            .any(|e| e.attr == "opacity" && e.ours == value(10.0)),
+        "{:#?}",
+        s.kept
+    );
+
+    // The timeout still works on the next catch-up that never completes.
+    a.tracker.connection_lost_at(&a.stage, t3 + S);
+    drop_link(&mut relay, &mut a);
+    b.apply(t3 + 2 * S, set(&layer("y"), "opacity", 21.0));
+    settle(&mut relay, &mut [&mut b], t3 + 2 * S);
+    let t4 = t3 + 600 * S;
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t4);
+    assert!(a.tracker.check_at(&a.stage, t4 + 29 * S).is_empty());
+    assert!(a.tracker.offline_since().is_some());
+    assert!(a.tracker.check_at(&a.stage, t4 + 30 * S).is_empty());
+    assert!(a.tracker.offline_since().is_none(), "timed out");
+}
+
+/// A layer file that carries others' history, added to the stack while
+/// offline, is no sign of a link: it does not start the catch-up timeout.
+/// Ops of others that arrive in it later do.
+#[test]
+fn a_layer_added_offline_does_not_start_the_catch_up_timeout() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.tracker.config_mut().catch_up_timeout = Some(30 * S);
+    a.tracker.connection_lost_at(&a.stage, t1);
+    drop_link(&mut relay, &mut a);
+    let bytes = b.root().export_snapshot().unwrap();
+    let extra = bae_model::Sublayer::from_snapshot(sl("extra"), &bytes).unwrap();
+    let event = a.stage.insert_sublayer(extra, 0).unwrap();
+    a.observe(&event, t1 + 5 * S);
+    for t in [6, 40, 3600] {
+        assert!(a.tracker.check_at(&a.stage, t1 + t * S).is_empty());
+        assert!(
+            a.tracker.offline_since().is_some(),
+            "dropped offline at +{t} s"
+        );
+    }
+
+    // Back: Bob's ops arrive, the timeout starts.
+    b.apply(t1 + 3601 * S, set(&layer("x"), "opacity", 11.0));
+    settle(&mut relay, &mut [&mut b], t1 + 3601 * S);
+    let t2 = t1 + 3700 * S;
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t2);
+    assert!(a.tracker.check_at(&a.stage, t2 + 29 * S).is_empty());
+    assert!(a.tracker.offline_since().is_some());
+    assert!(a.tracker.check_at(&a.stage, t2 + 30 * S).is_empty());
+    assert!(a.tracker.offline_since().is_none(), "timed out");
 }
 
 #[test]

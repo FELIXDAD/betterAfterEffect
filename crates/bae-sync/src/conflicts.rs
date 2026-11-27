@@ -101,14 +101,17 @@ pub struct ConflictConfig {
     /// frame. Zero reports every one.
     pub repeat_quiet: Duration,
     /// Give up waiting for [`ConflictTracker::caught_up`] this long after the
-    /// catch-up began: the first check after
+    /// catch-up began: the first check after the latest
     /// [`connection_lost`](ConflictTracker::connection_lost) that finds ops
-    /// of others beyond the version it remembered (the link is back). Then
-    /// the mark is dropped as by
+    /// of others beyond the version the stage had at that call (only a new
+    /// link brings them; a sublayer added to the stack since counts from the
+    /// first check that sees it). Then the mark is dropped as by
     /// [`cancel_offline`](ConflictTracker::cancel_offline): online notices
     /// resume, and no summary comes for that reconnect. Counted from the
     /// catch-up, not from the disconnection, so a long offline period still
-    /// ends in a summary. It covers a catch-up that never completes
+    /// ends in a summary, also after a catch-up the link dropped again
+    /// before it completed (the next `connection_lost` restarts the count).
+    /// It covers a catch-up that never completes
     /// (`SyncSession::is_caught_up` stays false while a record that failed to
     /// import, or ops Loro holds pending for missing dependencies, are listed
     /// by the remote); where nothing of the others arrives at all, call
@@ -250,8 +253,14 @@ type NoticeKey = (SublayerId, TreeID, String, Element, ConflictOutcome);
 struct Offline {
     since: ProjectVersion,
     at: Instant,
-    /// When a check first found ops of others beyond `since` (the catch-up
-    /// began), for [`ConflictConfig::catch_up_timeout`].
+    /// The version at the latest `connection_lost` (`since` stays at the
+    /// first): ops of others beyond it came over a link that is back, for
+    /// [`ConflictConfig::catch_up_timeout`]. A sublayer it does not list was
+    /// added to the stack since, maybe with others' history (a layer file);
+    /// the first check that sees it adds it as it is then.
+    lost: ProjectVersion,
+    /// When a check first found ops of others beyond `lost` (the catch-up
+    /// began).
     catching_up: Option<Instant>,
 }
 
@@ -854,7 +863,9 @@ impl ConflictTracker {
     /// The link to the others is gone (transport error, hub unreachable,
     /// shared folder unreachable, or the app goes offline on purpose): remember
     /// the version we had. A second call before [`caught_up`](Self::caught_up)
-    /// keeps the first mark.
+    /// keeps the first mark (the summary covers the whole time), and restarts
+    /// [`ConflictConfig::catch_up_timeout`]: a catch-up the link dropped again
+    /// is not counted on, the next link's catch-up starts the timer anew.
     ///
     /// Until `caught_up` (or [`cancel_offline`](Self::cancel_offline), or
     /// [`ConflictConfig::catch_up_timeout`]), edits made after the mark get
@@ -865,12 +876,20 @@ impl ConflictTracker {
     /// `caught_up` they stay as old as they were at the mark, so the catch-up
     /// still reports the ops that raced with them.
     pub fn connection_lost_at(&mut self, stage: &Stage, now: Instant) {
-        if self.offline.is_none() {
-            self.offline = Some(Offline {
-                since: ProjectVersion::current(stage),
-                at: now,
-                catching_up: None,
-            });
+        let lost = ProjectVersion::current(stage);
+        match &mut self.offline {
+            Some(off) => {
+                off.lost = lost;
+                off.catching_up = None;
+            }
+            None => {
+                self.offline = Some(Offline {
+                    since: lost.clone(),
+                    at: now,
+                    lost,
+                    catching_up: None,
+                });
+            }
         }
     }
 
@@ -888,7 +907,8 @@ impl ConflictTracker {
     }
 
     /// Apply [`ConflictConfig::catch_up_timeout`]: note when ops of others
-    /// beyond the mark first show up, and drop the mark that long after.
+    /// beyond the latest `connection_lost` first show up, and drop the mark
+    /// that long after.
     fn catch_up_timeout(&mut self, stage: &Stage, now: Instant) {
         let Some(limit) = self.config.catch_up_timeout else {
             return;
@@ -901,10 +921,18 @@ impl ConflictTracker {
             None => {
                 // One version-vector comparison per sublayer, only while a
                 // reconnect is pending and until the catch-up began.
-                let arrived = stage.sublayers().any(|layer| {
+                let mut arrived = false;
+                for layer in stage.sublayers() {
                     let doc = layer.doc();
-                    remote_ahead(&doc.oplog_vv(), &off.since.get(layer.id()), doc.peer_id())
-                });
+                    match off.lost.sublayers.get(layer.id()) {
+                        Some(lost) => arrived |= remote_ahead(&doc.oplog_vv(), lost, doc.peer_id()),
+                        None => {
+                            off.lost
+                                .sublayers
+                                .insert(layer.id().clone(), doc.oplog_vv());
+                        }
+                    }
+                }
                 if !arrived {
                     return;
                 }

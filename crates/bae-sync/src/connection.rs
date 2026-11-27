@@ -2403,10 +2403,16 @@ mod tests {
                 w.fetch_add(1, Ordering::SeqCst);
             }),
         );
-        // No other reason to wake for an hour (`Hello`s, heartbeats).
+        // No other reason to wake for an hour: `Hello`s, heartbeats, a link
+        // not online yet (`unresponsive_after`), sends that wait for the I/O
+        // thread (`io_stall`; answering briefly stalls it). Any of these
+        // would answer the rest on its own and hide a missing wake.
+        let hour = Duration::from_secs(3600);
+        c.config.unresponsive_after = hour;
+        c.config.io_stall = hour;
         let config = c.session.config_mut();
-        config.hello_interval = Some(Duration::from_secs(3600));
-        config.presence_heartbeat = Duration::from_secs(3600);
+        config.hello_interval = Some(hour);
+        config.presence_heartbeat = hour;
         let (mut remote, near) = MemoryTransport::pair();
         linked(
             &mut c,
@@ -2446,13 +2452,80 @@ mod tests {
             }
             answered
         };
-        // Pump only when woken.
+        // Pump only when woken; each wake comes right away.
+        let started = Instant::now();
         while c.session.pending_snapshot_requests() > 0 {
             wait_for("a wake", || woken.load(Ordering::SeqCst) > before);
             before = woken.load(Ordering::SeqCst);
             c.pump(&mut docs);
         }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "woken late: {:?}",
+            started.elapsed()
+        );
         wait_for("every answer", || collect(&mut remote) == names.len());
+    }
+
+    /// Snapshot requests still waiting when the connection closes are all
+    /// answered, not only `max_snapshots_per_pump` of them: the link closes
+    /// after this, and a shared folder whose write failed waits for its
+    /// repair snapshot.
+    #[test]
+    fn close_answers_every_waiting_snapshot_request() {
+        let mut c = bare("closing-snapshots", quiet());
+        let (mut remote, near) = MemoryTransport::pair();
+        let mut docs = MemDocs::new();
+        let names = ["a", "b", "c", "d", "e"];
+        for doc in names {
+            let d = LoroDoc::new();
+            d.get_map("m").insert("v", doc).unwrap();
+            d.commit();
+            docs.load(
+                DocKey::parse(doc).unwrap(),
+                &d.export(ExportMode::Snapshot).unwrap(),
+            )
+            .unwrap();
+        }
+        remote
+            .send(Message::hello(ClientId::new("folder").unwrap(), Vec::new()))
+            .unwrap();
+        for doc in names {
+            remote
+                .send(Message::SnapshotRequest {
+                    doc: DocKey::parse(doc).unwrap(),
+                })
+                .unwrap();
+        }
+        // The I/O thread takes in everything waiting before it says so, so
+        // one pump receives all six messages.
+        let (arrived_tx, arrived) = mpsc::channel();
+        linked(
+            &mut c,
+            ThreadedTransport::spawn(near, Duration::from_millis(1), move || {
+                let _ = arrived_tx.send(());
+            }),
+        );
+        arrived
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the requests arrived");
+        c.pump(&mut docs);
+        assert_eq!(c.session.stats().messages_received, 6);
+        assert_eq!(c.session.pending_snapshot_requests(), 3);
+
+        let mut closing = c.close(&mut docs);
+        let result = closing
+            .wait(Duration::from_secs(20))
+            .map(|r| r.as_ref().map_err(ToString::to_string).copied());
+        assert_eq!(result, Some(Ok(())));
+        let mut answered = Vec::new();
+        while let Ok(Some(m)) = remote.recv() {
+            if let Message::Snapshot { doc, .. } = m {
+                answered.push(doc.to_string());
+            }
+        }
+        answered.sort();
+        assert_eq!(answered, names);
     }
 
     #[test]

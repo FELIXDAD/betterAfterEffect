@@ -127,17 +127,21 @@
 - **冲突提示（#806）**（spec 6.4）：
   - `ConflictTracker::caught_up` 自己先对补齐进来的内容做一次检查，再算汇总，返回 `CaughtUp { notices, summary }`，调用顺序不会再错（以前先汇总后检查时，断开前没送出去的修改漏报冲突）。出错时离线标记保留，这次检查的提示留到下一次检查返回。
   - `cancel_offline()` 和 `ConflictConfig::catch_up_timeout`（默认不超时，从补齐开始、不从断开时算）：补齐一直完不成（导入失败、Loro 挂起缺依赖的操作）时，在线提示不再永远静默。
+  - 评审后（`catch_up_timeout`）：补齐到一半链路又断了、应用再次调用 `connection_lost` 时，计时作废，判断"别人的操作到来"也改从这一次断开时的版本算，下一条链路补齐时重新开始。以前保留第一次的计时：Wi-Fi 时断时续之后再离线一小时，重连后的第一次检查就去掉标记，那一小时没有汇总；离线时每帧检查也会在 30 秒后去掉。离线时加进层栈的、带别人历史的工程层也不再开始计时（从第一次看到它的检查算起）。原来的超时测试在离线期间也检查，现在能分出"从补齐开始"和"从第一次检查开始"（`an_interrupted_catch_up_restarts_the_timeout`、`a_layer_added_offline_does_not_start_the_catch_up_timeout`）。
   - 离线合并汇总要导出、导入旧版本快照（每个变了的工程层最多 3 个，加上 `history::diff` 的 2 个），文档写明不要在界面线程上算；`caught_up_detached` / `DetachedMerge` 在调用线程上只做检查、钉住工程（`Stage::snapshot_reader`，只复制句柄），汇总在后台线程上算，结果和在原 Stage 上算的相同。
   - 给 02 的请求（02 任务书"请求"一节）：公开存储布局的名字或解析辅助函数（`ops.rs` 现在是抄的）、明确的回滚标记（现在靠 `rollback: ` 标签前缀）、导入结果带上"有挂起的操作"（可选）。
 - **流量控制和清理（#808）**（spec 2.4、2.6、4.3、4.7、7.3）：
   - 自己的日志是更新的格式版本（降级）的文档：`DirTransport::not_written()`，`Transport::notes()`（`LinkNotes { last_error, not_written }`，`ThreadedTransport` 在每次调用内层传输后按 `notes_seq` 复制），`Connection::link_notes()` 给界面显示，这些文档上的修改算作没同步（状态和 `Closing::unsynced`）。Hub 加载工程时打 warn、`/v1/projects` 列出（10）。
   - 会话每次 `pump` 最多回答 `SessionConfig::max_snapshots_per_pump`（默认 2）个快照请求，其余留到之后的 `pump`（不丢、同一个文档只留一个、`reset` 时丢掉）；`Connection` 有没回答的请求时由闹钟立即再唤醒。
+  - 评审后：只留会回答的请求（自己有的文档、`send_data`），对方（包括只读的 Hub 客户端）发多少，队列都不超过文档数（以前每轮收 256 个、只回答 2 个，不存在的文档的请求越积越多，去重越来越慢，拖慢工程的整个 Relay 线程）；`flush`（`Connection::close`、Hub 卸载和退出前的 `Relay::flush`）回答所有还在等的请求（以前关闭时最多再回答 2 个，其余丢掉，共享目录没等到修复快照，日志一直落后）。唤醒测试去掉了 `io_stall`、`unresponsive_after` 的闹钟（以前它们每 5、10 秒叫醒一次，去掉修复测试也通过）。Hub 加载时的 warn 由测试在加载线程上抓日志检查（`RelayThread::start`；以前测试只看 `/v1/projects`，去掉加载时的检查也通过）。
   - 文档：50 ms 的清理时间不是硬上限（列目录、stat、删临时文件、锁文件不计时，每次至少读一块）；含读不懂记录的自己的日志永远不压缩，每长到 4 倍就追加一份快照（只在降级后）。
   - Hub 的 `max_backlog_mib = 0` 和其他上限一样拒绝启动（10）。
-- **多进程测试（#791）**（spec 3.1）：丢弃 `Proc` 时先关标准输入、给 5 秒自己退出再杀，等 `listening` 超时的 Hub 启动不再留下 Hub 进程（新测试强制走这条路径）；杀 Hub 的测试一直编辑到重连之后再叫停（原来 400 次编辑在忙的机器上可能不够）；同一端口重启时并行测试抢到端口的极小概率写在注释里。
+- **多进程测试（#791）**（spec 3.1）：丢弃 `Proc` 时先关标准输入、给 5 秒自己退出再杀，等 `listening` 超时的 Hub 启动不再留下 Hub 进程（新测试强制走这条路径）；杀 Hub 的测试一直编辑到重连之后再叫停（原来 400 次编辑在忙的机器上可能不够）；同一端口重启时并行测试抢到端口的极小概率写在注释里。默认测试现在 5 个，本机约 2.3 秒（1 个 CPU 约 6 秒）。
 - **按节点身份的回滚（#789）**（spec 5.3、5.4）：按 Prim 回滚时父节点已经不在、又不在范围里，报 `SyncError::RevertParentGone`，指出要先回滚的最上层祖先，什么都不改；`version.revert` 的说明写明按范围回滚会连带删掉移出范围的 Prim 下后来新建的子节点（可撤销）；补了规则 (b) 配对手动重建的同名同类型 Prim 的例子和测试。
 - **连接管理（#798 跟进 3、4）**（spec 7.5、7.9）：不发 `x-bae-access` 的旧 Hub（0.0.1）在连接线程上再 `GET /v1/status` 查权限，只读令牌也变成 `Read`；接入应用的注意事项（`wake` 不能只接 `request_repaint`、按 `Failure` 显示本地化文字、汇总放到后台线程）写进 spec 7.9 和 11 任务书的请求。
+- 体积（#808 的跟进）：`bae-hub` release 单文件（Linux x86_64，glibc）#798 分支 5,347,512 字节 → 本分支 5,363,624 字节，+15.7 KiB。应用经 `bae-agent` 只用到 bae-sync 的版本和 `version.*` 命令（不开 `hub`、`watch`），本分支里能到达的只有 `history.rs`、`commands.rs`、`error.rs` 的改动；连接管理、冲突提示、Hub 客户端都不链接进应用。
 - 没做：
+  - 应用的 `cargo xtask size`：`apps/bae` 在 Linux 上编译不过（`rfd` 只是 macOS、Windows 上的依赖，`shell/mod.rs` 却直接用它；不是本分支的改动），这里量不了，以 CI full tier 的 "Release size budget"（Windows、macOS）为准。
   - `remove_leftovers` 那一遍列目录并进第一次扫描（#791 的可选项）：会把删除从 `open` 挪到第一次 `recv`，契约、文档和测试都要改，只省一次列目录，而 `open` 本来就在后台线程上。
   - 按范围回滚时把移出范围的后来新建的子节点留在原处：先把它们移出要删的 Prim，可移到哪里都不是它们原来的位置，只写了说明。
 - 以后（性能，不急）：每次 `diff` / `revert` 都为整个工程层的两个版本各建一份 `NodeIndex`（`Prim` 范围的回滚也是全量建），开销和以前按路径遍历同一量级。界面要实时显示差异时，缓存当前版本的 `NodeIndex`（按 Loro frontiers 失效）。

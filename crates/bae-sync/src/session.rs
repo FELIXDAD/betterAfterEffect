@@ -137,9 +137,13 @@ pub struct SessionConfig {
     /// document on the thread that owns the stage, and a shared folder asks
     /// for many at once after a NAS hiccup (a repair for every document whose
     /// write failed) or a compaction. The rest wait in the session, oldest
-    /// first, and are answered on the next pumps; none is dropped (a request
-    /// taken off the transport is in no other queue, and the folder may not
-    /// ask again soon). [`SyncSession::pending_snapshot_requests`] says how
+    /// first, and are answered on the next pumps, or all at once by
+    /// [`SyncSession::flush`] before the link closes; none that can be
+    /// answered is dropped (a request taken off the transport is in no other
+    /// queue, and the folder may not ask again soon). Requests that would not
+    /// be answered (a document we do not have, or no `send_data`) are not
+    /// kept, so the queue holds each of our documents at most once, whatever
+    /// the remote sends. [`SyncSession::pending_snapshot_requests`] says how
     /// many wait: pump again soon while it is not zero ([`crate::Connection`]
     /// does). [`SyncSession::reset`] drops them with the link. Default 2.
     pub max_snapshots_per_pump: usize,
@@ -278,7 +282,8 @@ pub struct SyncSession {
     next_doc: Option<DocKey>,
     /// Snapshot requests taken off the transport and not answered yet
     /// ([`SessionConfig::max_snapshots_per_pump`]), oldest first, each
-    /// document once.
+    /// document once and only documents we have (so never more than we have
+    /// documents).
     snapshot_requests: VecDeque<DocKey>,
     stats: SyncStats,
     presence: Option<PresenceState>,
@@ -527,13 +532,19 @@ impl SyncSession {
         // delivered (a client that sends its last edits and closes at once must
         // not lose them), and the CRDT import does not need the link.
         self.import(docs, incoming.payloads, &mut out);
-        // Keep every request taken off the transport (a request taken here
-        // is in no queue any more, and the remote may not ask again soon: the
-        // shared folder asks again for a compaction only once the log
-        // doubled) and answer the oldest few, even when the link failed or an
-        // earlier answer did. The first error is returned.
+        // Keep every request taken off the transport that `send_snapshot`
+        // answers (a request taken here is in no queue any more, and the
+        // remote may not ask again soon: the shared folder asks again for a
+        // compaction only once the log doubled) and answer the oldest few,
+        // even when the link failed or an earlier answer did. The first error
+        // is returned. The others cost nothing to drop, and keeping them
+        // would let a remote grow the queue without bound (after the import,
+        // so a document that arrived in this pump counts).
         for doc in incoming.snapshot_requests {
-            if !self.snapshot_requests.contains(&doc) {
+            if self.config.send_data
+                && docs.version(&doc).is_some()
+                && !self.snapshot_requests.contains(&doc)
+            {
                 self.snapshot_requests.push_back(doc);
             }
         }
@@ -563,12 +574,16 @@ impl SyncSession {
         Ok(out)
     }
 
-    /// Send every document's ops the remote is not known to have right now,
-    /// ignoring `min_send_interval` and `max_backlog`. Nothing is received and
-    /// no `Hello` or presence goes out. Call it after the last [`pump`](Self::pump) before
-    /// closing a link whose sends may be held back, or the last edits never
-    /// leave. Sends nothing before the remote's first `Hello` (we do not know
-    /// what it has), and nothing without [`SessionConfig::send_data`].
+    /// Answer every snapshot request still waiting (whatever
+    /// [`SessionConfig::max_snapshots_per_pump`]), then send every document's
+    /// ops the remote is not known to have right now, ignoring
+    /// `min_send_interval` and `max_backlog`. Nothing is received and no
+    /// `Hello` or presence goes out. Call it after the last
+    /// [`pump`](Self::pump) before closing a link whose sends may be held
+    /// back, or the last edits never leave, nor the answers a shared folder
+    /// waits for (a repair snapshot after a failed write). Sends nothing
+    /// before the remote's first `Hello` (we do not know what it has), and
+    /// nothing without [`SessionConfig::send_data`].
     ///
     /// Only [`PumpOutcome::sent`] and [`PumpOutcome::errors`] are filled in.
     /// Errors are transport failures, as in [`pump`](Self::pump).
@@ -589,6 +604,12 @@ impl SyncSession {
         now: Instant,
     ) -> Result<PumpOutcome, SyncError> {
         let mut out = PumpOutcome::default();
+        let mut answered = Ok(());
+        while let Some(doc) = self.snapshot_requests.pop_front() {
+            let r = self.send_snapshot(docs, transport, doc, &mut out);
+            answered = answered.and(r);
+        }
+        answered?;
         if self.send_missing(docs, transport, false, &mut out)? {
             self.last_send = Some(now);
         }
@@ -1135,6 +1156,90 @@ mod tests {
         t.inbox.push_back(Message::hello(folder, all));
         s.pump(&mut docs, &mut t).unwrap();
         assert!(snapshots(&mut t).is_empty());
+    }
+
+    /// The documents of the snapshots a [`Lagging`] transport sent (drains
+    /// `sent`).
+    fn snapshots_sent(t: &mut Lagging) -> Vec<String> {
+        t.sent
+            .drain(..)
+            .filter_map(|m| match m {
+                Message::Snapshot { doc, .. } => Some(doc.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Five small documents, `a` to `e`.
+    fn five_docs() -> MemDocs {
+        let mut docs = MemDocs::new();
+        for (i, doc) in ["a", "b", "c", "d", "e"].into_iter().enumerate() {
+            let d = bae_model::loro::LoroDoc::new();
+            d.get_map("m").insert("v", text(i as u64 + 1, 50)).unwrap();
+            d.commit();
+            let snapshot = d.export(bae_model::loro::ExportMode::Snapshot).unwrap();
+            docs.load(key(doc), &snapshot).unwrap();
+        }
+        docs
+    }
+
+    /// Requests that would not be answered (a document we do not have, or
+    /// a link we send no data to) are not kept: a remote (a read-only hub
+    /// client may ask for snapshots) cannot grow the queue, nor take the
+    /// turns of requests that are answered.
+    #[test]
+    fn snapshot_requests_that_would_not_be_answered_are_not_kept() {
+        let mut docs = five_docs();
+        let mut s = SyncSession::new(SessionConfig::new(ClientId::new("me").unwrap()));
+        s.config_mut().max_snapshots_per_pump = 1;
+        let mut t = Lagging::default();
+        t.inbox
+            .push_back(Message::hello(ClientId::new("peer").unwrap(), Vec::new()));
+        for i in 0..200 {
+            t.inbox.push_back(Message::SnapshotRequest {
+                doc: key(&format!("missing{i}")),
+            });
+        }
+        t.inbox
+            .push_back(Message::SnapshotRequest { doc: key("a") });
+        s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(s.pending_snapshot_requests(), 0);
+        assert_eq!(snapshots_sent(&mut t), ["a"]);
+
+        // Without `send_data` nothing is answered, so nothing is kept.
+        s.config_mut().send_data = false;
+        for doc in ["a", "b", "c"] {
+            t.inbox
+                .push_back(Message::SnapshotRequest { doc: key(doc) });
+        }
+        s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(s.pending_snapshot_requests(), 0);
+        assert!(snapshots_sent(&mut t).is_empty());
+    }
+
+    /// `flush` answers every request still waiting, whatever
+    /// `max_snapshots_per_pump`: the link is about to close, and a request
+    /// not answered now never is (a shared folder whose write failed keeps
+    /// waiting for its repair snapshot).
+    #[test]
+    fn flush_answers_every_waiting_snapshot_request() {
+        let mut docs = five_docs();
+        let mut s = SyncSession::new(SessionConfig::new(ClientId::new("me").unwrap()));
+        let mut t = Lagging::default();
+        t.inbox.push_back(Message::hello(
+            ClientId::new("shared-folder").unwrap(),
+            Vec::new(),
+        ));
+        for doc in ["a", "b", "c", "d", "e"] {
+            t.inbox
+                .push_back(Message::SnapshotRequest { doc: key(doc) });
+        }
+        s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(snapshots_sent(&mut t), ["a", "b"]);
+        assert_eq!(s.pending_snapshot_requests(), 3);
+        s.flush(&docs, &mut t).unwrap();
+        assert_eq!(snapshots_sent(&mut t), ["c", "d", "e"]);
+        assert_eq!(s.pending_snapshot_requests(), 0);
     }
 
     /// A session on a link that may not write (a read-only hub token) sends no

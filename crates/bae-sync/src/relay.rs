@@ -267,8 +267,9 @@ impl Relay {
     }
 
     /// Send every peer what it is missing right now, ignoring each session's
-    /// `min_send_interval` and `max_backlog` (see [`SyncSession::flush`]);
-    /// nothing is received.
+    /// `min_send_interval` and `max_backlog`, and answer every snapshot
+    /// request still waiting (see [`SyncSession::flush`]); nothing is
+    /// received.
     /// Call it after the last [`pump`](Self::pump) before dropping the relay, or
     /// edits held back for a peer connected with
     /// [`connect_with`](Self::connect_with) are never sent. Peers whose transport
