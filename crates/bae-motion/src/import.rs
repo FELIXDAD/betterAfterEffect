@@ -237,6 +237,125 @@ impl Command for ImportItems {
     }
 }
 
+/// A new solid or placeholder item of the Project panel, no layer
+/// (File ▸ Import ▸ Solid… / Placeholder…).
+pub struct NewItem;
+
+/// What [`NewItem`] makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NewItemKind {
+    Solid,
+    Placeholder,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct NewItemParams {
+    pub kind: NewItemKind,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    #[serde(default)]
+    pub pixel_aspect: Option<f64>,
+    /// Solid color (solids).
+    #[serde(default)]
+    pub color: Option<[f64; 4]>,
+    /// Frames per second (placeholders).
+    #[serde(default)]
+    pub frame_rate: Option<f64>,
+    /// Length (placeholders).
+    #[serde(default)]
+    pub duration: Option<bae_model::Time>,
+    /// The folder to put it in (default: Solids for a solid, the items folder
+    /// for a placeholder).
+    #[serde(default)]
+    pub parent: Option<PrimPath>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct NewItemOutput {
+    pub item: PrimPath,
+}
+
+impl Command for NewItem {
+    type Params = NewItemParams;
+    type Output = NewItemOutput;
+    const ID: &'static str = "item.new";
+    const TITLE: &'static str = "New Item";
+    const DESCRIPTION: &'static str = "A solid (color, size, pixel aspect) or placeholder (size, frame rate, duration) item in the Project panel without a layer: AE File > Import > Solid... and Placeholder.... One undo step.";
+
+    fn run(
+        &self,
+        tx: &mut Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<NewItemOutput, CommandError> {
+        if !(1..=30000).contains(&p.width) || !(1..=30000).contains(&p.height) {
+            return Err(fail("size must be 1–30000 pixels"));
+        }
+        let name = p.name.trim().to_owned();
+        if name.is_empty() {
+            return Err(fail("the item needs a name"));
+        }
+        let parent = match p.parent {
+            Some(parent) => {
+                tx.stage().require_prim(&parent)?;
+                parent
+            }
+            None => {
+                let folder = match p.kind {
+                    NewItemKind::Solid => query::SOLIDS_FOLDER,
+                    NewItemKind::Placeholder => ASSETS_FOLDER,
+                };
+                let folder = PrimPath::new(folder).expect("valid");
+                ensure_folder(tx, &folder)?;
+                folder
+            }
+        };
+        let item = child(
+            &parent,
+            &query::unique_child_name(tx.stage(), &parent, &name),
+        )?;
+        create(tx, &item, PrimType::ASSET, None)?;
+        set(tx, &item, "name", Value::String(name))?;
+        set(tx, &item, "width", Value::Int(i64::from(p.width)))?;
+        set(tx, &item, "height", Value::Int(i64::from(p.height)))?;
+        if let Some(par) = p.pixel_aspect {
+            if !(par.is_finite() && (0.01..=100.0).contains(&par)) {
+                return Err(fail("pixel aspect ratio must be between 0.01 and 100"));
+            }
+            if par != 1.0 {
+                set(tx, &item, "pixel_aspect", Value::Float(par))?;
+            }
+        }
+        match p.kind {
+            NewItemKind::Solid => {
+                set(tx, &item, "kind", Value::Enum("solid".into()))?;
+                let color = p.color.unwrap_or([0.5, 0.5, 0.5, 1.0]);
+                set(tx, &item, "solid_color", Value::Color(color))?;
+            }
+            NewItemKind::Placeholder => {
+                set(tx, &item, "kind", Value::Enum("placeholder".into()))?;
+                let fps = p.frame_rate.unwrap_or(30.0);
+                if !(1.0..=999.0).contains(&fps) {
+                    return Err(fail("frame rate must be 1–999"));
+                }
+                set(
+                    tx,
+                    &item,
+                    "frame_rate",
+                    Value::FrameRate(bae_model::FrameRate::from_fps(fps)),
+                )?;
+                let duration = p.duration.unwrap_or(bae_model::Time::from_seconds(60.0));
+                if duration <= bae_model::Time::ZERO {
+                    return Err(fail("duration must be positive"));
+                }
+                set(tx, &item, "duration", Value::Time(duration))?;
+            }
+        }
+        Ok(NewItemOutput { item })
+    }
+}
+
 pub(crate) fn add_imported_layer(
     tx: &mut Transaction<'_>,
     comp: &PrimPath,
