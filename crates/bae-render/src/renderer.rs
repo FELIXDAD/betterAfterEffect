@@ -183,6 +183,7 @@ impl OutputTarget {
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -295,6 +296,10 @@ impl SourceResolver for Resolver<'_> {
 
     fn custom(&mut self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
         self.providers.resolve(content)
+    }
+
+    fn outlines(&mut self, content: &CustomContent) -> Option<Arc<crate::source::Outlines>> {
+        self.providers.get(&content.provider)?.outlines(content)
     }
 }
 
@@ -530,7 +535,6 @@ impl Renderer {
         let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
         let tiles = (self.frames.stats().budget > 0 || feedback).then(|| crate::exec::TileCache {
             whole_surfaces: request.roi.is_some(),
-            feedback,
             frames: &mut self.frames,
             request: RenderRequest {
                 roi: None,

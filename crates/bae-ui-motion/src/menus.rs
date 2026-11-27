@@ -456,6 +456,7 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 crate::viewer::view_options::background_checked(cx.resources, &key)
             })
         }
+        actions::ids::ENABLE_LOGGING => spec.checked_when(|_| bae_platform::logging::verbose()),
         actions::ids::SEPARATE_DIMENSIONS => spec.checked_when(|cx| {
             let session = common::session(cx.resources);
             let layers = session.lock().selected_layers.clone();
@@ -466,11 +467,29 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         }
 
         id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
-            && id != "motion.view.clear_guides" =>
+            && !matches!(
+                id,
+                "motion.view.clear_guides"
+                    | "motion.view.import_guides"
+                    | "motion.view.export_guides"
+            ) =>
         {
             spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
         }
 
+        crate::path_menu::ROTOBEZIER => spec
+            .enabled_when(crate::path_menu::any_target)
+            .checked_when(crate::path_menu::all_roto),
+        crate::path_menu::CLOSED => spec
+            .enabled_when(crate::path_menu::any_open)
+            .checked_when(crate::path_menu::all_closed),
+        crate::path_menu::SET_FIRST_VERTEX => spec.enabled_when(crate::path_menu::one_vertex),
+        crate::path_menu::CONVERT => spec.enabled_when(crate::path_menu::can_convert),
+        crate::tools::ids::FREE_TRANSFORM => {
+            spec.enabled_when(|cx| crate::path_menu::can_free_transform(cx.stage, cx.resources))
+        }
+        crate::path_menu::GROUP => spec.enabled_when(crate::path_menu::can_group),
+        crate::path_menu::UNGROUP => spec.enabled_when(crate::path_menu::can_ungroup),
         crate::viewer::view3d::ids::LAYOUT => {
             let n = item
                 .params
@@ -543,6 +562,16 @@ fn panel_label(cx: &MenuContext<'_>, title: &str, panel: &str) -> String {
     let session = common::session(cx.resources);
     let shown = match panel {
         "composition" | "timeline" => common::active_comp(cx.stage, &session).map(|c| c.name),
+        "footage" | "flowchart" => {
+            let s = session.lock();
+            let path = if panel == "footage" {
+                s.footage_view.as_ref()
+            } else {
+                s.flowchart_root.as_ref().or(s.active_comp.as_ref())
+            };
+            path.filter(|p| cx.stage.has_prim(p))
+                .map(|p| bae_motion::query::display_name_of(cx.stage, p))
+        }
         "effect_controls" | "layer" => session
             .lock()
             .selected_layers
@@ -606,6 +635,7 @@ impl ActionHandler for MotionActions {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Text Orientation", "文字方向"),
     // New layer menu
     ("New", "新建"),
     ("Text", "文本"),

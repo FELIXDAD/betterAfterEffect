@@ -387,6 +387,61 @@ fn deselect_all_then_shape_tools_make_a_new_layer() {
     );
 }
 
+/// Layer ▸ Mask and Shape Path on shapes selected in the Timeline: Convert To
+/// Bezier Path keeps the outline in place; Group Shapes (Ctrl+G) wraps
+/// siblings in "Group 1" where the frontmost was; Ungroup Shapes puts them
+/// back.
+#[test]
+fn convert_group_and_ungroup_shapes() {
+    let mut h = H::new();
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
+    h.apply(&r);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let rect_group = h.contents(&layer)[0].clone();
+    let rect = h.contents(&rect_group)[0].clone();
+    let row = |p: &PrimPath| format!("{layer}#{p}");
+    h.session().lock().selected_groups = vec![row(&rect)];
+    let r = tool_action(&h, crate::path_menu::CONVERT, json!({}));
+    h.apply(&r);
+    let items = h.contents(&rect_group);
+    assert_eq!(h.name(&items[0]), "Path 1", "in the Rectangle Path's place");
+    let b = h.bezier(&items[0]);
+    assert_eq!(b.vertices.len(), 4);
+    assert!(
+        b.vertices
+            .iter()
+            .all(|v| v[0].abs() == 100.0 && v[1].abs() == 50.0)
+    );
+    // A second shape, then both groups into Group 1.
+    h.select(&[&layer]);
+    let r = h.draw(Tool::Ellipse, (400.0, 200.0), (500.0, 300.0));
+    h.apply(&r);
+    let ellipse_group = h.contents(&layer)[0].clone();
+    h.session().lock().selected_groups = vec![row(&rect_group), row(&ellipse_group)];
+    let r = tool_action(&h, crate::path_menu::GROUP, json!({}));
+    h.apply(&r);
+    let top = h.contents(&layer);
+    assert_eq!(top.len(), 1);
+    assert_eq!(h.name(&top[0]), "Group 1");
+    // Its anchor point and position at the center of both shapes (layer
+    // space: x −220…180, y −130…120); nothing moves.
+    assert!(close(
+        vec2v(h.value(&top[0], "transform:anchor_point")),
+        [-20.0, -5.0]
+    ));
+    assert!(close(
+        vec2v(h.value(&top[0], "transform:position")),
+        [-20.0, -5.0]
+    ));
+    let inner: Vec<String> = h.contents(&top[0]).iter().map(|p| h.name(p)).collect();
+    assert_eq!(inner, ["Ellipse 1", "Rectangle 1"]);
+    h.session().lock().selected_groups = vec![row(&top[0])];
+    let r = tool_action(&h, crate::path_menu::UNGROUP, json!({}));
+    h.apply(&r);
+    let names: Vec<String> = h.contents(&layer).iter().map(|p| h.name(p)).collect();
+    assert_eq!(names, ["Ellipse 1", "Rectangle 1"]);
+}
+
 /// #733: a shape tool selects the group it draws (AE), so the box shown is the
 /// group's and its corner scales the group around the group's anchor (the
 /// rectangle's center), not the layer around the comp center.
