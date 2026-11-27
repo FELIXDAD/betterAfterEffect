@@ -14,8 +14,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bae_model::loro::{
-    ContainerID, ExportMode, Index, JsonOpContent, JsonTreeOp, LoroDoc, LoroMap, LoroValue, TreeID,
-    ValueOrContainer, VersionVector,
+    ExportMode, LoroDoc, LoroMap, LoroValue, TreeID, ValueOrContainer, VersionVector,
 };
 use bae_model::{
     AttrSpec, AuthorId, ModelError, Op, PrimPath, PrimSpec, PrimTree, PrimType, Reference,
@@ -26,6 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::docs::{DocSet, Imported};
 use crate::error::SyncError;
 use crate::identity::{Matching, NodeIndex, suffixed};
+use crate::ops::Walker;
 use crate::protocol::DocKey;
 
 /// File name of the history document inside a `.bae` directory.
@@ -462,13 +462,13 @@ pub fn view_at(
 }
 
 /// A sublayer at some version: the live one if the version is current.
-enum LayerAt<'a> {
+pub(crate) enum LayerAt<'a> {
     Live(&'a Sublayer),
     Past(Sublayer),
 }
 
 impl LayerAt<'_> {
-    fn get(&self) -> &Sublayer {
+    pub(crate) fn get(&self) -> &Sublayer {
         match self {
             LayerAt::Live(s) => s,
             LayerAt::Past(s) => s,
@@ -486,7 +486,10 @@ impl LayerAt<'_> {
     }
 }
 
-fn layer_at<'a>(live: &'a Sublayer, vv: &VersionVector) -> Result<LayerAt<'a>, SyncError> {
+pub(crate) fn layer_at<'a>(
+    live: &'a Sublayer,
+    vv: &VersionVector,
+) -> Result<LayerAt<'a>, SyncError> {
     let doc = live.doc();
     let now = doc.oplog_vv();
     if *vv == now {
@@ -670,41 +673,16 @@ fn who(touched: &FxHashMap<TreeID, Touch>, nodes: [Option<TreeID>; 2]) -> (Vec<A
 /// `Stage::transact`) and the latest commit time.
 fn node_authors(doc: &LoroDoc, a: &VersionVector, b: &VersionVector) -> FxHashMap<TreeID, Touch> {
     let mut out: FxHashMap<TreeID, Touch> = FxHashMap::default();
-    let mut node_of: FxHashMap<ContainerID, Option<TreeID>> = FxHashMap::default();
+    let mut walker = Walker::live_only(doc);
     let spans: Vec<_> = b.sub_iter(a).chain(a.sub_iter(b)).collect();
     for span in spans {
-        for change in doc.export_json_in_id_span(span) {
-            let author = change
-                .msg
-                .as_deref()
-                .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
-                .and_then(|v| v.get("author")?.as_str().map(str::to_owned))
-                .and_then(|s| AuthorId::new(&s).ok());
-            for op in &change.ops {
-                let node = match &op.content {
-                    JsonOpContent::Tree(t) => Some(match t {
-                        JsonTreeOp::Create { target, .. }
-                        | JsonTreeOp::Move { target, .. }
-                        | JsonTreeOp::Delete { target } => *target,
-                    }),
-                    _ => *node_of.entry(op.container.clone()).or_insert_with(|| {
-                        doc.get_path_to_container(&op.container)?
-                            .iter()
-                            .find_map(|(_, idx)| match idx {
-                                Index::Node(t) => Some(*t),
-                                _ => None,
-                            })
-                    }),
-                };
-                if let Some(node) = node {
-                    let t = out.entry(node).or_default();
-                    if let Some(a) = &author {
-                        t.authors.insert(a.clone());
-                    }
-                    t.last = t.last.max(change.timestamp);
-                }
+        walker.walk(span, |op| {
+            let t = out.entry(op.target.node()).or_default();
+            if let Some(a) = op.author {
+                t.authors.insert(a.clone());
             }
-        }
+            t.last = t.last.max(op.timestamp);
+        });
     }
     out
 }

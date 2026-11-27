@@ -49,6 +49,7 @@
 - [x] 版本（PR C）：命名版本（`History`，同步的 Loro 文档 + `history.loro`）、任意版本的只读视图、按 Prim 的差异（新增/删除/修改/移动，含作者和时间）
 - [x] 回滚（PR F）：`History::revert_to` / `history::revert`，以新的撤销单元恢复整个工程、一个工程层或一个 Prim 子树，不改写历史；命令 `version.revert`（`bae_sync::register_commands`）供 Agent 调用
 - [x] 差异和回滚按节点身份（G0，分支与合并的前置）：`identity.rs` 的 `NodeIndex`（TreeID → 父节点、原始名、兄弟序号、spec）和 `Matching`（同一 TreeID，加"重建别名"）；`diff` 和 `revert` / `version.revert` 不再按路径匹配 Prim，镜像因并发同名新建而在客户端之间不一致时，两边算出的差异和回滚结果相同；恢复时与留下的同名兄弟冲突用旧节点自己的后缀 `<名字>_<peer>_<counter>`（按重建别名仍对上旧节点，回滚可重复执行）；`Prim` 范围也按节点判断。镜像不一致本身是 bae-model 的问题，已报给 02
+- [x] 语义冲突提示（#737 子任务 5 的引擎部分，界面另做）：`ConflictTracker`（`conflicts.rs`，只观察不修改）。在线：按元素（值、表达式、某时间的关键帧）记住自己最近的修改，远端导入覆盖了它报 `Overridden`（含胜出作者、是否真正同时），我们胜出时报较轻的 `Kept`，Prim 被删报 `PrimRemoved`；只解码新到操作里写了相关 map 的部分，大导入不扫描整个工程。离线：`connection_lost` / `caught_up`（`SyncSession::is_caught_up` 判断补齐）给出 `MergeSummary`：保留的、被覆盖的、新建和删除的 Prim 的结果、别人改了什么（按节点身份的 `history::diff`）。Hub 和共享目录都可用。评审后补上：断开前没送出去的修改补齐时照样提示；本地事件晚于导入交给 `observe` 也不漏报；共享目录重连先重读目录再回 `Hello`，补齐分几次 pump 时 `is_caught_up` 不会提前为真；补齐中途又改了东西时 `merged` 不丢别人的修改；别人失败事务的回滚胜出时报告；自己也删了的 Prim 不算被别人删；连续冲突按 `repeat_quiet` 只报一次；空闲检查只比较 frontiers，不随记着的修改数和 peer 数增长。规格见 spec 6.4
 - [ ] 分支与合并
 - [x] 多客户端模拟测试：4 个客户端经 Hub、20% 丢包 + 10% 重复 + 乱序延迟，编辑 150 轮后全部收敛；两端直连；Hub 重启后补齐 + 新客户端加入；协作者新建的工程层
 
