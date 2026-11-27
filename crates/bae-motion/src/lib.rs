@@ -107,13 +107,13 @@ use bae_model::{CommandRegistry, DynCommand};
 
 pub use camera::{CameraSettings, LightSettings, SetCameraSettings, SetLightSettings};
 pub use comp::{
-    CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
+    CompOutput, CreateComp, CreateFolder, CropComp, ResizeAnchor, SetCompSettings, SetWorkArea,
     TrimCompToWorkArea,
 };
 pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
-pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
+pub use import::{ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind, ReplaceFile};
 pub use interpret::InterpretFootage;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
@@ -157,10 +157,12 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(tracker::RecordTrack),
         r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
+        r.register(CropComp),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(NewItem),
         r.register(photoshop::ImportPhotoshop),
         r.register(ReplaceFile),
         r.register(CreateLayer),

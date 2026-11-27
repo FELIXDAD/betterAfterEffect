@@ -17,7 +17,7 @@
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
-use bae_model::{BaselineOption, TextDocument, TextStyle};
+use bae_model::{BaselineOption, TextDocument, TextJoin, TextStyle};
 use bae_vector::paint::{LineJoin, Rgba, paint_color};
 use kurbo::{Affine, Point, Rect, Vec2};
 
@@ -418,7 +418,11 @@ pub fn document_paint(doc: &TextStyle) -> TextPaint {
         .map(|c| TextStroke {
             color: paint_color(c),
             width: doc.stroke_width,
-            join: LineJoin::Miter,
+            join: match doc.line_join {
+                TextJoin::Miter => LineJoin::Miter,
+                TextJoin::Round => LineJoin::Round,
+                TextJoin::Bevel => LineJoin::Bevel,
+            },
             miter_limit: 4.0,
         });
     TextPaint {
@@ -457,6 +461,11 @@ impl DisplayText {
                 }
                 '\r' | '\n' => push('\n', &mut text),
                 '\u{3}' => push('\u{2028}', &mut text),
+                // Hindi Digits: Arabic-Indic digits for 0-9.
+                '0'..='9' if doc.style_at(start + i).hindi_digits => push(
+                    char::from_u32(0x0660 + c as u32 - '0' as u32).unwrap_or(c),
+                    &mut text,
+                ),
                 _ if doc.style_at(start + i).all_caps => {
                     for u in c.to_uppercase() {
                         push(u, &mut text);
@@ -650,7 +659,7 @@ fn shape_paragraph(
             range.clone(),
         );
         let features = match (
-            individual_chars || faces.len() > 1 || out.vertical(),
+            individual_chars || faces.len() > 1 || out.vertical() || !style.ligatures,
             style.small_caps,
         ) {
             (true, true) => Some(r#""liga" 0, "clig" 0, "dlig" 0, "smcp" 1"#),
@@ -704,7 +713,17 @@ fn shape_paragraph(
     } else {
         layout.set_alignment(Alignment::Left, AlignmentOptions::default());
     }
-    layout.break_all_lines(box_width);
+    if base.no_break {
+        layout.break_all_lines(None);
+    } else {
+        layout.break_all_lines(box_width);
+        if p.every_line
+            && let Some(width) = box_width
+            && layout.len() > 1
+        {
+            balance_lines(&mut layout, width);
+        }
+    }
 
     let mut word = out.chars.last().map_or(0, |c| c.word);
     let mut prev_breaks_word = true;
@@ -741,6 +760,11 @@ fn shape_paragraph(
         let baseline = match (line_index, paragraph) {
             (0, Some(b)) => b.y0 + ascent,
             (0, None) => 0.0,
+            // Top-to-Top: the leading runs from the previous line's top.
+            _ if p.top_leading => {
+                let prev = &out.lines[line_index - 1];
+                prev.baseline + leading + ascent - prev.ascent
+            }
             _ => out.lines[line_index - 1].baseline + leading,
         } + if local_line == 0 {
             p.space_before
@@ -762,8 +786,25 @@ fn shape_paragraph(
         // Width for alignment: trailing spaces hang, trailing tracking is excluded.
         let visible = f64::from(m.advance - m.hanging_advance);
         let has_glyphs = line.runs().any(|r| !r.is_empty());
+        // Roman Hanging Punctuation: punctuation at either end sits outside
+        // the margin, so the rest of the line aligns to it.
+        let (left_hang, right_hang) = if p.hanging_punctuation {
+            let mut clusters = line
+                .runs()
+                .flat_map(|r| r.visual_clusters().collect::<Vec<_>>())
+                .filter(|c| !c.is_space_or_nbsp() && !c.is_hard_line_break());
+            let first = clusters.next();
+            let last = clusters.last();
+            let left = first.as_ref().map_or(0., |c| hanging_advance(display, c));
+            (
+                left,
+                last.as_ref().map_or(left, |c| hanging_advance(display, c)),
+            )
+        } else {
+            (0., 0.)
+        };
         let width = if has_glyphs {
-            (visible - letter_spacing).max(0.0)
+            (visible - letter_spacing - left_hang - right_hang).max(0.0)
         } else {
             0.0
         };
@@ -793,7 +834,7 @@ fn shape_paragraph(
         };
         // parley positions are relative to its own line origin (offset included
         // when justifying); place them at (x, baseline).
-        let mut pen = x;
+        let mut pen = if justified_line { x } else { x - left_hang };
         let line_chars_start = out.chars.len();
         for run in line.runs() {
             let synthesis = run.synthesis();
@@ -892,6 +933,66 @@ fn shape_paragraph(
 }
 
 /// Whether a cluster is a paragraph break or soft return in the display text.
+/// The advance a punctuation cluster hangs by (Roman Hanging Punctuation).
+fn hanging_advance<B: parley::Brush>(
+    display: &DisplayText,
+    cluster: &parley::Cluster<'_, B>,
+) -> f64 {
+    let hangs = |c: char| {
+        matches!(
+            c,
+            ',' | '.'
+                | ':'
+                | ';'
+                | '!'
+                | '?'
+                | '\''
+                | '"'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '\u{2018}'
+                | '\u{2019}'
+                | '\u{201c}'
+                | '\u{201d}'
+                | '\u{ab}'
+                | '\u{bb}'
+        )
+    };
+    let text = &display.text[cluster.text_range()];
+    if !text.is_empty() && text.chars().all(hangs) {
+        f64::from(cluster.advance())
+    } else {
+        0.0
+    }
+}
+
+/// Adobe Every-line Composer: the narrowest width that keeps the line count,
+/// so words spread evenly over the paragraph's lines.
+fn balance_lines<B: parley::Brush>(layout: &mut parley::Layout<B>, width: f32) {
+    let lines = layout.len();
+    let (mut low, mut high) = (0.0, width);
+    for _ in 0..8 {
+        let middle = (low + high) * 0.5;
+        layout.break_all_lines(Some(middle));
+        if layout.len() > lines {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    // Break at that width but keep the box as the layout width, so justified
+    // lines still fill the box.
+    let mut breaker = layout.break_lines();
+    breaker.state_mut().set_layout_max_advance(width);
+    breaker.state_mut().set_line_max_advance(high);
+    while breaker.break_next().is_some() {
+        breaker.state_mut().set_line_max_advance(high);
+    }
+    breaker.finish();
+}
+
 fn is_break<B: parley::Brush>(display: &DisplayText, cluster: &parley::Cluster<'_, B>) -> bool {
     display.text[cluster.text_range()]
         .chars()
@@ -928,6 +1029,24 @@ mod tests {
         assert_eq!(t.source_at(t.text.len() - 1), 8);
         assert_eq!(t.source_at(2), 2, "CRLF break maps to the CR");
         assert_eq!(t.source_range(3..4, 9), 4..5, "C after CRLF is char 4");
+    }
+
+    /// Character panel menu: Hindi Digits keep their source indices; Line
+    /// Join reaches the stroke.
+    #[test]
+    fn hindi_digits_and_line_join() {
+        let mut d = doc("A19");
+        d.style.hindi_digits = true;
+        d.style.line_join = TextJoin::Round;
+        d.style.stroke_color = Some([1.; 4]);
+        d.style.stroke_width = 2.;
+        let t = DisplayText::new(&d, &d.text, 0);
+        assert_eq!(t.text, "A\u{661}\u{669}");
+        assert_eq!(t.source_at(3), 2);
+        assert_eq!(
+            document_paint(&d.style).stroke.unwrap().join,
+            LineJoin::Round
+        );
     }
 
     #[test]
