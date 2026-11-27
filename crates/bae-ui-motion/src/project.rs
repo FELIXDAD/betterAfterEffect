@@ -100,6 +100,82 @@ struct Row {
 /// File ▸ Dependencies ▸ Find Missing Footage: the Project panel search that
 /// lists the footage whose file is not found (AE).
 pub(crate) const MISSING_FOOTAGE: &str = "Missing Footage";
+/// Find Missing Effects / Fonts: the searches that list the comps using an
+/// effect BAE does not have, or a font that is not installed.
+pub(crate) const MISSING_EFFECTS: &str = "Missing Effects";
+pub(crate) const MISSING_FONTS: &str = "Missing Fonts";
+
+/// The search `needle` is (in English or as shown).
+fn is_search(needle: &str, term: &str) -> bool {
+    needle == tr(term).to_lowercase() || needle == term.to_lowercase()
+}
+
+/// The comp of a prim inside one (an effect, a layer).
+fn comp_of(stage: &Stage, p: &PrimPath) -> Option<PrimPath> {
+    p.ancestors()
+        .find(|a| stage.prim(a).is_some_and(|v| v.is_a(&PrimType::COMP)))
+}
+
+/// Comps with an effect whose definition the app does not have.
+fn comps_missing_effects(
+    stage: &Stage,
+    effects: Option<&crate::effects::EffectRegistries>,
+) -> HashSet<PrimPath> {
+    let Some(effects) = effects else {
+        return HashSet::new();
+    };
+    stage
+        .traverse()
+        .into_iter()
+        .filter(|p| {
+            stage.prim(p).is_some_and(|v| {
+                v.is_a(&PrimType::EFFECT)
+                    && v.value("match_name")
+                        .and_then(|m| m.as_str())
+                        .is_some_and(|m| effects.def(m).is_none())
+            })
+        })
+        .filter_map(|p| comp_of(stage, &p))
+        .collect()
+}
+
+/// Comps with a text layer using a font that is not installed (once the
+/// installed fonts are indexed; before that nothing counts as missing).
+fn comps_missing_fonts(stage: &Stage) -> HashSet<PrimPath> {
+    let Some(catalog) = crate::ae_panels::character::font_menu::CATALOG
+        .get()
+        .filter(|c| c.indexed())
+    else {
+        return HashSet::new();
+    };
+    let missing = |doc: &bae_model::TextDocument| {
+        std::iter::once(&doc.style)
+            .chain(doc.runs.iter().map(|r| &r.style))
+            .any(|s| catalog.lookup(&s.font).is_none())
+    };
+    let mut out = HashSet::new();
+    for comp in query::comps(stage) {
+        for layer in query::comp_layers(stage, &comp) {
+            let Some(spec) = query::attr_spec(stage, &layer, "text:source") else {
+                continue;
+            };
+            let docs = spec
+                .value
+                .iter()
+                .chain(spec.keyframes.values().map(|k| &k.value));
+            if docs
+                .filter_map(|v| match v {
+                    bae_model::Value::TextDocument(d) => Some(d.as_ref()),
+                    _ => None,
+                })
+                .any(missing)
+            {
+                out.insert(comp.clone());
+            }
+        }
+    }
+    out
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ItemKind {
@@ -145,14 +221,29 @@ const ROW_H: f32 = 20.0;
 impl ProjectPanel {
     /// The rows shown; `base`: the folder relative footage paths start from
     /// (the search "Missing Footage" lists footage whose file is not found).
-    fn rows(&self, stage: &Stage, base: Option<std::path::PathBuf>) -> Vec<Row> {
+    fn rows(
+        &self,
+        stage: &Stage,
+        base: Option<std::path::PathBuf>,
+        effects: Option<&crate::effects::EffectRegistries>,
+    ) -> Vec<Row> {
         let mut out = Vec::new();
         let needle = self.search.trim().to_lowercase();
-        let missing_only = needle == tr(MISSING_FOOTAGE).to_lowercase()
-            || needle == MISSING_FOOTAGE.to_lowercase();
+        let missing_footage = is_search(&needle, MISSING_FOOTAGE);
+        // Find Missing Effects / Fonts: the comps that use them.
+        let missing_comps = if is_search(&needle, MISSING_EFFECTS) {
+            Some(comps_missing_effects(stage, effects))
+        } else if is_search(&needle, MISSING_FONTS) {
+            Some(comps_missing_fonts(stage))
+        } else {
+            None
+        };
+        let missing_only = missing_footage || missing_comps.is_some();
         let resolver = bae_model::asset::AssetResolver::new(base, Vec::new());
         let matches = |c: &PrimPath, name: &str| {
-            if missing_only {
+            if let Some(comps) = &missing_comps {
+                comps.contains(c)
+            } else if missing_footage {
                 item_kind(stage, c) == Some(ItemKind::Footage)
                     && stage
                         .prim(c)
@@ -403,8 +494,15 @@ impl ProjectPanel {
     }
 
     /// The items the list shows (search applied; absolute footage paths).
-    pub(crate) fn shown_items(&self, stage: &Stage) -> Vec<PrimPath> {
-        self.rows(stage, None).into_iter().map(|r| r.path).collect()
+    pub(crate) fn shown_items(
+        &self,
+        stage: &Stage,
+        effects: Option<&crate::effects::EffectRegistries>,
+    ) -> Vec<PrimPath> {
+        self.rows(stage, None, effects)
+            .into_iter()
+            .map(|r| r.path)
+            .collect()
     }
 
     pub(crate) fn start_rename(&mut self, item: PrimPath, text: &str) {
@@ -494,7 +592,8 @@ impl Panel for ProjectPanel {
                     _ => loc,
                 }
             });
-        let rows = self.rows(stage, base);
+        let effects = crate::effects::registries(cx.resources);
+        let rows = self.rows(stage, base, effects.as_ref());
         let footer_h = 28.0;
         let list_h = (ui.available_height()
             - footer_h

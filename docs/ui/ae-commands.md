@@ -81,8 +81,8 @@
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ✅ |
 | Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ✅ |
 | Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ✅ |
-| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ⏸ |
-| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ⏸ |
+| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ✅ |
+| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ✅ |
 | Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ✅ |
 | Watch Folder... | 131099 | `motion.file.watch_folder` |  |  |  | B | Ⓐ |
 | Scripts ▸ Run Script File... | 917505 | `motion.file.run_script_file` |  |  |  | B | ⏸ |
