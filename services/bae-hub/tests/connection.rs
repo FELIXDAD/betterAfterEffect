@@ -381,7 +381,9 @@ fn the_offline_summary_comes_once_the_new_link_caught_up() {
             false
         }
     });
-    let summary = summary.unwrap().expect("connection_lost was called");
+    let caught = summary.unwrap().expect("connection_lost was called");
+    assert!(caught.notices.is_empty(), "{:?}", caught.notices);
+    let summary = caught.summary;
     assert_eq!(a.opacity(), Some(Value::Float(5.0)));
     assert!(a.has_layer("offline_bob"));
     assert_eq!(summary.overridden.len(), 1, "{summary:#?}");

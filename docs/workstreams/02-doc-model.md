@@ -153,3 +153,11 @@ bae-text 已按现有 `TextDocument` 排版（整段一种样式）。下一阶�
 3. **段落属性**（按段落）：缩进（左/右/首行）、段前距、段后距；`justification` 也挪到段落里。
 4. **文本框选项**（AE 24.6+，AE-TXT-031）：内边距、垂直对齐、首行基线方式。
 5. 自动行距百分比（默认 120%，AE-TXT-020）。
+
+### 来自 09 collab/sync（2026-11-27，冲突提示的跟进）
+
+冲突提示和离线合并汇总（`docs/spec/sync.md` 6.4，#806）只读 Loro 历史、不改数据，但要按 `Sublayer` 的存储布局解析操作。下面三条都不急，没有它们功能照常，只是 bae-model 改动时 09 这边可能悄无声息地失效：
+
+1. **公开存储布局的常量或辅助函数。** `crates/bae-sync/src/ops.rs` 复制了 `Sublayer` 文档里写的布局名：树 `prims`，节点元数据 map 里的 `attrs`，每个属性 map 里的 `value`、`expr`、`keys`（时间 → 关键帧）。冲突提示、离线汇总和 `history::diff` 的作者统计都按这些名字把 Loro 操作对应到 `(Prim, 属性, 元素)`。bae-model 改了布局（改名、加一层 map）时，这里不会编译失败，只会漏报冲突、汇总漏项。希望 bae-model 公开这些名字（例如 `bae_model::layout::{TREE, ATTRS, VALUE, EXPR, KEYS}`），更好的是公开一个辅助函数，把一个 map 操作（容器 ID + 键）解析成"哪个节点、哪个属性、哪个元素"，09 改为调用它。
+2. **明确的回滚标记。** `Stage::transact` 回滚失败事务时提交的标签是 `rollback: <原标签>`（`stage.rs` 的 `commit_layers`），09 靠这个前缀认出回滚（它写回的值不是谁要求的修改：不算我们的修改，别人的回滚也不算"别人也改了这个"）。命令标签本身以 `rollback: ` 开头时会被误认，bae-model 改了这个前缀时会认不出来。希望提交信息里加一个明确的字段（例如 `{"author", "label", "rollback": true}`），或者公开一个判断函数（例如 `bae_model::is_rollback_commit(message)`），09 改用它。
+3. **（可选）导入是否完整。** `Stage::import_updates` / `import_updates_batch` 现在看不出 Loro 是否把一部分操作挂起了（缺它们依赖的操作，Loro 的 `ImportStatus::pending`）。这时 `SyncSession::is_caught_up` 会一直为假，离线合并汇总等不到（09 已经加了 `ConflictTracker::cancel_offline` 和 `catch_up_timeout` 兜底）。希望导入结果带上"有挂起的操作"（例如挂起的版本范围），09 可以在状态里提示"还缺协作者的部分修改"，不必一直等。

@@ -533,11 +533,14 @@ fn offline_edits_are_summarized_after_catching_up() {
     assert_eq!(fingerprint(&a.stage), fingerprint(&b.stage));
     // Alice's offline edits are left to the summary.
     assert!(a.take_notices().is_empty());
-    let s = a
+    let caught = a
         .tracker
         .caught_up(&a.stage)
         .unwrap()
         .expect("a reconnect was pending");
+    // Every pump was checked already: nothing left for the catch-up's check.
+    assert!(caught.notices.is_empty(), "{:#?}", caught.notices);
+    let s = caught.summary;
     assert!(a.tracker.offline_since().is_none());
     assert!(a.tracker.caught_up(&a.stage).unwrap().is_none());
     let (alice, bob) = (a.who.clone(), b.who.clone());
@@ -688,7 +691,7 @@ fn a_removal_another_author_undid_by_moving_the_prim() {
     settle(&mut relay, &mut [&mut a, &mut b], t1 + 2 * S);
     assert!(a.session.is_caught_up(&a.stage));
     assert!(a.root().node_id(&layer("f/x")).is_some());
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     let prims: Vec<_> = s
         .prims
         .iter()
@@ -716,7 +719,7 @@ fn a_reconnect_with_nothing_new_on_either_side_is_empty() {
     connect(&mut relay, &mut a);
     settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
     assert!(a.session.is_caught_up(&a.stage));
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     assert!(s.is_empty(), "{s:#?}");
     assert_eq!(s.conflicts(), 0);
 }
@@ -783,7 +786,7 @@ fn offline_summary_through_a_shared_folder() {
         }
     }
     assert!(a.session.is_caught_up(&a.stage));
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     let bob = b.who.clone();
     assert_eq!(s.kept.len(), 1, "{s:#?}");
     assert_eq!(s.kept[0].element, Element::Keyframe(sec(0)));
@@ -904,9 +907,167 @@ fn an_edit_the_dropped_link_never_delivered_is_reported_after_reconnecting() {
     assert!(na[0].concurrent);
     assert_eq!((na[0].edited_at, na[0].at), (t1, t2));
     // Made before the mark: not an offline edit.
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     assert!(s.overridden.is_empty() && s.kept.is_empty(), "{s:#?}");
     assert!(b.take_notices().is_empty());
+}
+
+/// An app that asks for the summary right after the pump that caught up,
+/// before any check: `caught_up` checks what arrived first, so the edit the
+/// dead link never delivered still gets its notice (before, the summary
+/// counted the catch-up's remote ops as compared, and the notice was lost).
+#[test]
+fn the_catch_up_checks_what_arrived_before_summarizing() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.apply(t1, set(&title(), "opacity", 50.0));
+    a.tracker.connection_lost_at(&a.stage, t1 + S);
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    b.bump(t1, 5);
+    b.apply(t1, set(&title(), "opacity", 80.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
+
+    let t2 = t1 + 60 * S;
+    connect(&mut relay, &mut a);
+    catch_up_unchecked(&mut relay, &mut a, &mut b, t2);
+    let caught = a.tracker.caught_up_at(&a.stage, t2).unwrap().unwrap();
+    assert_eq!(caught.notices.len(), 1, "{:#?}", caught.notices);
+    let n = &caught.notices[0];
+    assert_eq!(n.outcome, ConflictOutcome::Overridden);
+    assert_eq!(
+        (n.ours.clone(), n.result.clone()),
+        (value(50.0), value(80.0))
+    );
+    assert_eq!(n.winner, Some(b.who.clone()));
+    assert!(
+        caught.summary.overridden.is_empty(),
+        "{:#?}",
+        caught.summary
+    );
+    // Reported once.
+    assert!(a.tracker.check_at(&a.stage, t2).is_empty());
+    assert!(a.tracker.offline_since().is_none());
+}
+
+/// [`ConflictTracker::caught_up_detached`]: the same check and notices on
+/// the stage's thread, the summary on another thread, equal to the one
+/// computed on the live stage.
+#[test]
+fn the_summary_can_be_computed_on_another_thread() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.apply(t1, set(&title(), "opacity", 50.0));
+    a.tracker.connection_lost_at(&a.stage, t1 + S);
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    a.apply(t1 + 2 * S, set(&layer("y"), "opacity", 30.0));
+    a.apply(t1 + 2 * S, create(&layer("added")));
+    b.bump(t1, 5);
+    b.apply(t1, set(&title(), "opacity", 80.0));
+    b.apply(t1 + S, delete(&layer("x")));
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
+
+    let t2 = t1 + 60 * S;
+    connect(&mut relay, &mut a);
+    catch_up_unchecked(&mut relay, &mut a, &mut b, t2);
+    let since = a.tracker.offline_since().unwrap().clone();
+    let live = bae_sync::merge_summary(&a.stage, &since).unwrap();
+    let caught = a.tracker.caught_up_detached_at(&a.stage, t2).unwrap();
+    assert!(a.tracker.offline_since().is_none());
+    assert_eq!(caught.notices.len(), 1, "{:#?}", caught.notices);
+    assert_eq!(caught.notices[0].outcome, ConflictOutcome::Overridden);
+    assert_eq!(caught.merge.since(), &since);
+    // The stage goes on changing meanwhile; the copy was pinned.
+    a.apply(t2, set(&layer("y"), "opacity", 31.0));
+    let merge = caught.merge;
+    let summary = std::thread::spawn(move || merge.summarize())
+        .join()
+        .unwrap()
+        .unwrap();
+    assert_eq!(summary, live);
+    assert_eq!(summary.kept.len(), 1, "{summary:#?}");
+    assert_eq!(summary.prims.len(), 1, "{summary:#?}");
+    assert!(!summary.merged.is_empty());
+}
+
+/// Reconnect `a` and pump until it caught up, without any check (an app that
+/// asks for the summary first).
+fn catch_up_unchecked(relay: &mut Relay, a: &mut Client, b: &mut Client, now: Instant) {
+    for _ in 0..50 {
+        let link = a.link.as_mut().unwrap();
+        a.session.pump_at(&mut a.stage, link, now).unwrap();
+        relay.pump_at(now);
+        b.pump(now);
+        if a.session.is_caught_up(&a.stage) {
+            return;
+        }
+    }
+    panic!("never caught up");
+}
+
+/// A catch-up that never completes (`is_caught_up` stays false) silences
+/// every later online notice until the mark goes: `cancel_offline` drops it.
+#[test]
+fn cancel_offline_resumes_online_notices() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.tracker.connection_lost_at(&a.stage, t1);
+    // The link stays (or comes back) up, but the app never sees a catch-up.
+    let race = |a: &mut Client, b: &mut Client, relay: &mut Relay, t: Instant, v: f64| {
+        a.apply(t, set(&title(), "opacity", v));
+        b.bump(t, 3);
+        b.apply(t, set(&title(), "opacity", v + 1.0));
+        settle(relay, &mut [&mut *a, &mut *b], t + S);
+    };
+    race(&mut a, &mut b, &mut relay, t1 + S, 10.0);
+    assert!(a.take_notices().is_empty(), "left to the summary");
+    race(&mut a, &mut b, &mut relay, t1 + 600 * S, 20.0);
+    assert!(a.take_notices().is_empty(), "still waiting for a catch-up");
+
+    assert!(a.tracker.cancel_offline());
+    assert!(!a.tracker.cancel_offline());
+    assert!(a.tracker.offline_since().is_none());
+    assert!(a.tracker.caught_up(&a.stage).unwrap().is_none());
+    race(&mut a, &mut b, &mut relay, t1 + 700 * S, 30.0);
+    let na = a.take_notices();
+    assert_eq!(na.len(), 1, "{na:#?}");
+    assert_eq!(na[0].ours, value(30.0));
+    assert_eq!(na[0].outcome, ConflictOutcome::Overridden);
+}
+
+/// `catch_up_timeout` counts from the catch-up (others' ops beyond the mark
+/// arrived), not from the disconnection: a long offline period keeps its
+/// mark, a catch-up that never completes loses it after the timeout.
+#[test]
+fn the_catch_up_timeout_starts_when_the_catch_up_begins() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.tracker.config_mut().catch_up_timeout = Some(30 * S);
+    a.tracker.connection_lost_at(&a.stage, t1);
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    a.apply(t1 + S, set(&title(), "opacity", 10.0));
+    b.apply(t1 + S, set(&layer("x"), "opacity", 11.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
+    // Offline for hours: nothing of the others arrived, the mark stays.
+    let t2 = t1 + 3600 * 5 * S;
+    assert!(a.tracker.check_at(&a.stage, t2).is_empty());
+    assert!(a.tracker.offline_since().is_some());
+
+    // Back: Bob's edit arrives, the app never calls `caught_up`.
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t2);
+    assert!(a.tracker.check_at(&a.stage, t2 + 29 * S).is_empty());
+    assert!(a.tracker.offline_since().is_some());
+    assert!(a.tracker.check_at(&a.stage, t2 + 30 * S).is_empty());
+    assert!(a.tracker.offline_since().is_none(), "timed out");
+
+    // Online notices are back.
+    let t3 = t2 + 40 * S;
+    a.apply(t3, set(&title(), "opacity", 20.0));
+    b.bump(t3, 3);
+    b.apply(t3, set(&title(), "opacity", 21.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t3 + S);
+    let na = a.take_notices();
+    assert_eq!(na.len(), 1, "{na:#?}");
+    assert_eq!(na[0].ours, value(20.0));
 }
 
 #[test]
@@ -924,7 +1085,7 @@ fn a_delivered_edit_changed_later_by_someone_who_saw_it_is_not_reported_on_recon
     settle(&mut relay, &mut [&mut a, &mut b], t1 + 60 * S);
     assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
     assert!(a.take_notices().is_empty());
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     assert_eq!(s.merged.len(), 1, "{s:#?}");
     assert_eq!(s.merged[0].attrs, ["opacity"]);
 }
@@ -944,7 +1105,7 @@ fn others_changes_imported_before_an_edit_during_catch_up_are_merged() {
     import_from(&mut a, &b, t1 + 3 * S);
     assert!(a.take_notices().is_empty());
 
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     let merged: Vec<_> = s
         .merged
         .iter()
@@ -988,7 +1149,7 @@ fn a_folder_reconnect_rereads_the_folder_before_it_is_caught_up() {
     a.pump(t2);
     assert!(a.session.is_caught_up(&a.stage));
     assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     assert!(s.kept.is_empty(), "{s:#?}");
     assert_eq!(s.overridden.len(), 1, "{s:#?}");
     assert_eq!(s.overridden[0].result, value(80.0));
@@ -1029,7 +1190,7 @@ fn a_folder_catch_up_spanning_several_pumps_is_not_cut_short() {
     }
     assert!(pumps > 1, "{pumps}");
     assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     assert!(s.kept.is_empty(), "{s:#?}");
     assert_eq!(s.overridden.len(), 1, "{s:#?}");
     assert_eq!(s.overridden[0].result, value(80.0));
@@ -1147,7 +1308,7 @@ fn a_prim_we_removed_ourselves_is_not_reported_as_removed_by_another() {
     settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
     connect(&mut relay, &mut a);
     settle(&mut relay, &mut [&mut a, &mut b], t1 + 2 * S);
-    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap().summary;
     assert!(s.overridden.is_empty(), "{s:#?}");
     let prims: Vec<_> = s.prims.iter().map(|p| (p.path.clone(), p.change)).collect();
     assert_eq!(prims, [(layer("x"), OfflinePrimChange::Removed)]);

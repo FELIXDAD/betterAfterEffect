@@ -46,8 +46,9 @@ mod transport;
 pub use client::ClientId;
 pub use commands::{RevertOutput, RevertParams, register_commands};
 pub use conflicts::{
-    ConcurrentEdit, ConflictConfig, ConflictOutcome, ConflictStats, ConflictTracker, Element,
-    ElementValue, MergeSummary, OfflineEdit, OfflinePrim, OfflinePrimChange, merge_summary,
+    CaughtUp, CaughtUpDetached, ConcurrentEdit, ConflictConfig, ConflictOutcome, ConflictStats,
+    ConflictTracker, DetachedMerge, Element, ElementValue, MergeSummary, OfflineEdit, OfflinePrim,
+    OfflinePrimChange, merge_summary,
 };
 pub use connection::{
     Backoff, Closing, Connection, ConnectionConfig, ConnectionOutcome, ConnectionState,

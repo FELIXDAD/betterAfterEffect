@@ -382,7 +382,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 ### 6.4 冲突提示与离线合并汇总（`ConflictTracker`，`conflicts.rs`）
 
-只观察、只报告：不改工程数据，不进任何撤销栈。在持有 Stage 的线程上调用，代价有上限（见下）。
+只观察、只报告：不改工程数据，不进任何撤销栈。在持有 Stage 的线程上调用，在线提示的代价有上限（见下）；离线合并汇总例外，要导出、导入旧版本的快照，大工程不要在界面线程上算（见"离线：合并汇总"的代价一条）。
 
 **元素**：CRDT 各自按"后写者胜"合并的最小单位：属性的静态值、表达式、某个时间上的一个关键帧（工程层存储里各是一个 map 键，见 bae-model `Sublayer` 的存储布局）。两个人改同一属性的不同关键帧，或者一个改值、一个改表达式，不会互相覆盖，不报告。
 
@@ -392,7 +392,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 应用把每个本地事件（`local` / `undo` / `redo`）按顺序交给 `observe(stage, event)`；每次 `SyncSession::pump` 之后调用 `check(stage)`（远端事件也可以交给 `observe`，效果相同）。
   - 本地事件不必在下一次导入之前交给 `observe`（比如每帧结束时统一交）：`observe` 时的时钟当作修改的时间，所以要在同一帧里交；修改之后、`observe` 之前导入的别人的操作照样会和它比较。
 - 本地事件：只读这次提交自己的 Loro 操作，按 `(工程层, TreeID, 属性, 元素)` 记下我们设的值、本地时钟时间、我们的操作 ID 和这个操作当时知道什么（它所在 Loro change 的依赖换成的版本向量，不是 `observe` 时的版本：Loro 不会把导入之后的提交并进导入之前的 change）。
-  - 自动回滚失败事务的提交（标签 `rollback: …`）不算我们的修改。
+  - 自动回滚失败事务的提交（标签 `rollback: …`）不算我们的修改。靠标签前缀识别，存储布局的名字（`prims`、`attrs`、`value`、`expr`、`keys`）也是从 bae-model 的文档抄到 `ops.rs` 里的：bae-model 改了不会编译失败，只会漏报。已在 02 任务书请求公开布局常量（或解析辅助函数）和明确的回滚标记，另外请求导入结果带上"有挂起的操作"。
   - 我们删除的 Prim（或它的祖先）上记着的修改随即忘掉：别人同时也删了它不算冲突。
   - 最多记 `max_recent` 个（默认 1024，严格上限，超过时丢掉最旧的四分之一），超过窗口 `window`（默认 10 秒）的丢掉。
   - 一次超过 `max_ops_per_edit`（默认 2048）个操作的提交（粘贴、导入）不逐个记：它们主要是新建的 Prim，别人不可能改过。
@@ -414,12 +414,15 @@ sum     := BLAKE3(payload) 的前 8 字节
 **离线：合并汇总**（`MergeSummary`）
 
 - 连接断开时（传输出错、Hub 不可达、共享目录不可达，或者用户主动离线）调用 `connection_lost(stage)`：记下当前的 `ProjectVersion`。再次调用保留第一次的。
-- 重连：`SyncSession::reset()`，然后照常 `pump`。`is_caught_up(docs)`（2.4）第一次为真时调用 `caught_up(stage)`，得到汇总。
+- 重连：`SyncSession::reset()`，然后照常 `pump`。`is_caught_up(docs)`（2.4）第一次为真时调用 `caught_up(stage)`，得到 `CaughtUp { notices, summary }`：`caught_up` 先对补齐进来的内容做一次 `check`（断开之前的修改和同时到来的远端操作比较，`notices` 是这次的在线提示），再算汇总。以前要求应用先 `check` 再 `caught_up`，顺序反了的话汇总会把补齐进来的远端操作直接标成"已比较"，断开之前没送出去的修改就漏报冲突（`the_catch_up_checks_what_arrived_before_summarizing`）；现在顺序由 `caught_up` 自己保证，之前已经 `check` 过也没关系（不会重复报告）。出错时离线标记保留，这次检查的提示不丢，下一次 `check`（或 `caught_up`）返回；应用不要每帧重试。
   - Hub：它的 `Hello` 列出它拥有的全部内容。
   - 共享目录：传输层收到会话的 `Hello` 时立刻重新读一遍目录，读到的记录排在它回的 `Hello` 前面（4.5），所以补齐要几次 pump 都没关系（每次最多 `max_messages_per_pump` 条），`is_caught_up` 在目录那一刻的内容全部导入之后才为真。之后才写进目录的修改按在线提示处理。
-  - `caught_up` 要在补齐那次 pump 之后的 `check` 之后调用（和平常一样，每次 pump 之后都 `check`）。
-  - 用 `Connection`（第 7 节）时，重连和 `reset` 由它做：`status()` 离开 `Online`（`status_changed`）时调用 `connection_lost`；之后 `is_online()` 为真、并且 `session().is_caught_up(docs)` 第一次为真时（同样在那次 pump 之后的 `check` 之后）调用 `caught_up`。要先看 `is_online()`：链路断开之后、下一次 `reset` 之前，会话还留着旧链路上对方确认过的版本（`forget_unconfirmed`，2.4），`is_caught_up` 按它回答，离线时也可能为真；`Connection` 接上新链路时 `reset`，对方在新链路上说了 `Hello` 才算 `Online`。只读打开的共享目录能写之后重连（7.5），也是这样一次断开和补齐。
+  - 补齐那次 pump 之后不必先 `check`（`caught_up` 自己做）；平常每次 pump 之后照样 `check`。
+  - 用 `Connection`（第 7 节）时，重连和 `reset` 由它做：`status()` 离开 `Online`（`status_changed`）时调用 `connection_lost`；之后 `is_online()` 为真、并且 `session().is_caught_up(docs)` 第一次为真时调用 `caught_up`。要先看 `is_online()`：链路断开之后、下一次 `reset` 之前，会话还留着旧链路上对方确认过的版本（`forget_unconfirmed`，2.4），`is_caught_up` 按它回答，离线时也可能为真；`Connection` 接上新链路时 `reset`，对方在新链路上说了 `Hello` 才算 `Online`。只读打开的共享目录能写之后重连（7.5），也是这样一次断开和补齐。
 - 等待重连期间，断开之后做的修改不出在线提示（都在汇总里，补齐过程中做的也算）。
+- **补齐一直完不成**：`is_caught_up` 要求本地版本包含对方列出的全部版本。对方列出的记录有一条这里导入失败，或者 Loro 因为缺依赖把操作挂起，它就一直为假，`caught_up` 不会被调用，离线标记一直在，之后的修改全都不出在线提示。两种兜底：
+  - `cancel_offline()`：放弃这次汇总，去掉离线标记，之后的修改照常出在线提示；标记期间做的修改不再和那段时间到来的远端操作比较（它们本来留给汇总）。返回是否有等待中的重连。应用可以在 `Connection` 已经在线一段时间（比如一分钟）还没补齐时调用。
+  - `ConflictConfig::catch_up_timeout`（默认 `None`，不超时）：从补齐开始算，也就是 `connection_lost` 之后第一次发现别人超出标记版本的操作到来（链路回来了）的那次检查；之后超过这个时间还没有 `caught_up`，标记就像 `cancel_offline` 一样去掉，这次重连没有汇总。不从断开时算：离线几个小时之后重连照样有汇总。别人的操作一条都没到（全部导入失败）时不开始计时，要靠 `cancel_offline`（`the_catch_up_timeout_starts_when_the_catch_up_begins`、`cancel_offline_resumes_online_notices`）。
 - 断开之前做的照常提示。应用发现断开往往晚于连接真正断掉（发送失败要到之后的接收才报出来；共享目录还有 `min_send_interval` 攒着没写的），这期间的修改可能根本没送出去，它们在 `since` 里，不是离线修改。所以等待重连期间，断开之前的修改按 `connection_lost` 那一刻的"年龄"算是否在窗口内，补齐时导入的别人的操作照样和它们比较；但只比较不知道它们的操作（同时修改，或者因为没送到而不知道）：别人看到之后才改的，什么时候改的这里无从知道，不提示（会出现在 `merged` 里）。`caught_up` 之后按平常的时钟算，已经汇总或比较过的远端操作不会再提示一次。
 - 也可以直接调用 `merge_summary(stage, since)`。只读版本向量和历史，与传输方式无关：
   - "我们的"：本 Stage 自己的 Loro peer 在 `since` 之后的操作（本地编辑、撤销、重做，这个客户端上的任何作者，所以 Agent 的修改也算）；其余都是别人的。工程重新打开后 peer 会变，所以 `since` 必须来自同一个 Stage。
@@ -428,7 +431,7 @@ sum     := BLAKE3(payload) 的前 8 字节
   - `prims`：我们新建（只列最上层）或删除的 Prim 的结果：`Added`；`AddedButRemoved`（父节点被别人删了）；`Removed`；`RemovedButChanged`（别人同期改过它或它下面的东西，那些修改随之看不到了）；`RemovalUndone`（别人同时的移动按 Loro 的顺序胜出，它回来了）。`by` 是相关的其他作者。我们新建的 Prim 上的属性修改不另外列。
   - `merged`：别人改了什么，按 Prim：`history::diff`（5.3）从"合并前我们拥有的版本"（`since` 加上我们在别人的操作到来之前做的操作）到"它加上别人所有的操作"，所以只有别人的修改，包括他们胜过我们的地方。补齐分几次到来、中间我们又改了东西时也一样：那之后我们的操作依赖已经到来的别人的操作，放进"合并前"的版本就会把那批别人的修改一起带进去（在 `merged` 里就看不到了），所以从第一个依赖别人新操作的 change 起（沿我们的操作单调，二分查找）不算进"合并前"；它们仍按离线修改列在 `kept` / `overridden` 里。（别人若在我们补齐的过程中看到并依赖了这些操作，它们会随别人的操作出现在 `merged` 里。）
   - `conflicts()`：没有按我们的意思保留下来的个数（`overridden` 加上冲突类的 `prims`）。
-  - 代价和一次 `history::diff` 相当（要用到那个版本的只读快照），每次重连调用一次，不要每帧调用。
+  - **代价**：对每个从 `since` 起有变化的工程层，最多 3 个旧版本的只读快照（被删 Prim 的路径用到时才建：每个都是一次 `ExportMode::SnapshotAt` 导出加导入、建一次镜像），再加 `history::diff` 算 `merged` 用的 2 个。每次重连调用一次，不要每帧调用。应用里 Stage 在界面线程上，大工程重连时会明显卡顿，所以不要在界面线程上算：`caught_up_detached(stage)` 在调用线程上只做检查（返回 `notices`）、去掉离线标记，再用 `Stage::snapshot_reader` 钉住当时的工程（只复制句柄，不导出），返回 `DetachedMerge`；把它交给后台线程调用 `summarize()`，在那里复制工程、算汇总，结果和在原 Stage 上算的一样（`the_summary_can_be_computed_on_another_thread`）。副本的镜像是从头建的：并发新建同名 Prim 的少数情况下，路径可能和本客户端界面上显示的不同（5.3），Prim、节点和变化都一样。`summarize` 出错时离线标记不会回来。
 - **已删除的 Prim 上的操作**：Loro 给不出已删除节点里的容器的路径（`get_path_to_container` 返回 `None`），所以这里按容器 ID 的结构解析：可合并 map 的 ID 里有父 map 和键（`ContainerID::parse_mergeable`），一层层往上到树节点的元数据 map（`TreeID::associated_meta_container`）。`history::diff` 的作者统计（5.3）保持原来的做法，输出不变；因此两个版本之间改过、现在已经删掉的 Prim，差异里只有树操作的作者（要不要也改成按结构解析，待定）。
 
 **验证**（`crates/bae-sync/tests/conflicts.rs`，全部用显式时间，不依赖机器快慢；谁胜出由 Loro 的顺序决定，测试让一方先多做几次无关修改，Lamport 更大，结果确定）：
@@ -441,6 +444,8 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 代价：记着 1000 个修改、历史里有 40 多个 peer 时，什么都没变的检查 200 次都停在 frontiers 比较（`quick_checks`），一次版本向量比较都没有；别人改了无关的东西时每次检查只比较 2 次版本向量，不解码。
 - 超过窗口不报告；窗口可配置。同一属性不同时间的关键帧不报告，同一时间的报告；值和表达式互不影响，两个表达式报告。撤销、重做算我们的修改（报告撤销设回的值）。只有对方改、或者对方改的是我们没碰的属性：不报告，不解码任何操作。我们改着的 Prim 被删：每个元素一条 `PrimRemoved`。
 - 1000 个图层的大导入只检查我们改过的那个元素。
+- 补齐之后的检查由 `caught_up` 自己做：应用在补齐那次 pump 之后直接 `caught_up`、一次 `check` 都没做时，断开前没送出去、被 B 同时覆盖的修改照样在 `notices` 里，之后的 `check` 不再报告。`caught_up_detached` 的检查结果相同，后台线程算出的汇总和在原 Stage 上算的相同（之后工程又改了也不影响）。
+- 补齐一直完不成：`cancel_offline` 之后冲突照常提示，之前（离线标记还在、等了十分钟）不提示；`catch_up_timeout` 30 秒：断开五小时、别人的操作没到时标记一直在，重连后别人的操作到来，29 秒时还在，30 秒时去掉，之后冲突照常提示。
 - 离线（Hub）：A 断开后改、B 在线改，A 重连补齐后：保留的（含 B 同期改过但 A 胜出的）、被覆盖的（B 胜出、Prim 被 B 删掉）、A 新建的、建在被 B 删掉的文件夹里的、A 删掉而 B 改过的、B 的移动让 A 的删除失效的；`merged` 只有 B 的修改；A 不出在线提示，B 收到在线提示；两边都没有新东西时汇总为空。
 - 断开前最后一个修改没送出去，A 一分钟后重连：补齐时报告它被 B 覆盖；送出去了、B 看到之后才改的不报告。
 - 补齐分两次到来、中间 A 又改了东西：`merged` 里 B 的两次修改都在，A 的两个修改都在 `kept`。
