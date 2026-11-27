@@ -928,12 +928,13 @@ pub(crate) fn related_tab(
     name: &str,
 ) -> bae_ui::TabInfo {
     let tab = bae_ui::TabInfo::new(format!("{} {name}", tr(panel)));
-    if !crate::prefs::current(cx.resources).bool("appearance.use_label_color_for_related_tabs") {
+    let prefs = crate::prefs::current(cx.resources);
+    if !prefs.bool("appearance.use_label_color_for_related_tabs") {
         return tab;
     }
     let label = crate::actions::label_of(cx.stage, path);
     if (1..=16).contains(&label) {
-        tab.label(theme::label_color(label as usize))
+        tab.label(bae_ui::settings::label_color(&prefs, label as usize))
     } else {
         tab
     }
