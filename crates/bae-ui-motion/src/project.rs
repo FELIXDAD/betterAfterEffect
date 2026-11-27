@@ -109,26 +109,6 @@ fn add_item_layer(
     common::new_layer(cx, session, kind, extra);
 }
 
-/// The pointer's ghost for dragging `items`: the item's icon and name, or how
-/// many there are.
-fn item_ghost(stage: &Stage, items: &[PrimPath]) -> crate::drag_feedback::Ghost {
-    let icon = |p: &PrimPath| match item_kind(stage, p) {
-        Some(ItemKind::Comp) => Icon::Composition,
-        Some(ItemKind::Folder) => Icon::Folder,
-        _ => Icon::Footage,
-    };
-    match items {
-        [one] => crate::drag_feedback::Ghost {
-            icon: icon(one),
-            label: query::display_name_of(stage, one),
-        },
-        _ => crate::drag_feedback::Ghost {
-            icon: items.first().map_or(Icon::Footage, icon),
-            label: crate::drag_feedback::items_label(items.len()),
-        },
-    }
-}
-
 /// The size (pixels) of a project item that has one: a comp, footage, a solid.
 pub(crate) fn item_size(stage: &Stage, item: &PrimPath) -> Option<(f64, f64)> {
     if let Some(info) = query::comp_info(stage, item) {
@@ -764,8 +744,14 @@ impl Panel for ProjectPanel {
                         ItemKind::Footage | ItemKind::Solid => Icon::Footage,
                     };
                     let p = ui.painter();
-                    icons::paint(p, Rect::from_center_size(pos2(x + 7.0, rect.center().y), vec2(14.0, 14.0)), icon, color::ICON);
+                    let icon_rect = Rect::from_center_size(pos2(x + 7.0, rect.center().y), vec2(14.0, 14.0));
+                    icons::paint(p, icon_rect, icon, color::ICON);
                     x += 20.0;
+                    // The outline a drag carries (AE): the icon and the name column.
+                    let name_rect = Rect::from_min_max(
+                        pos2(x - 2.0, rect.top() + 2.0),
+                        pos2(rect.left() + name_right - 4.0, rect.bottom() - 2.0),
+                    );
                     let name = query::display_name_of(stage, &row.path);
                     let renaming = self.rename.as_ref().is_some_and(|(r, _)| r == &row.path);
                     if renaming {
@@ -840,7 +826,7 @@ impl Panel for ProjectPanel {
                     };
                     crate::drag_feedback::source(
                         &resp,
-                        || item_ghost(stage, &dragged()),
+                        || crate::drag_feedback::Ghost::row(icon_rect, name_rect, &resp, dragged().len()),
                         || ItemDrag(dragged()),
                     );
                     // AE 26's item menu (the same for comps, footage and folders).

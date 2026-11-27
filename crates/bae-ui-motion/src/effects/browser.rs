@@ -186,7 +186,7 @@ impl EffectsPanel {
                             if resp.clicked() { self.selection = Some(Selection::Builtin(r.name)); }
                             crate::drag_feedback::source(
                                 &resp,
-                                || crate::drag_feedback::Ghost { icon: bae_ui::icons::Icon::Star, label: tr(r.name).to_owned() },
+                                || crate::drag_feedback::Ghost::of(&resp, 1),
                                 || EffectDrag::Preset(vec![r.build()].into()),
                             );
                             if resp.double_clicked() { *apply = Some(vec![r.build()].into()); }
@@ -470,10 +470,7 @@ impl Panel for EffectsPanel {
                                 list.push((Selection::Preset(path.clone()), None));
                                 crate::drag_feedback::source(
                                     &resp,
-                                    || crate::drag_feedback::Ghost {
-                                        icon: bae_ui::icons::Icon::Star,
-                                        label: name.clone(),
-                                    },
+                                    || crate::drag_feedback::Ghost::of(&resp, 1),
                                     || EffectDrag::Preset(entry.effects.clone()),
                                 );
                                 if resp.clicked() {
@@ -535,10 +532,7 @@ impl Panel for EffectsPanel {
                             }
                             crate::drag_feedback::source(
                                 &resp,
-                                || crate::drag_feedback::Ghost {
-                                    icon: bae_ui::icons::Icon::Fx,
-                                    label: e.name.clone(),
-                                },
+                                || crate::drag_feedback::Ghost::of(&resp, 1),
                                 || EffectDrag::Effect(e.match_name.clone()),
                             );
                             if resp.double_clicked() {

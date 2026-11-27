@@ -210,10 +210,7 @@ fn header(
             // above the header it goes before.
             crate::drag_feedback::source(
                 &title,
-                || crate::drag_feedback::Ghost {
-                    icon: bae_ui::icons::Icon::Fx,
-                    label: name.clone(),
-                },
+                || crate::drag_feedback::Ghost::of(&title, 1),
                 || EffectMove(effect.clone()),
             );
             if let Some(moved) = title.dnd_hover_payload::<EffectMove>()

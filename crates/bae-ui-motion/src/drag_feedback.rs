@@ -1,23 +1,59 @@
-//! Drag-and-drop feedback shared by every panel (AE): what is being dragged
-//! follows the pointer (its icon and name, or how many items); a target that
-//! takes it marks where it lands (each target draws its own mark: the
-//! Timeline's insertion line, the viewer's placement box, a highlighted
-//! folder or layer) and the pointer shows Copy; anywhere else the pointer
-//! shows Not Allowed and releasing does nothing. Esc cancels (egui's
-//! DragAndDrop drops the payload).
+//! Drag-and-drop feedback shared by every panel, as AE draws it: the dragged
+//! row's outline (its icon square and name bar, one per item) follows the
+//! pointer where it was grabbed; over a target that takes it the pointer is
+//! the copy pointer (with AE's dotted box and plus beside the arrow where the
+//! system has no such pointer) and the target marks where it lands (the
+//! Timeline's insertion line and time, the viewer's placement box, a lit
+//! folder or layer); anywhere else the pointer is Not Allowed and releasing
+//! does nothing. Esc cancels (egui's DragAndDrop drops the payload).
 
 use std::any::Any;
 
-use bae_ui::icons::{self, Icon};
-use bae_ui::theme::{self, color};
-use egui::{Context, CursorIcon, Id, LayerId, Order, Rect, Response, Stroke, Ui, vec2};
+use bae_ui::theme::color;
+use egui::{
+    Color32, Context, CursorIcon, Id, LayerId, Order, Painter, Pos2, Rect, Response, Shape, Stroke,
+    Ui, pos2, vec2,
+};
 
-/// What the pointer carries while dragging.
-#[derive(Clone, Debug, PartialEq)]
+/// The outline that follows the pointer.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Ghost {
-    pub icon: Icon,
-    /// The item's name, or "N items".
-    pub label: String,
+    /// The dragged row's icon square and name bar where they were drawn.
+    pub icon: Rect,
+    pub name: Rect,
+    /// Where the press was.
+    pub grab: Pos2,
+    /// Items dragged (one outline each, up to four).
+    pub count: usize,
+}
+
+impl Ghost {
+    /// For a widget without its own icon: the name bar is the widget, the
+    /// icon square sits to its left.
+    pub(crate) fn of(resp: &Response, count: usize) -> Ghost {
+        let r = resp.rect;
+        let s = r.height();
+        Ghost::row(
+            Rect::from_min_size(r.min - vec2(s + 4.0, 0.0), vec2(s, s)),
+            r,
+            resp,
+            count,
+        )
+    }
+
+    /// A row with its icon and name boxes.
+    pub(crate) fn row(icon: Rect, name: Rect, resp: &Response, count: usize) -> Ghost {
+        let grab = resp
+            .ctx
+            .input(|i| i.pointer.press_origin())
+            .unwrap_or_else(|| name.left_center());
+        Ghost {
+            icon,
+            name,
+            grab,
+            count: count.max(1),
+        }
+    }
 }
 
 fn ghost_id() -> Id {
@@ -60,12 +96,7 @@ pub(crate) fn accepted(ctx: &Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(accepted_id())) == Some(true)
 }
 
-/// "N items" in the UI language.
-pub(crate) fn items_label(n: usize) -> String {
-    bae_ui::tr("{n} items").replace("{n}", &n.to_string())
-}
-
-/// Draws the ghost and sets the pointer after every panel has drawn.
+/// Draws the outline and sets the pointer after every panel has drawn.
 struct Feedback;
 
 impl egui::Plugin for Feedback {
@@ -98,32 +129,58 @@ impl egui::Plugin for Feedback {
             return;
         };
         let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, ghost_id()));
-        let galley = painter.layout_no_wrap(ghost.label.clone(), theme::body(), color::TEXT);
-        let icon = 16.0;
-        let size = vec2(icon + 6.0 + galley.size().x, icon.max(galley.size().y)) + vec2(12.0, 6.0);
-        let rect = Rect::from_min_size(pos + vec2(14.0, 12.0), size);
-        painter.rect_filled(rect, 3.0, color::BUTTON_ON.gamma_multiply(0.9));
-        painter.rect_stroke(
-            rect,
-            3.0,
-            Stroke::new(1.0, color::ACCENT),
-            egui::StrokeKind::Inside,
-        );
-        let icon_rect = Rect::from_min_size(
-            rect.min + vec2(6.0, (rect.height() - icon) / 2.0),
-            vec2(icon, icon),
-        );
-        icons::paint(&painter, icon_rect, ghost.icon, color::TEXT);
-        painter.galley(
-            egui::pos2(
-                icon_rect.right() + 6.0,
-                rect.center().y - galley.size().y / 2.0,
-            ),
-            galley,
-            color::TEXT,
-        );
+        paint_outline(&painter, &ghost, pos);
+        // macOS has a copy pointer; elsewhere the system arrow gets AE's
+        // dotted box and plus.
+        if accepted && !cfg!(target_os = "macos") {
+            paint_copy_badge(&painter, pos);
+        }
     }
 }
 
-/// Chinese strings.
-pub(crate) const ZH: &[(&str, &str)] = &[("{n} items", "{n} 个项目")];
+fn paint_outline(painter: &Painter, ghost: &Ghost, pos: Pos2) {
+    let stroke = Stroke::new(1.0, color::TEXT);
+    let step = ghost.name.height() + 2.0;
+    for k in 0..ghost.count.min(4) {
+        let d = pos - ghost.grab + vec2(0.0, k as f32 * step);
+        for r in [ghost.icon, ghost.name] {
+            painter.rect_stroke(r.translate(d), 0.0, stroke, egui::StrokeKind::Inside);
+        }
+    }
+}
+
+/// The Windows copy pointer's badge: a dotted box with a plus at its corner.
+fn paint_copy_badge(painter: &Painter, pos: Pos2) {
+    let b = Rect::from_min_size(pos + vec2(6.0, 16.0), vec2(11.0, 11.0));
+    let edge = [
+        b.left_top(),
+        b.right_top(),
+        b.right_bottom(),
+        b.left_bottom(),
+        b.left_top(),
+    ];
+    painter.extend(Shape::dashed_line(
+        &edge,
+        Stroke::new(2.0, Color32::BLACK),
+        2.0,
+        2.0,
+    ));
+    painter.extend(Shape::dashed_line(
+        &edge,
+        Stroke::new(1.0, Color32::WHITE),
+        2.0,
+        2.0,
+    ));
+    let plus = Rect::from_min_size(b.right_bottom() - vec2(4.0, 4.0), vec2(9.0, 9.0));
+    painter.rect_filled(plus, 0.0, Color32::WHITE);
+    painter.rect_stroke(
+        plus,
+        0.0,
+        Stroke::new(1.0, Color32::BLACK),
+        egui::StrokeKind::Inside,
+    );
+    let m = plus.center();
+    let s = Stroke::new(1.0, Color32::BLACK);
+    painter.line_segment([pos2(m.x - 2.5, m.y), pos2(m.x + 2.5, m.y)], s);
+    painter.line_segment([pos2(m.x, m.y - 2.5), pos2(m.x, m.y + 2.5)], s);
+}
