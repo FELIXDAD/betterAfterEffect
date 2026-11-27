@@ -204,6 +204,13 @@ pub struct AvWriterEncoder {
     pixel_format: PixelFormat,
     frame_alpha: AlphaMode,
     frames: u64,
+    /// Audio handed over but not yet taken by the writer: appended as soon as
+    /// its input is ready, never waited for (#793).
+    pending_audio: std::collections::VecDeque<crate::AudioBuffer>,
+    /// No more audio follows; the input is marked finished once the queue
+    /// is written (`audio_finished`).
+    audio_complete: bool,
+    audio_finished: bool,
 }
 
 // SAFETY: the AVFoundation objects are only used through `&mut self` / `self`,
@@ -308,6 +315,9 @@ impl AvWriterEncoder {
                 frame_alpha,
                 audio,
                 frames: 0,
+                pending_audio: Default::default(),
+                audio_complete: false,
+                audio_finished: false,
             })
         }
     }
@@ -367,7 +377,19 @@ impl AvWriterEncoder {
 
     fn append_rows(&mut self, bytes: &[u8], stride: usize) -> Result<(), MediaError> {
         let buffer = self.pixel_buffer(bytes, stride)?;
-        self.wait_ready(&self.input)?;
+        // The writer interleaves: with uncompressed audio it takes the next
+        // frame only once audio ahead of it is in, so queued audio goes in
+        // while the frame waits (#793: PCM audio deadlocked the export).
+        // SAFETY: status queries on a writing session.
+        while !unsafe { self.input.isReadyForMoreMediaData() } {
+            // SAFETY: a status query on a writing session.
+            if unsafe { self.writer.status() } == AVAssetWriterStatus::Failed {
+                return Err(writer_error(&self.writer, "encoding failed"));
+            }
+            if !self.drain_audio()? {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
         let rate = self.settings.frame_rate;
         // SAFETY: building a time and appending a pool buffer to a writing session.
         let appended = unsafe {
@@ -380,6 +402,28 @@ impl AvWriterEncoder {
         }
         self.frames += 1;
         Ok(())
+    }
+
+    /// Appends queued audio while its input takes it; whether any went in.
+    fn drain_audio(&mut self) -> Result<bool, MediaError> {
+        let Some(audio) = self.audio.as_mut() else {
+            return Ok(false);
+        };
+        let mut appended = false;
+        // SAFETY: a status query on a writing session.
+        while !self.pending_audio.is_empty() && unsafe { audio.input.isReadyForMoreMediaData() } {
+            let pcm = self.pending_audio.pop_front().expect("queued audio");
+            audio.append(&self.writer, &pcm)?;
+            appended = true;
+        }
+        // All of it is in: the writer stops waiting for audio past its end.
+        if self.audio_complete && self.pending_audio.is_empty() && !self.audio_finished {
+            // SAFETY: closing one input of a writing session.
+            unsafe { audio.input.markAsFinished() };
+            self.audio_finished = true;
+            appended = true;
+        }
+        Ok(appended)
     }
 
     fn wait_ready(&self, input: &AVAssetWriterInput) -> Result<(), MediaError> {
@@ -579,37 +623,48 @@ impl Encoder for AvWriterEncoder {
     }
 
     fn push_audio(&mut self, pcm: &crate::AudioBuffer) -> Result<(), MediaError> {
-        let Some(audio) = &self.audio else {
+        if self.audio.is_none() {
             return Err(MediaError::Unsupported("no audio stream".into()));
-        };
+        }
         self.settings
             .audio
             .as_ref()
             .expect("configured audio")
             .validate_input(pcm)?;
-        self.wait_ready(&audio.input)?;
-        self.audio
-            .as_mut()
-            .expect("configured audio")
-            .append(&self.writer, pcm)
+        self.pending_audio.push_back(pcm.clone());
+        self.drain_audio().map(|_| ())
+    }
+
+    fn end_audio(&mut self) -> Result<(), MediaError> {
+        self.audio_complete = true;
+        self.drain_audio().map(|_| ())
     }
 
     fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {
+        let mut this = self;
         // SAFETY: closing a writing session.
         unsafe {
-            self.input.markAsFinished();
-            if let Some(audio) = &self.audio {
+            // The video ends first, so the writer takes the rest of the audio.
+            this.input.markAsFinished();
+            while !this.pending_audio.is_empty() {
+                let input = &this.audio.as_ref().expect("configured audio").input;
+                this.wait_ready(input)?;
+                this.drain_audio()?;
+            }
+            if let Some(audio) = &this.audio
+                && !this.audio_finished
+            {
                 audio.input.markAsFinished();
             }
             #[allow(deprecated)]
-            let finished = self.writer.finishWriting();
-            if !finished || self.writer.status() != AVAssetWriterStatus::Completed {
-                return Err(writer_error(&self.writer, "cannot finish the movie"));
+            let finished = this.writer.finishWriting();
+            if !finished || this.writer.status() != AVAssetWriterStatus::Completed {
+                return Err(writer_error(&this.writer, "cannot finish the movie"));
             }
         }
         Ok(EncodeOutput {
-            files: vec![self.settings.path.clone()],
-            frames: self.frames,
+            files: vec![this.settings.path.clone()],
+            frames: this.frames,
             stats: crate::export::EncodeStats {
                 threads: 1,
                 ..Default::default()

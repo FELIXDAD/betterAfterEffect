@@ -71,7 +71,9 @@ pub fn run(mut app: App, dirs: AppDirs) -> ExitCode {
         bae_ui_motion::register_preset_index(&mut app, dirs.data.join("Presets"));
     }
     // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
-    bae_plugin::load_installed(&app);
+    if !global.safe_mode {
+        bae_plugin::load_installed(&app);
+    }
     let packages = app
         .resource::<bae_plugin::PluginRuntime>()
         .map(|runtime| {

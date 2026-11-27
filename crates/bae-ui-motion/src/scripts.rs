@@ -45,7 +45,7 @@ pub const INSTALL_SCRIPT_FILE: &str = "motion.file.install_script_file";
 /// An installed script, `{"path": …}` (catalog action of the Scripts list).
 pub const RUN_INSTALLED: &str = "motion.file.run_script";
 /// Shows the report of the script that just ran.
-const REPORT: &str = "motion.file.script_report";
+pub(super) const REPORT: &str = "motion.file.script_report";
 const EDITOR: &str = "motion.file.script_editor";
 const EDITOR_PANEL: &str = "script_editor";
 const RECENT_LIMIT: usize = 10;

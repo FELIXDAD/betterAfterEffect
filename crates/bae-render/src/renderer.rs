@@ -183,6 +183,7 @@ impl OutputTarget {
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -282,6 +283,7 @@ impl SourceResolver for Resolver<'_> {
             &footage.asset,
             footage.file_revision,
             footage.sequence,
+            footage.alphabetical,
             footage.psd_layer,
         ) {
             Ok(source) => Ok(Some(source)),
@@ -527,8 +529,8 @@ impl Renderer {
         }
         let encode_start = Instant::now();
         let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
-        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
-            feedback,
+        let tiles = (self.frames.stats().budget > 0 || feedback).then(|| crate::exec::TileCache {
+            whole_surfaces: request.roi.is_some(),
             frames: &mut self.frames,
             request: RenderRequest {
                 roi: None,

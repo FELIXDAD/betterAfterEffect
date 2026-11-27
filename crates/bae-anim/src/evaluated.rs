@@ -124,6 +124,8 @@ pub struct EvaluatedLayer {
 pub struct LayerSwitches {
     /// Video switch (eye).
     pub enabled: bool,
+    /// Sampling quality of this layer.
+    pub quality: LayerQuality,
     /// Effect switch (fx): the layer's effects render (AE default on).
     pub effects: bool,
     pub solo: bool,
@@ -137,6 +139,26 @@ pub struct LayerSwitches {
     pub preserve_transparency: bool,
     /// The layer's Frame Blending switch (AE-CMP-065).
     pub frame_blending: FrameBlending,
+}
+
+/// Quality in increasing sampling order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayerQuality {
+    Wireframe,
+    Draft,
+    #[default]
+    Best,
+}
+
+impl LayerQuality {
+    pub fn from_token(token: Option<&str>) -> Self {
+        match token {
+            Some("wireframe") => Self::Wireframe,
+            Some("draft") => Self::Draft,
+            _ => Self::Best,
+        }
+    }
 }
 
 /// A layer's Frame Blending switch.
@@ -313,6 +335,21 @@ pub struct MaterialState {
     pub specular_shininess: f64,
     /// Percent.
     pub metal: f64,
+    /// Advanced 3D: the colour of the shadows it casts.
+    pub shadow_color: [f64; 4],
+    /// Advanced 3D: 0 Off, 1 On, 2 Only.
+    pub appears_in_reflections: u8,
+    /// Percent.
+    pub reflection_intensity: f64,
+    /// Percent.
+    pub reflection_sharpness: f64,
+    /// Percent.
+    pub reflection_rolloff: f64,
+    /// Percent.
+    pub transparency: f64,
+    /// Percent.
+    pub transparency_rolloff: f64,
+    pub index_of_refraction: f64,
 }
 
 /// Camera layer state (AE-ANI-009/022).
@@ -390,6 +427,15 @@ pub struct LightState {
     pub point_of_interest: DVec3,
     /// Light space → comp space; spot/parallel lights shine along local +z.
     pub world_matrix: DMat4,
+    /// Environment lights: the layer (index in the comp) whose image lights
+    /// the scene (AE's Source).
+    pub source: Option<usize>,
+    /// Environment lights: the image shows behind the layers.
+    pub background_visible: bool,
+    /// Percent.
+    pub background_opacity: f64,
+    /// Percent.
+    pub background_blur: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]

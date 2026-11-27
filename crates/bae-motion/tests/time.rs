@@ -173,9 +173,18 @@ fn time_reverse_keeps_in_and_out() {
     let t = query::layer_timing(&fx.stage, &layer);
     assert_eq!(t.stretch, -100.0);
     assert_eq!((t.in_point, t.out_point), (s(1.0), s(3.0)));
-    // What the out point showed now shows at the in point.
-    assert_eq!(fx.source_at(&comp, &layer, s(1.0)), s(3.0));
-    assert_eq!(fx.source_at(&comp, &layer, s(2.5)), s(1.5));
+    // Frame for frame (AE, #764): the in point shows the last frame (3 s − 1
+    // frame), the last frame the first (1 s); never a time past the end.
+    let frame = Time(SEC / 30);
+    assert_eq!(fx.source_at(&comp, &layer, s(1.0)), s(3.0) - frame);
+    assert_eq!(fx.source_at(&comp, &layer, s(3.0) - frame), s(1.0));
+    // Reversing again restores the layer.
+    fx.run("layer.time_reverse", json!({"layers": [layer]}));
+    assert_eq!(
+        query::layer_timing(&fx.stage, &layer).start_time,
+        Time::ZERO
+    );
+    assert_eq!(fx.source_at(&comp, &layer, s(2.5)), s(2.5));
 }
 
 #[test]

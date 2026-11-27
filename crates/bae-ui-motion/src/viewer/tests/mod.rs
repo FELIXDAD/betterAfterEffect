@@ -431,6 +431,15 @@ impl H {
         self.frame(Vec::new(), Modifiers::NONE);
     }
 
+    /// An arrow-key nudge by `(dx, dy)` screen pixels, the key let go: the
+    /// action, then the frame that commits it (one undo step).
+    fn nudge(&mut self, dx: f64, dy: f64) {
+        let a = self.action_with(crate::tools::ids::NUDGE, json!({"dx": dx, "dy": dy}));
+        assert!(a.invocations.is_empty(), "nothing until the key is up");
+        let r = self.frame(Vec::new(), Modifiers::NONE);
+        self.apply(&r);
+    }
+
     /// Click the menu entry labeled `label`.
     fn choose(&mut self, label: &str) -> PanelRequests {
         let p = self
@@ -470,8 +479,10 @@ mod guides;
 mod masks;
 mod motion_sketch;
 mod navigation;
+mod navigator;
 mod parity;
 mod pen;
+mod puppet;
 mod resolution;
 mod selection;
 mod shape_tools;

@@ -6,6 +6,8 @@
 //! pre-comps are drawn as vector meshes in comp space. No effects, masks, mattes,
 //! blend modes or 3D perspective (3D layers are drawn orthographically).
 
+pub(crate) mod vertical_text;
+
 use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_anim::{EvaluatedComp, EvaluatedLayer, EvaluatedPrim, LayerSource};
 use bae_model::{BezierPath, LayerKind, PrimType, Value};
@@ -361,9 +363,18 @@ pub(crate) fn layer_bounds(layer: &EvaluatedLayer) -> Option<(DVec2, DVec2)> {
             }
             (min.x <= max.x).then_some((min, max))
         }
-        LayerKind::Text => layer.text.as_ref().map(|t| {
+        LayerKind::Text => layer.text.as_ref().and_then(|t| {
             if let Some(rect) = bae_text::layout::box_rect(t) {
-                return (DVec2::new(rect.x0, rect.y0), DVec2::new(rect.x1, rect.y1));
+                return Some((DVec2::new(rect.x0, rect.y0), DVec2::new(rect.x1, rect.y1)));
+            }
+            if t.line_orientation == bae_model::LineOrientation::Vertical {
+                let layout = crate::ae_panels::character::hit_layout(t)?;
+                let r = layout
+                    .lines
+                    .iter()
+                    .map(|line| layout.line_rect(line))
+                    .reduce(|a, b| a.union(b))?;
+                return Some((DVec2::new(r.x0, r.y0), DVec2::new(r.x1, r.y1)));
             }
             let w = if t.runs.is_empty() {
                 t.style.font_size * 0.55 * t.text.chars().count().max(1) as f64
@@ -382,10 +393,10 @@ pub(crate) fn layer_bounds(layer: &EvaluatedLayer) -> Option<(DVec2, DVec2)> {
                 "right" => -w,
                 _ => 0.0,
             };
-            (
+            Some((
                 DVec2::new(x0, -t.style.font_size * 0.8),
                 DVec2::new(x0 + w, t.style.font_size * 0.25),
-            )
+            ))
         }),
         LayerKind::Null => Some((DVec2::ZERO, DVec2::splat(100.0))),
         _ => None,
@@ -552,6 +563,21 @@ pub(crate) fn paint_comp(
                 if let Some(t) = &layer.text
                     && alpha > 0.
                 {
+                    if t.line_orientation == bae_model::LineOrientation::Vertical {
+                        let scale =
+                            (xf.scale() * view_scale) as f32 * painter.ctx().pixels_per_point();
+                        if let Some(preview) = vertical_text::Preview::get(
+                            painter,
+                            egui::Id::new(("vertical preview", &layer.path)),
+                            t,
+                            scale,
+                        ) {
+                            shapes.push(
+                                preview.shape(|p| screen(DVec2::from_array(p)), alpha as f32),
+                            );
+                        }
+                        continue;
+                    }
                     shapes.push(text_shape(
                         painter,
                         t,
@@ -645,15 +671,21 @@ pub(crate) fn bounds_quad(
     view: &View,
     outer: &Affine,
 ) -> Option<[Pos2; 4]> {
+    projected_bounds(layer, view, outer, is_3d(layer))
+}
+
+/// Project a nested layer with all ancestor transforms and the containing camera.
+pub(crate) fn projected_bounds(
+    layer: &EvaluatedLayer,
+    view: &View,
+    outer: &Affine,
+    three_d: bool,
+) -> Option<[Pos2; 4]> {
     let (min, max) = layer_bounds(layer)?;
     let c = [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)];
-    if is_3d(layer) {
-        let [a, b, c, d] =
-            c.map(|p| view.project(layer.world_matrix.transform_point3(p.extend(0.0)), true));
-        return Some([a?, b?, c?, d?]);
-    }
     let xf = outer.then(&layer.world_matrix);
-    Some(c.map(|p| view.to_screen(xf.apply(p))))
+    let [a, b, c, d] = c.map(|p| view.project(xf.m.transform_point3(p.extend(0.0)), three_d));
+    Some([a?, b?, c?, d?])
 }
 
 /// A 3D layer the camera sees (cameras and lights have no picture).

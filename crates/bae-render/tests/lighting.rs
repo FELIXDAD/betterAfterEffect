@@ -83,6 +83,7 @@ fn light(kind: LightKind, at: DVec3, aim: DVec3) -> Light {
         shadow_darkness: 100.0,
         shadow_diffusion: 0.0,
         scope_below: None,
+        environment: None,
     }
 }
 
@@ -501,6 +502,48 @@ fn shadow_only_modes() {
     assert!(only_shadows.px(10, 190)[3] < 8, "no receiver where lit");
 }
 
+/// An environment light's Source and Background options reach the renderer;
+/// a hidden source layer still counts (the frame depends on its pixels).
+#[test]
+fn evaluator_passes_environment_light_sources() {
+    let mut b = SceneBuilder::new();
+    let comp = b
+        .comp(
+            "main",
+            200,
+            200,
+            bae_model::FrameRate::FPS_30,
+            Time::ONE_SECOND,
+        )
+        .unwrap();
+    let light = b.layer(&comp, "light", "light", None).unwrap();
+    b.set(&light, "light:type", Value::Enum("environment".into()))
+        .unwrap();
+    let hdri = b
+        .solid_layer(&comp, "hdri", [1.0, 0.5, 0.0, 1.0], [400, 200], [0.0, 0.0])
+        .unwrap();
+    b.set(&hdri, "enabled", Value::Bool(false)).unwrap();
+    b.set(&light, "light:source", Value::PrimRef(hdri.clone()))
+        .unwrap();
+    b.set(&light, "light:background_visible", Value::Bool(true))
+        .unwrap();
+    b.set(&light, "light:background_opacity", Value::Float(50.0))
+        .unwrap();
+    let stage = b.into_stage();
+    let mut eval = AnimEvaluator::new(None);
+    let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
+    let index = rc.layers.iter().position(|l| l.path == hdri).unwrap();
+    assert_eq!(
+        rc.lights[0].environment,
+        Some(bae_render::light::EnvironmentSource {
+            layer: index,
+            background: Some([0.5, 0.0]),
+        })
+    );
+    assert!(!rc.layers[index].visible);
+    assert!(!rc.layers[index].inert, "the light reads it");
+}
+
 /// Shadows that hold still are drawn into a receiver-space map once (the
 /// second frame with the same layers and lights) and sampled from then on;
 /// the map matches the per-pixel shadows closely.
@@ -534,4 +577,39 @@ fn still_shadows_come_from_a_cached_map() {
         .max()
         .unwrap();
     assert!(worst <= 24, "map vs per pixel: {worst}");
+}
+
+/// The render queue renders at Best Settings: a Draft layer is drawn at Best
+/// in final renders; previews honour the switch.
+#[test]
+fn final_renders_ignore_the_quality_switch() {
+    let mut b = SceneBuilder::new();
+    let comp = b
+        .comp(
+            "main",
+            100,
+            100,
+            bae_model::FrameRate::FPS_30,
+            Time::ONE_SECOND,
+        )
+        .unwrap();
+    let layer = b
+        .solid_layer(&comp, "a", [1.0, 1.0, 1.0, 1.0], [50, 50], [0.0, 0.0])
+        .unwrap();
+    b.set(&layer, "quality", Value::Enum("draft".into()))
+        .unwrap();
+    let stage = b.into_stage();
+    let quality = |purpose| {
+        let mut eval = AnimEvaluator::new(None).with_purpose(purpose);
+        let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
+        rc.layers[0].quality
+    };
+    assert_eq!(
+        quality(bae_render::RenderPurpose::Final),
+        bae_anim::LayerQuality::Best
+    );
+    assert_eq!(
+        quality(bae_render::RenderPurpose::Preview),
+        bae_anim::LayerQuality::Draft
+    );
 }
