@@ -1,4 +1,5 @@
 use super::*;
+use egui_kittest::kittest::Queryable as _;
 
 #[test]
 fn composition_and_timeline_tabs_follow_the_item_label() {
@@ -16,7 +17,21 @@ fn composition_and_timeline_tabs_follow_the_item_label() {
     h.state().session().lock().open_comp(&comp);
     settle(&mut h);
     let shows_swatch = |h: &Ui, title: &str| {
-        let text = find_text(h, title).unwrap_or_else(|| panic!("missing tab {title}"));
+        // The Timeline tab shows only the comp (AE); find its text in the tab.
+        let text = match title.strip_prefix("Timeline ") {
+            Some(comp) => {
+                let tab = h
+                    .query_all_by_label(title)
+                    .next()
+                    .unwrap_or_else(|| panic!("missing tab {title}"))
+                    .rect();
+                find_texts(h, |t| t == comp)
+                    .into_iter()
+                    .find(|r| tab.contains(r.center()))
+            }
+            None => find_text(h, title),
+        }
+        .unwrap_or_else(|| panic!("missing tab {title}"));
         h.output().shapes.iter().any(|s| {
             matches!(&s.shape, egui::Shape::Rect(r) if r.fill == egui::Color32::from_rgb(3,209,129)
                 && (r.rect.center().y-text.center().y).abs() < 5.0

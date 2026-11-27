@@ -679,7 +679,7 @@ fn transport_keys_move_the_playhead_after_clicking_a_layer() {
     let mut h = comp_with_solid();
     // As the report: click the time ruler first, then a layer.
     let head = header(&h);
-    let tick = find_texts(&h, |t| t == "2s")
+    let tick = find_texts(&h, |t| t == "02s" || t == "02:00f")
         .into_iter()
         .find(|r| r.left() > head.right())
         .unwrap_or_else(|| panic!("no ruler label in {:?}", painted_texts(&h)));
@@ -815,10 +815,11 @@ fn small_windows_show_and_scroll_the_timeline_rows() {
         let mut h = gui_sized(Gui::new(), size);
         comp_with(&mut h, &["motion.layer.new.null"; 6]);
         settle(&mut h);
-        let tab = find_texts(&h, |t| t.starts_with("Timeline"))
-            .into_iter()
+        let tab = h
+            .query_all_by_label("Timeline Comp 1")
             .next()
-            .expect("timeline tab");
+            .expect("timeline tab")
+            .rect();
         let names = h.state().layer_names();
         let in_timeline = |h: &Ui| {
             names

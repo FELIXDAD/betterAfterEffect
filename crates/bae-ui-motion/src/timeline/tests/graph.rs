@@ -17,7 +17,7 @@ fn shift_f3_and_the_switch_toggle_the_graph_editor() {
         |x| x.action == crate::actions::ids::GRAPH_EDITOR && x.chord.to_string().contains("F3")
     ));
     // The comp switch in the timeline header (right end of the outline).
-    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
+    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 17.0);
     h.click(&mut tl, sw, Modifiers::NONE);
     assert!(h.session().lock().graph_editor);
     // The graph and its button bar are visible on the release frame.
@@ -492,7 +492,7 @@ fn clicking_a_property_name_selects_it_and_its_keys() {
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     // Row 2 (the revealed Rotation); the name starts after the stopwatch and
     // the Graph Editor Set switch.
-    let row_y = 22.0 + 34.0 + 20.0 + 19.0 + 9.5;
+    let row_y = 34.0 + 20.0 + 19.0 + 9.5;
     h.click(&mut tl, pos2(124.0 + 14.0 + 50.0, row_y), Modifiers::NONE);
     let s = h.session();
     let s = s.lock();
@@ -521,7 +521,7 @@ fn graph_editor_set_and_show_properties() {
         .reveal
         .insert(h.layer.clone(), crate::session::Reveal::Animated);
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
-    let row_y = 22.0 + 34.0 + 20.0 + 19.0 + 9.5;
+    let row_y = 34.0 + 20.0 + 19.0 + 9.5;
     h.click(&mut tl, pos2(124.0 + 14.0 - 8.0, row_y), Modifiers::NONE);
     assert_eq!(
         h.session().lock().graph_set,
