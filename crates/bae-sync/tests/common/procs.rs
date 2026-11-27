@@ -12,7 +12,11 @@
 //! then.
 //!
 //! Processes are killed with [`Child::kill`]: `TerminateProcess` on Windows,
-//! `SIGKILL` on Unix; neither runs any cleanup in the child.
+//! `SIGKILL` on Unix; neither runs any cleanup in the child. Dropping a
+//! [`Proc`] (a test that ends, or panics) first closes its stdin and gives the
+//! child [`DROP_GRACE`] to exit on its own, and kills it only then: a child
+//! that runs a process of its own (the hub tests' guard) gets to end that one
+//! too, which a kill would leave running.
 //!
 //! Shared by `crates/bae-sync/tests/multiprocess_dir.rs` and
 //! `services/bae-hub/tests/multiprocess.rs` (included there by path).
@@ -33,6 +37,9 @@ use bae_sync::{DocSet, Message};
 pub const ROLE_VAR: &str = "BAE_MP_ROLE";
 /// Protocol lines on a child's stdout start with this.
 pub const PREFIX: &str = "@mp ";
+/// How long a dropped [`Proc`] may take to exit after its stdin closed,
+/// before it is killed.
+pub const DROP_GRACE: Duration = Duration::from_secs(5);
 
 /// The role of this process when it was started by [`Proc::spawn`]; `None` in
 /// the normal test run.
@@ -198,8 +205,12 @@ impl Proc {
 }
 
 impl Drop for Proc {
+    /// End it the way a parent that quits does (stdin closed), and kill it
+    /// only if it is still running after [`DROP_GRACE`]: a guard child kills
+    /// the hub it started when its stdin closes, which killing the guard
+    /// itself would skip. Already gone (killed, quit): returns at once.
     fn drop(&mut self) {
-        self.kill_and_wait();
+        self.end(DROP_GRACE);
     }
 }
 
