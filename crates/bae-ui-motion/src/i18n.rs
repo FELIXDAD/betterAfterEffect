@@ -33,6 +33,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "The composition has no enabled audio layers.",
         "合成中没有开启声音的图层。",
     ),
+    (
+        "Play/Stop (Shift + Numpad 0)",
+        "播放/停止（Shift + 小键盘 0）",
+    ),
     ("Cache Frames When Idle", "空闲时缓存帧"),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
     ("Set Frame", "设置帧"),

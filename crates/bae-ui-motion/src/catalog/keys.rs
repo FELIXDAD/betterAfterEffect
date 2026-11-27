@@ -267,7 +267,7 @@ pub const KEYS: &[Key] = &[
     k("CEggApp", "PreviewAudioWorkArea", "Alt+PadDecimal|Alt+PadComma|Alt+PadDelete|macControl+Alt+.", "motion.comp.preview_audio", r#"{"work_area":true}"#, B, Later, 0),
     k("CEggApp", "PreviewNumpad0", "Pad0|PadInsert|macControl+0", "motion.play", r#"{"preview":"numpad0"}"#, B, Done, 0),
     k("CEggApp", "PreviewNumpad0NFrames", "Alt+Pad0|Alt+PadInsert|macControl+Alt+0", "motion.play", r#"{"preview":"numpad0_n_frames"}"#, B, Later, 0),
-    k("CEggApp", "PreviewShiftNumpad0", "Shift+Pad0|Shift+PadInsert|macControl+Shift+0", "motion.play", r#"{"preview":"shift_numpad0"}"#, B, Todo, 0),
+    k("CEggApp", "PreviewShiftNumpad0", "Shift+Pad0|Shift+PadInsert|macControl+Shift+0", "motion.play", r#"{"preview":"shift_numpad0"}"#, B, Done, 0),
     k("CEggApp", "ShowConsole", "Ctrl+F12", "motion.window.console", "", B, Later, 0),
     k("CEggApp", "ShowDebugMonitor", "Ctrl+Shift+9", "motion.window.debug_monitor", "", B, Adobe, 0),
     k("CEggApp", "TestHostPlugin", "Ctrl+Shift+F12", "motion.help.test_host_plugin", "", B, Adobe, 0),

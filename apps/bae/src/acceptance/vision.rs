@@ -43,6 +43,27 @@ fn roto_brush_layer_strokes_and_undo() {
     let (modifiers, key_z) = cmd(Key::Z);
     key(&mut h, modifiers, key_z);
     assert_eq!(read(&h), Some(fg));
+    key(&mut h, Modifiers::ALT, Key::W);
+    let edge = h.get_by_label("Refine Edge Canvas").rect().center();
+    drag(&mut h, edge, edge + egui::vec2(15., 20.), Modifiers::NONE);
+    let effect = bae_motion::effect::effects_of(h.state().stage(), &layer)[0].clone();
+    assert!(
+        h.state()
+            .stage()
+            .prim(&effect)
+            .unwrap()
+            .value("param:50005")
+            .is_some()
+    );
+    key(&mut h, modifiers, key_z);
+    assert!(
+        h.state()
+            .stage()
+            .prim(&effect)
+            .unwrap()
+            .value("param:50005")
+            .is_none()
+    );
     key(&mut h, modifiers, key_z);
     assert_eq!(read(&h), None);
 }
