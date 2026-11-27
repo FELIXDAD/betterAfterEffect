@@ -38,3 +38,10 @@ fn fs_shadow(i: VsOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(u.value.rgb, 1.0);
 }
+
+// Light-view depth of the 3D models that cast shadows on models
+// (exec/mesh.rs): `clip` is the light's view-projection.
+@vertex
+fn vs_caster(@location(0) pos: vec3<f32>) -> @builtin(position) vec4<f32> {
+    return u.clip * (u.model * vec4<f32>(pos, 1.0));
+}
