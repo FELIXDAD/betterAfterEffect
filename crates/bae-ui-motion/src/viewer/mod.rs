@@ -1041,6 +1041,23 @@ impl Panel for CompositionViewer {
         // Paint.
         let painter = ui.painter_at(area);
         let controls = view_options::shown_controls(&session.lock());
+        // Region of interest for Crop Comp to Region of Interest (AE turns it
+        // off once the comp is cropped to it).
+        {
+            let mut s = session.lock();
+            if std::mem::take(&mut s.roi_cropped) {
+                self.display.roi_on = false;
+                self.display.roi = None;
+            }
+            match self.display.roi() {
+                Some(r) => {
+                    let rect = [r.x0, r.y0, r.x1, r.y1].map(f64::from);
+                    s.roi = Some((info.path.clone(), rect));
+                }
+                None if s.roi.as_ref().is_some_and(|(c, _)| *c == info.path) => s.roi = None,
+                None => {}
+            }
+        }
         let pasteboard = session.lock().panel_background.color();
         painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
