@@ -526,7 +526,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "SelectPrevViewerContext", "Shift+Comma", "motion.panel.select_previous_viewer", "", B, Later, 0),
     k("CSwitchboard", "SendFarther", "Ctrl+[|Ctrl+Alt+DownArrow", "motion.order", r#"{"to":"backward"}"#, B, Done, 0),
     k("CSwitchboard", "SendToBack", "Ctrl+Shift+[|Ctrl+Alt+Shift+DownArrow|Ctrl+Shift+-", "motion.order", r#"{"to":"back"}"#, B, Done, 0),
-    k("CSwitchboard", "SetProxyFile", "Ctrl+Alt+P", "motion.file.set_proxy_file", "", E, Later, 0),
+    k("CSwitchboard", "SetProxyFile", "Ctrl+Alt+P", "motion.file.set_proxy_file", "", E, Done, 0),
     k("CSwitchboard", "SetSamplingQualityBicubic", "Alt+Shift+B", "motion.layer.sampling", r#"{"sampling":"bicubic"}"#, B, Todo, 0),
     k("CSwitchboard", "SetSamplingQualityBilinear", "Alt+B", "motion.layer.sampling", r#"{"sampling":"bilinear"}"#, B, Todo, 0),
     k("CSwitchboard", "ShowCompTree", "Ctrl+Shift+F11", "motion.comp.composition_flowchart", "", E, Done, 0),

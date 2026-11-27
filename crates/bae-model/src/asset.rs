@@ -367,6 +367,30 @@ pub fn alphabetical_frames(file: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+/// AE proxies (File ▸ Set Proxy): the stand-in file of a footage item or comp
+/// is an `Asset` prim with this name under the item.
+pub const PROXY_PRIM: &str = "proxy";
+/// Item attribute: its proxy is used where proxies are on.
+pub const PROXY_ENABLED: &str = "proxy:enabled";
+
+/// The proxy prim of `item`, if it has one.
+pub fn proxy_of(stage: &crate::Stage, item: &PrimPath) -> Option<PrimPath> {
+    let path = item.child(PROXY_PRIM).ok()?;
+    stage
+        .prim(&path)
+        .is_some_and(|v| v.is_a(&crate::PrimType::ASSET))
+        .then_some(path)
+}
+
+/// The proxy of `item` when it has one and it is on.
+pub fn proxy_in_use(stage: &crate::Stage, item: &PrimPath) -> Option<PrimPath> {
+    let on = stage
+        .prim(item)
+        .and_then(|v| v.value(PROXY_ENABLED).and_then(crate::Value::as_bool))
+        == Some(true);
+    on.then(|| proxy_of(stage, item)).flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

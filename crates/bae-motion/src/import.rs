@@ -97,6 +97,11 @@ const ATTRS: &[&str] = &[
     "timecode:drop_frame",
 ];
 
+/// Whether an importer (or File ▸ Set Proxy) may set `attr` on a footage item.
+pub(crate) fn footage_attr_allowed(attr: &str) -> bool {
+    ATTRS.contains(&attr) || crate::project_settings::is_metadata_field(attr)
+}
+
 /// The folder `rel` (`a/b`) under `parent`, created as needed (matched by
 /// display name, like the Project panel shows it).
 pub(crate) fn folder_path(
