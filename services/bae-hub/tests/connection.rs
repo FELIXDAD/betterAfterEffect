@@ -11,10 +11,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bae_hub::{Access as TokenAccess, HubConfig, RunningHub};
-use bae_model::{AuthorId, Op, PrimType, Specifier, Stage, SublayerId, Value};
+use bae_model::{AuthorId, Op, PrimType, Specifier, Stage, StageEvent, SublayerId, Value};
 use bae_sync::{
-    Access, Backoff, ClientId, Connection, ConnectionConfig, ConnectionOutcome, ConnectionState,
-    Failure, PresenceState, SessionConfig, Target,
+    Access, Backoff, ClientId, ConflictConfig, ConflictTracker, Connection, ConnectionConfig,
+    ConnectionOutcome, ConnectionState, DocKey, DocSet, ElementValue, Failure, PresenceState,
+    PrimChange, SessionConfig, Target,
 };
 use common::*;
 
@@ -77,9 +78,11 @@ impl App {
         out
     }
 
-    fn set_opacity(&mut self, value: f64) {
+    /// Returns the local event (for a `ConflictTracker`).
+    fn set_opacity(&mut self, value: f64) -> StageEvent {
         self.stage.set_edit_target(&SublayerId::root()).unwrap();
-        self.stage
+        let ((), event) = self
+            .stage
             .transact(&self.who, "edit", |tx| {
                 tx.apply(Op::SetValue {
                     path: p("/comps/main/layers/title"),
@@ -88,6 +91,7 @@ impl App {
                 })
             })
             .unwrap();
+        event
     }
 
     fn opacity(&self) -> Option<Value> {
@@ -300,6 +304,108 @@ fn the_hub_goes_away_and_comes_back_on_the_same_port() {
         d.pump();
         d.conn.status().peers == 2
     });
+    drop(hub);
+}
+
+/// The offline merge summary (`ConflictTracker`, spec 6.4) on a connection,
+/// wired as the spec says: `connection_lost` when the state leaves `Online`,
+/// `caught_up` at the first pump that is online again and `is_caught_up`.
+/// While the hub is away, Alice sets the opacity, and Bob sets it after edits
+/// of his own (so his op wins by Loro order) and adds a layer. Bob is back
+/// first, and the hub has his edits before Alice reconnects: her summary
+/// lists her edit as overridden by Bob and his changes as merged, and she
+/// gets no online notice for it. While she is offline, `is_caught_up` still
+/// answers for the old link, which is why the app asks `is_online` first.
+#[test]
+fn the_offline_summary_comes_once_the_new_link_caught_up() {
+    let data = tempfile::tempdir().unwrap();
+    let hub = start(config(data.path()));
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut a = App::join(addr, WRITE, "alice", &base);
+    let mut b = App::join(addr, WRITE, "bob", &base);
+    wait("both online", LONG, || {
+        a.pump();
+        b.pump();
+        a.conn.is_online() && b.conn.is_online()
+    });
+    let mut tracker = ConflictTracker::new(&a.stage, ConflictConfig::default());
+
+    hub.shutdown();
+    let mut lost = false;
+    wait("both offline", LONG, || {
+        a.pump();
+        b.pump();
+        if !lost && !a.conn.is_online() {
+            tracker.connection_lost(&a.stage);
+            lost = true;
+        }
+        lost && !b.conn.is_online()
+    });
+    assert!(
+        a.conn.session().is_caught_up(&a.stage),
+        "answers for the old link"
+    );
+    let event = a.set_opacity(2.0);
+    assert!(tracker.observe(&a.stage, &event).is_empty());
+    for v in [3.0, 4.0, 5.0] {
+        b.set_opacity(v);
+    }
+    b.create_layer("offline_bob");
+
+    let hub = restart(data.path(), addr);
+    // The hub has Bob's edits once it says so (its next `Hello`).
+    let docs = [
+        DocKey::sublayer(&SublayerId::root()),
+        DocKey::sublayer(&sl("anim/a")),
+    ];
+    wait("the hub confirmed Bob's edits", LONG, || {
+        b.pump();
+        let confirmed = b.conn.session().remote_versions();
+        b.conn.is_online()
+            && docs.iter().all(|doc| {
+                confirmed
+                    .and_then(|c| c.get(doc))
+                    .is_some_and(|theirs| theirs.includes_vv(&b.stage.version(doc).unwrap()))
+            })
+    });
+    let mut summary = None;
+    wait("Alice caught up", LONG, || {
+        a.pump();
+        let notices = tracker.check(&a.stage);
+        assert!(notices.is_empty(), "{notices:?}");
+        if a.conn.is_online() && a.conn.session().is_caught_up(&a.stage) {
+            summary = Some(tracker.caught_up(&a.stage).unwrap());
+            true
+        } else {
+            false
+        }
+    });
+    let summary = summary.unwrap().expect("connection_lost was called");
+    assert_eq!(a.opacity(), Some(Value::Float(5.0)));
+    assert!(a.has_layer("offline_bob"));
+    assert_eq!(summary.overridden.len(), 1, "{summary:#?}");
+    let edit = &summary.overridden[0];
+    assert_eq!(edit.attr, "opacity");
+    assert_eq!(edit.ours, Some(ElementValue::Value(Value::Float(2.0))));
+    assert_eq!(edit.result, Some(ElementValue::Value(Value::Float(5.0))));
+    assert_eq!(edit.winner, Some(author("user:bob")));
+    assert!(summary.kept.is_empty(), "{summary:#?}");
+    let merged: Vec<_> = summary
+        .merged
+        .iter()
+        .map(|d| (d.path.to_string(), d.change.clone()))
+        .collect();
+    assert!(
+        merged.contains(&(format!("{LAYERS}/offline_bob"), PrimChange::Added)),
+        "{merged:?}"
+    );
+    assert!(
+        merged.contains(&(format!("{LAYERS}/title"), PrimChange::Modified)),
+        "{merged:?}"
+    );
+    // Once: the next reconnect needs `connection_lost` again.
+    assert!(tracker.caught_up(&a.stage).unwrap().is_none());
     drop(hub);
 }
 

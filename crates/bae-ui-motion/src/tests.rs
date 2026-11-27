@@ -992,7 +992,12 @@ fn menu_bar_follows_the_ae_catalog() {
     }
     assert_eq!(tops, expect);
     let built = menu_lines(&tree);
-    let wanted = catalog_lines();
+    let mut wanted = catalog_lines();
+    let install = wanted
+        .iter()
+        .position(|line| line == "File > Scripts > Install ScriptUI Panel...")
+        .unwrap();
+    wanted.insert(install, "File > Scripts > Open Script Editor...".to_owned());
     let first_diff = built
         .iter()
         .zip(&wanted)

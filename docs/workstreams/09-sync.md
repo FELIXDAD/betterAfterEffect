@@ -50,6 +50,7 @@
 - [x] 回滚（PR F）：`History::revert_to` / `history::revert`，以新的撤销单元恢复整个工程、一个工程层或一个 Prim 子树，不改写历史；命令 `version.revert`（`bae_sync::register_commands`）供 Agent 调用
 - [x] 差异和回滚按节点身份（G0，分支与合并的前置）：`identity.rs` 的 `NodeIndex`（TreeID → 父节点、原始名、兄弟序号、spec）和 `Matching`（同一 TreeID，加"重建别名"）；`diff` 和 `revert` / `version.revert` 不再按路径匹配 Prim，镜像因并发同名新建而在客户端之间不一致时，两边算出的差异和回滚结果相同；恢复时与留下的同名兄弟冲突用旧节点自己的后缀 `<名字>_<peer>_<counter>`（按重建别名仍对上旧节点，回滚可重复执行）；`Prim` 范围也按节点判断。镜像不一致本身是 bae-model 的问题，已报给 02
 - [x] 连接管理（`collab/sync-connection`，epic #737 子任务 3 的引擎部分）：`Connection`（共享目录 / Hub 目标、后台连接、断线按退避重连、401/403/404/ClientId 被占用时停下等用户处理、读写权限、状态栏状态、在线状态、`unknown_docs`、不阻塞的关闭）；Hub 握手响应带 `x-bae-access`；只读时关掉 `SessionConfig::send_data`；`DirTransport::open_read_only`；规格见 spec 第 7 节
+- [x] 语义冲突提示（#737 子任务 5 的引擎部分，界面另做）：`ConflictTracker`（`conflicts.rs`，只观察不修改）。在线：按元素（值、表达式、某时间的关键帧）记住自己最近的修改，远端导入覆盖了它报 `Overridden`（含胜出作者、是否真正同时），我们胜出时报较轻的 `Kept`，Prim 被删报 `PrimRemoved`；只解码新到操作里写了相关 map 的部分，大导入不扫描整个工程。离线：`connection_lost` / `caught_up`（`SyncSession::is_caught_up` 判断补齐）给出 `MergeSummary`：保留的、被覆盖的、新建和删除的 Prim 的结果、别人改了什么（按节点身份的 `history::diff`）。Hub 和共享目录都可用。评审后补上：断开前没送出去的修改补齐时照样提示；本地事件晚于导入交给 `observe` 也不漏报；共享目录重连先重读目录再回 `Hello`，补齐分几次 pump 时 `is_caught_up` 不会提前为真；补齐中途又改了东西时 `merged` 不丢别人的修改；别人失败事务的回滚胜出时报告；自己也删了的 Prim 不算被别人删；连续冲突按 `repeat_quiet` 只报一次；空闲检查只比较 frontiers，不随记着的修改数和 peer 数增长。规格见 spec 6.4
 - [ ] 分支与合并
 - [x] 多客户端模拟测试：4 个客户端经 Hub、20% 丢包 + 10% 重复 + 乱序延迟，编辑 150 轮后全部收敛；两端直连；Hub 重启后补齐 + 新客户端加入；协作者新建的工程层
 
@@ -90,6 +91,17 @@
   - #798 评审跟进 1（spec 7.5）：`DirTransport::open` 报 `PermissionDenied` 不再直接算只读（Windows/SMB 上"等待删除"的锁文件也是这个错误）：再在 `updates/` 里建、删一个探测文件，建不了才只读，建得了就当普通失败重试。只读的共享目录链路每隔 `Backoff::failed_retry` 再探测一次，能写了就重新连接（可写）。
   - #798 评审跟进 2（spec 7.3、7.4）：连接超过 `ConnectionConfig::unresponsive_after`（默认 10 秒）还没在线时，状态是新的 `ConnectionState::Unresponsive { since }`（NAS 卡在打开、扫描或等旧链路放开时不再一直显示"连接中"）；连接线程照样等，闹钟按时唤醒一次。
   - 合并 #808 后的评审跟进（spec 2.4、3.1、4.1、7.4、7.5、7.7、7.8）：`close` 把 `flush` 导出的数据交给关闭线程按 `max_backlog` 发（一次全交给链路时，大工程刚分享就关闭会超过 Hub 链路的 `max_unsent`，关闭失败）；Hub 的连接超过 2 × `hub_timeout` 加 1 秒才算 `Unresponsive`（以前每次超时重试都在 `Offline` 前闪一下）；锁文件连续 3 次被拒而目录能写时改为只读加入，只读链路的定期探测也看锁文件能不能打开（以前只读的锁文件让连接一直离线）；可写打开时删掉自己留下的探测文件（清理默认关闭，以前说"清理会删"不对）；规格 2.4 第 4 步和 3.1 改成：重发由"在路上"记录挡住，流量控制管积压，`a_slow_reader_is_not_flooded_by_its_own_hellos` 要求发出不到 1.25 倍；Hub README 写明握手用 `client_limits`。
+  - 合并 dev（#791、#806）（spec 2.4、4.1、4.3、4.5、6.4、7.4、7.5、7.8）：#791 的 `remove_leftovers`（拿到锁才删自己的 `<client-id>.tmp-*`，`updates/**` 和 `presence/`）和本分支的 `remove_own_probes`（只删 `updates/` 下的，不论有没有拿到锁）做的是同一件事，只留前者；写权限探测的文件名（`write_probe_path`）就是它删的那种，单元测试 `our_leftover_probe_files_are_removed_on_open` 覆盖。#806 的 `is_caught_up` / `remote_versions` 改读对方确认过的版本（`confirmed`），不读含"在路上"部分的 `remote`：问的是对方有的我们是否都导入了，两者结果相同（我们发出的本来就在本地版本里），确认过的这份不依赖这一点。断线（`forget_unconfirmed`）之后、下一次 `reset` 之前它还按旧链路回答，所以接在 `Connection` 上时先看 `is_online()`（spec 6.4 写了怎么接，Hub 测试 `the_offline_summary_comes_once_the_new_link_caught_up` 走了一遍断开、两边离线修改、重连补齐、汇总）。共享目录收到会话的 `Hello` 立刻重读目录（#806）对只读打开同样适用。
+
+- 同一台机器上的多进程回环测试（epic #737 子任务 7 第一部分，`collab/sync-multiprocess-tests`）：客户端是测试程序自己再启动一次，不另外发布程序。
+  - Hub 模式（`services/bae-hub/tests/multiprocess.rs`）：真实的 `bae-hub` 进程，杀掉后在同一个数据目录和端口重启；客户端进程被杀后用同一个 `ClientId` 从保存的状态或从头重启；一个会断线、会延迟的代理。
+  - 共享目录（`crates/bae-sync/tests/multiprocess_dir.rs`）：4 个进程，编辑中途被杀（测试补上写到一半留下的半条记录和压缩临时文件；新进程先等着锁，再杀旧进程），同一个 `ClientId` 重启后继续；目录大小不超过压缩阈值。
+  - 默认测试各约 3 秒，长时间测试在 `--ignored` 里。说明见 spec 3.1、4.6。
+  - 评审后：子进程每轮合并排队的唤醒、落后时不追赶编辑（原来一轮只取一条消息，机器忙时唤醒堆在父进程的命令前面，命令 30 秒等不到回答，共享目录的长时间测试每次都这样失败）；测试客户端不定期发 `Hello`，`SyncSession::reset` 失效时测试会失败；Hub 被杀后单独靠磁盘恢复、离线保存后重启、截掉半条记录、等锁这几处原来不管实现对不对都能通过，现在分别检查；`bae-hub` 由一个随测试进程退出的子进程启动，测试进程死掉时不再留下 Hub。
+  - 测出的问题：进程在压缩（或写在线状态心跳）时写完临时文件、改名之前被杀，临时文件永远留在目录里，每次在这个时候崩溃就多一个（macOS 上压缩的 `F_FULLFSYNC` 慢，这个窗口不小）。现在 `DirTransport::open` 拿到锁之后删除自己的 `<client-id>.tmp-*`（spec 4.3，回归测试 `temporary_files_of_a_dead_session_are_removed`）。Hub 的工程目录用的是同一份代码。
+  - 合并 dev（#782、#783）后：`DirTransport::open` 删自己的临时文件，和 4.7 清理按时间删任何人过期的临时文件并存。前者启动时拿到锁就删、不论新旧，只删自己的；后者要等超过 `inactive_after`（默认 3 天），而且要有客户端在清理（上面"永远留在目录里"是 4.7 合并之前的情况）。两者用同一个目录遍历，删掉的都算进 `DirStats::stale_files_removed`；`lock_client` 现在同时告诉 `open` 是否真的拿到了锁。
+  - 合并后跑测试时共享目录的多进程测试失败过一次（约 40 次里 2 次）：90 秒内不收敛，所有进程版本相同、没有没发出去的修改，只有一个进程（被杀后先等锁再启动的那个）的指纹不同。就是上面"并发创建同名的 Prim 后镜像里的命名不同"的问题，不是同步出错。现在这个测试和清理的压力测试一样不并发创建同名的 Prim（`random_edit_with(.., false)`），不收敛时的报错里写出各进程的版本是否相同。Hub 的多进程测试本来就不创建同名的 Prim。
+  - 同一个测试在 3 个并行跑的压力下还出现过"先等锁再启动的进程重启后没有压缩过"（30 次里 2 次）：它接手的日志的阈值是上次快照的两倍；大概因为合并 dev 后 `open` 遇到锁被占用先重试 2 秒，旧进程多编辑 2 秒，快照更大；机器忙时同样的 900 次编辑合并成更少的字节，到不了阈值。现在重启后的进程一直编辑到压缩过为止再停（同样的压力下 30 次都通过）。
 
 ### 2026-11-27（#782、#783 评审的跟进）
 

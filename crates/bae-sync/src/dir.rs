@@ -395,7 +395,8 @@ impl DirTransport {
     ///
     /// Takes an advisory lock on `updates/<client>.lock` so two sessions on one
     /// machine cannot share a client ID ([`SyncError::ClientIdInUse`]). File
-    /// systems without locking are accepted as they are.
+    /// systems without locking are accepted as they are. With the lock held,
+    /// removes the temporary files a dead earlier session with this ID left.
     ///
     /// Blocks: besides creating directories on the share, a lock that is held
     /// is retried for up to 2 seconds before `ClientIdInUse` (another client's
@@ -415,9 +416,8 @@ impl DirTransport {
         fs::create_dir_all(&updates).map_err(SyncError::io(&updates))?;
         let presence = root.join(PRESENCE);
         fs::create_dir_all(&presence).map_err(SyncError::io(&presence))?;
-        let lock = lock_client(&updates.join(format!("{client}.{LOCK_EXT}")), &client)?;
-        remove_own_probes(&updates, &client);
-        Ok(Self::new(root, client, config, Some(lock)))
+        let (lock, locked) = lock_client(&updates.join(format!("{client}.{LOCK_EXT}")), &client)?;
+        Ok(Self::new(root, client, config, Some(lock), locked))
     }
 
     /// Attach to `project` without writing anything, for a folder whose
@@ -441,14 +441,15 @@ impl DirTransport {
         if !root.is_dir() {
             return Err(SyncError::NotADirectory(root));
         }
-        Ok(Self::new(root, client, config, None))
+        Ok(Self::new(root, client, config, None, false))
     }
 
     /// Whether `client` may write in the `updates/` folder of `project`:
     /// creates and deletes a file of its own there (`<client>.tmp-<random>`;
     /// if the delete fails, the next [`open`](Self::open) of this client
-    /// removes it, holding the lock, and so does the cleanup of §4.7 where it
-    /// is turned on, `DirConfig::inactive_after`). `Ok(false)`:
+    /// removes it, holding the lock, with its other temporary files
+    /// ([`remove_leftovers`](Self::remove_leftovers)), and so does the cleanup
+    /// of §4.7 where it is turned on, `DirConfig::inactive_after`). `Ok(false)`:
     /// creating it was refused (`PermissionDenied`, `ReadOnlyFilesystem`), or
     /// `updates/` does not exist (so [`open`](Self::open) could not create
     /// it). Other errors are returned as they are.
@@ -459,9 +460,7 @@ impl DirTransport {
     /// gives that error until the deletion completes, after any wait. Blocks
     /// like `open` (a few round trips to the file server).
     pub(crate) fn probe_writable(project: &Path, client: &ClientId) -> io::Result<bool> {
-        let probe = project
-            .join(UPDATES)
-            .join(format!("{client}{TMP_MARK}{}", new_generation()));
+        let probe = write_probe_path(project, client);
         match OpenOptions::new().write(true).create_new(true).open(&probe) {
             Ok(f) => {
                 drop(f);
@@ -505,8 +504,16 @@ impl DirTransport {
         }
     }
 
-    fn new(root: PathBuf, client: ClientId, config: DirConfig, lock: Option<File>) -> Self {
-        #[allow(unused_mut)]
+    /// `leftovers`: remove the temporary files of an earlier session of ours
+    /// ([`remove_leftovers`](Self::remove_leftovers)); only while we hold
+    /// `lock`.
+    fn new(
+        root: PathBuf,
+        client: ClientId,
+        config: DirConfig,
+        lock: Option<File>,
+        leftovers: bool,
+    ) -> Self {
         let mut t = DirTransport {
             root,
             client,
@@ -534,11 +541,41 @@ impl DirTransport {
             #[cfg(feature = "watch")]
             _watcher: None,
         };
+        if leftovers {
+            t.remove_leftovers();
+        }
         #[cfg(feature = "watch")]
         if t.config.watch {
             t.start_watcher();
         }
         t
+    }
+
+    /// Delete the temporary files (`<client>.tmp-*` in `updates/**` and
+    /// `presence/`) an earlier session with our client ID left when its
+    /// process died between writing and renaming them (a compaction, a
+    /// presence heartbeat, a clock probe), or whose delete failed (the write
+    /// probe, [`probe_writable`](Self::probe_writable)). Others' cleanup
+    /// passes only delete them once they are `inactive_after` old (§4.7), and
+    /// only where one runs, so until then every crash at the wrong moment
+    /// would leave one more. Only done while we hold the client ID's lock, so
+    /// no live session of ours is writing them; a write probe of ours going on
+    /// just then (another process that wants to attach as us) only creates and
+    /// deletes its file, and does not mind that it is gone.
+    fn remove_leftovers(&mut self) {
+        let prefix = format!("{}{TMP_MARK}", self.client);
+        let mut files = Vec::new();
+        for dir in [UPDATES, PRESENCE] {
+            walk_files(&self.root.join(dir), String::new(), 0, &mut files);
+        }
+        for (_, name, path) in files {
+            if name.starts_with(&prefix) {
+                match fs::remove_file(&path) {
+                    Ok(()) => self.stats.stale_files_removed += 1,
+                    Err(e) => self.note_cleanup_error(&path, e),
+                }
+            }
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -937,8 +974,11 @@ impl DirTransport {
     }
 
     /// The session says what it has. Re-deliver every document it is missing
-    /// something of (e.g. a sublayer the app just added), then answer with our own
-    /// hello so a reset session knows what the folder has.
+    /// something of (e.g. a sublayer the app just added), read the folder again
+    /// (not waiting for the poll interval), then answer with our own hello so a
+    /// reset session knows what the folder has. The hello is queued after
+    /// everything read, so the session learns what the folder has only once it
+    /// has received all of it (`SyncSession::is_caught_up`).
     fn on_hello(&mut self, versions: Vec<(DocKey, VersionVector)>) -> Result<(), SyncError> {
         if !self.scanned {
             // The first scan delivers everything anyway.
@@ -972,9 +1012,9 @@ impl DirTransport {
                 }
             }
         }
-        if !missing.is_empty() {
-            self.poll_now = true;
-        }
+        self.poll_now = false;
+        self.last_poll = Some(Instant::now());
+        self.poll();
         self.inbox.push_back(self.hello());
         Ok(())
     }
@@ -1981,8 +2021,8 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
 }
 
 /// Take the advisory lock at `path` for `client`'s session. File systems without
-/// locking are accepted as they are.
-fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
+/// locking are accepted as they are: the flag says whether we hold the lock.
+fn lock_client(path: &Path, client: &ClientId) -> Result<(File, bool), SyncError> {
     let deadline = Instant::now() + LOCK_WAIT;
     loop {
         let opened = OpenOptions::new()
@@ -2008,9 +2048,9 @@ fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
                 // A cleanup pass deleted the file we opened while it held the lock
                 // (§4.7): lock the file that is there now.
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                _ => return Ok(lock),
+                _ => return Ok((lock, true)),
             },
-            Err(fs::TryLockError::Error(_)) => return Ok(lock),
+            Err(fs::TryLockError::Error(_)) => return Ok((lock, false)),
             // Possibly a cleanup pass holding it for a moment.
             Err(fs::TryLockError::WouldBlock) => {}
         }
@@ -2021,28 +2061,13 @@ fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
     }
 }
 
-/// Delete `updates/<client>.tmp-*`: probe files of ours whose delete failed
-/// (the write probe, [`DirTransport::probe_writable`]; the clock probe of the
-/// cleanup) or that a crash left behind. Called by `open` once it holds our
-/// lock, so no session of ours is writing one for itself; a write probe of
-/// another session of ours that is going on just then only creates and
-/// deletes its file, and does not mind that it is gone. Without this they
-/// stayed unless the cleanup of §4.7 is on (off by default). Errors are
-/// ignored: they are left for the next open.
-fn remove_own_probes(updates: &Path, client: &ClientId) {
-    let prefix = format!("{client}{TMP_MARK}");
-    let Ok(entries) = fs::read_dir(updates) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with(&prefix))
-        {
-            let _ = fs::remove_file(entry.path());
-        }
-    }
+/// A new file name for [`DirTransport::probe_writable`]: a temporary file of
+/// `client`'s in `updates/`, which [`DirTransport::remove_leftovers`] removes
+/// if the probe could not.
+fn write_probe_path(project: &Path, client: &ClientId) -> PathBuf {
+    project
+        .join(UPDATES)
+        .join(format!("{client}{TMP_MARK}{}", new_generation()))
 }
 
 /// Every record of the log at `path`, decoded.
@@ -2724,32 +2749,50 @@ mod tests {
         fs::rename(&tmp, path).unwrap();
     }
 
-    /// Probe files of ours whose delete failed (`probe_writable`, the clock
-    /// probe) are removed when we open the folder writable, also with the
-    /// cleanup off (the default); others' files and the temporary files in
-    /// document folders are left alone. `probe_lock` tells a lock file we can
-    /// open, or none, from one we cannot.
+    /// Temporary files of ours are removed when we open the folder writable,
+    /// also with the cleanup off (the default): probe files whose delete
+    /// failed (`probe_writable`, the clock probe) and what a crash left in
+    /// document folders (`remove_leftovers`); others' files are left alone.
+    /// `probe_lock` tells a lock file we can open, or none, from one we
+    /// cannot.
     #[test]
     fn our_leftover_probe_files_are_removed_on_open() {
         let tmp = tempfile::tempdir().unwrap();
         let updates = tmp.path().join(UPDATES);
         fs::create_dir_all(updates.join("root")).unwrap();
-        for name in ["a.tmp-1", "a.tmp-2", "b.tmp-3", "root/a.tmp-4", "ab.tmp-5"] {
+        let a = ClientId::new("a").unwrap();
+        // What `probe_writable` leaves when it cannot delete its file.
+        let probe = write_probe_path(tmp.path(), &a);
+        fs::write(&probe, b"").unwrap();
+        let ours = ["a.tmp-1", "root/a.tmp-4"];
+        let others = ["b.tmp-3", "ab.tmp-5", "root/b.tmp-6"];
+        for name in ours.iter().chain(&others) {
             fs::write(updates.join(name), b"").unwrap();
         }
         assert_eq!(DirConfig::default().inactive_after, None);
-        let a = ClientId::new("a").unwrap();
         assert!(
             DirTransport::probe_lock(tmp.path(), &a).unwrap(),
             "no lock file"
         );
         let t = transport(tmp.path(), "a", DirConfig::default());
-        for gone in ["a.tmp-1", "a.tmp-2"] {
+        assert!(!probe.exists(), "{}", probe.display());
+        for gone in ours {
             assert!(!updates.join(gone).exists(), "{gone}");
         }
-        for kept in ["b.tmp-3", "root/a.tmp-4", "ab.tmp-5", "a.lock"] {
+        for kept in others.iter().chain(&["a.lock"]) {
             assert!(updates.join(kept).exists(), "{kept}");
         }
+        assert_eq!(t.stats().stale_files_removed, 3);
+        assert!(t.last_error().is_none(), "{:?}", t.last_error());
+        // A probe of ours that can write leaves nothing behind.
+        assert!(DirTransport::probe_writable(tmp.path(), &a).unwrap());
+        let left: Vec<_> = fs::read_dir(&updates)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("a."))
+            .collect();
+        assert_eq!(left, ["a.lock"]);
         // Held by `t`: still opens (the lock is advisory).
         assert!(DirTransport::probe_lock(tmp.path(), &a).unwrap());
         drop(t);

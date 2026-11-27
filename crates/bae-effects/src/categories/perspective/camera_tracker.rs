@@ -1,4 +1,4 @@
-use crate::{Builtin, catalog::DefBuilder, categories::controls::Control, rust_builtin};
+use crate::{Builtin, catalog::DefBuilder, rust_builtin};
 use bae_model::{ParamKind, Value};
 use std::sync::Arc;
 pub(super) fn entry() -> Builtin {
@@ -119,7 +119,7 @@ pub(super) fn entry() -> Builtin {
         p.flags.hidden = matches!(p.id, 1 | 11 | 400 | 314 | 311 | 312 | 305);
     }
     let mut entry = rust_builtin(
-        (Arc::new(Control(def)), labels),
+        (Arc::new(super::track_points::TrackPoints(def)), labels),
         "camera-tracker",
         "3D 摄像机跟踪器",
         &["camera", "tracking", "跟踪"],

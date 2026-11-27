@@ -26,6 +26,7 @@
 
 mod client;
 mod commands;
+mod conflicts;
 mod connection;
 mod dir;
 mod docs;
@@ -34,6 +35,7 @@ pub mod history;
 #[cfg(feature = "hub")]
 mod hub;
 mod identity;
+mod ops;
 mod presence;
 mod protocol;
 mod relay;
@@ -43,6 +45,10 @@ mod transport;
 
 pub use client::ClientId;
 pub use commands::{RevertOutput, RevertParams, register_commands};
+pub use conflicts::{
+    ConcurrentEdit, ConflictConfig, ConflictOutcome, ConflictStats, ConflictTracker, Element,
+    ElementValue, MergeSummary, OfflineEdit, OfflinePrim, OfflinePrimChange, merge_summary,
+};
 pub use connection::{
     Backoff, Closing, Connection, ConnectionConfig, ConnectionOutcome, ConnectionState,
     ConnectionStatus, FOLDER_SEND_INTERVAL, Failure, Target,

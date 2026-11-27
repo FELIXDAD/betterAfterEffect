@@ -635,6 +635,41 @@ fn a_folder_opened_read_only_is_read_but_never_written() {
     DirTransport::open(&dir, ClientId::new("reader").unwrap(), fast()).unwrap();
 }
 
+/// A process killed between writing a temporary file and renaming it (a
+/// compaction, a presence heartbeat) leaves the file behind; the next session
+/// with that client ID removes it once it holds the lock. Other clients' files
+/// are not touched (`multiprocess_dir.rs` kills real processes).
+#[test]
+fn temporary_files_of_a_dead_session_are_removed() {
+    let (_tmp, dir) = project_dir();
+    let mine = [
+        dir.join("updates/root/alice.tmp-0123"),
+        dir.join("updates/anim/a/alice.tmp-4567"),
+        dir.join("presence/alice.tmp-89ab"),
+    ];
+    let theirs = [
+        dir.join("updates/root/alice2.tmp-0123"),
+        dir.join("updates/root/bob.tmp-0123"),
+        dir.join("updates/root/alice.log"),
+    ];
+    for path in mine.iter().chain(&theirs) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"left by a dead process").unwrap();
+    }
+    let alice = DirTransport::open(&dir, ClientId::new("alice").unwrap(), fast()).unwrap();
+    for path in &mine {
+        assert!(!path.exists(), "{} was left", path.display());
+    }
+    for path in &theirs {
+        assert!(path.exists(), "{} was removed", path.display());
+    }
+    // A second session cannot get the lock and removes nothing.
+    fs::write(&mine[0], b"being written").unwrap();
+    assert!(DirTransport::open(&dir, ClientId::new("alice").unwrap(), fast()).is_err());
+    assert!(mine[0].exists());
+    drop(alice);
+}
+
 #[test]
 fn a_sublayer_added_later_is_redelivered() {
     let (_tmp, dir) = project_dir();

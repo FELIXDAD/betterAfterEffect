@@ -399,6 +399,49 @@ impl SyncSession {
         self.in_flight.clear();
     }
 
+    /// What the remote showed it has, per document: its last `Hello`, plus what
+    /// it sent since. Not what we sent it: that may still be on its way, or
+    /// lost ([`unsynced`](Self::unsynced) covers it). `None` until it said
+    /// hello (after [`reset`](Self::reset), until it says hello again). After
+    /// [`forget_unconfirmed`](Self::forget_unconfirmed) (the link failed) it
+    /// stays what the old link showed until the next `reset`.
+    pub fn remote_versions(&self) -> Option<&BTreeMap<DocKey, VersionVector>> {
+        self.confirmed.as_ref()
+    }
+
+    /// Whether we have everything the remote showed it has
+    /// ([`remote_versions`](Self::remote_versions)): it said hello since the
+    /// last [`reset`](Self::reset), and every document of `docs` it listed is
+    /// included in the local version. Documents `docs` does not hold (reported
+    /// in [`PumpOutcome::unknown_docs`]) are not waited for.
+    ///
+    /// Reads what the remote confirmed, not what we count as sent (which also
+    /// holds what we handed to the link, and what may still be on its way,
+    /// see [`Message::Hello`]'s `ack`): the question is whether we imported
+    /// what the remote has, and what we sent is part of our own version
+    /// anyway, so the answer is the same either way; the confirmed versions
+    /// say so without relying on it.
+    ///
+    /// After a reconnect (`reset`, then pumps), the first time this holds is when
+    /// to call `ConflictTracker::caught_up`. Hub: its `Hello` lists everything it
+    /// has and comes before the updates, so this waits for them. Shared folder:
+    /// `DirTransport` answers our `Hello` by reading the folder again and queues
+    /// its own after the records it read, so this holds once everything the
+    /// folder had at that moment has been received, however many pumps that
+    /// takes. Between a link failure and the next `reset` it still answers for
+    /// the old link: with [`crate::Connection`], which resets the session when
+    /// it adopts a new link, ask it only while `Connection::is_online` (the new
+    /// remote said hello).
+    pub fn is_caught_up(&self, docs: &dyn DocSet) -> bool {
+        let Some(remote) = &self.confirmed else {
+            return false;
+        };
+        remote.iter().all(|(key, theirs)| {
+            docs.version(key)
+                .is_none_or(|ours| ours.includes_vv(theirs))
+        })
+    }
+
     /// Documents with local ops the remote is not known to have yet ("unsynced
     /// changes"). Everything counts as unsynced before the remote said hello.
     pub fn unsynced(&self, docs: &dyn DocSet) -> Vec<DocKey> {
