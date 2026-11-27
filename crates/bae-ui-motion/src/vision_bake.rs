@@ -97,12 +97,20 @@ impl Job {
                     return Some(result.map(|seq| {
                         let _directory = seq.dir.keep();
                         match &self.mode {
-                            Mode::Freeze(effect) => cx.invoke_with("roto.freeze",serde_json::json!({
-                                "effect":effect,"file":seq.file,"start":self.start,"duration":self.duration
-                            })),
-                            Mode::Fill(layer,_) => cx.invoke_with("vision.fill_layer",serde_json::json!({
-                                "layer":layer,"file":seq.file,"start":self.start,"duration":self.duration,"origin":seq.origin
-                            })),
+                            Mode::Freeze(effect) => cx.invoke_with(
+                                "roto.freeze",
+                                serde_json::json!({
+                                    "effect": effect, "file": seq.file,
+                                    "start": self.start, "duration": self.duration
+                                }),
+                            ),
+                            Mode::Fill(layer, _) => cx.invoke_with(
+                                "vision.fill_layer",
+                                serde_json::json!({
+                                    "layer": layer, "file": seq.file, "origin": seq.origin,
+                                    "start": self.start, "duration": self.duration
+                                }),
+                            ),
                         }
                     }));
                 }

@@ -74,8 +74,8 @@ mod text_orientation;
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
-mod vision;
 mod type_preferences;
+mod vision;
 mod window_workspaces;
 
 use std::collections::VecDeque;

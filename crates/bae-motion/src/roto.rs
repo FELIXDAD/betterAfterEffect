@@ -134,6 +134,7 @@ impl Command for Freeze {
                     folder_label: None,
                     parent: None,
                     comp: Some(comp),
+                    precompose: false,
                     create_comp: false,
                 },
             )?;
