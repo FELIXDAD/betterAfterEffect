@@ -37,13 +37,15 @@ pub struct HubLimits {
     /// Largest encoded protocol message this side sends. A whole sublayer
     /// snapshot must fit: a larger one fails to send instead of being refused
     /// remotely (the session still sends its other documents first). The
-    /// peer's `max_incoming` must not be smaller.
+    /// peer's `max_incoming` must not be smaller (except for document data the
+    /// peer will not take anyway: a read-only hub connection, whose session
+    /// sends none, [`crate::SessionConfig::send_data`]).
     pub max_message: usize,
     /// Largest message accepted from the peer (also the frame limit, since a
     /// message is one frame): a larger one fails `recv` as soon as its frame
     /// header arrives, before it is buffered, and the link is dropped. The hub
-    /// takes much less from read-only connections, which only send `Hello`,
-    /// presence and snapshot requests.
+    /// takes less from read-only connections (16 MiB by default), whose
+    /// sessions should send no document data.
     pub max_incoming: usize,
     /// Flow control: what may wait for a peer that reads slowly before sessions
     /// hold back further document data (see above; sessions have their own

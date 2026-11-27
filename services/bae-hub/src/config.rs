@@ -164,10 +164,19 @@ pub struct HubConfig {
     /// Read-only connections take less, see `read_only_max_incoming`.
     pub limits: HubLimits,
     /// Largest message a read-only connection may send (its
-    /// `HubLimits::max_incoming`, at most `limits.max_incoming`). They only
-    /// send `Hello`, presence and snapshot requests, so a read-only token
-    /// cannot make the hub take in large messages it would only drop.
-    /// Default 1 MiB.
+    /// `HubLimits::max_incoming`, at most `limits.max_incoming`), so a
+    /// read-only token cannot make the hub take in messages as large as
+    /// writers may send, which it would only drop. Default 16 MiB.
+    ///
+    /// Not smaller: what a viewer must send grows too. Its `Hello` holds a
+    /// version vector per document, about 11 bytes per (document, Loro peer)
+    /// pair, and every editing session adds a peer to the documents it edits
+    /// (about 95 000 pairs per MiB). And viewers edit locally: a session that
+    /// does not know it is read-only (`SessionConfig::send_data`) sends those
+    /// edits after every `Hello` of the hub and every reconnect, so a viewer
+    /// with more than this in one document is dropped every time it connects.
+    /// Clients that know their token is read-only (`GET /v1/status`) set
+    /// `send_data = false` and never send data at all.
     pub read_only_max_incoming: usize,
 }
 
@@ -186,7 +195,7 @@ impl HubConfig {
             empty_tick: Duration::from_millis(500),
             store_send_interval: Duration::from_millis(300),
             limits: HubLimits::default(),
-            read_only_max_incoming: 1 << 20,
+            read_only_max_incoming: 16 << 20,
         }
     }
 
@@ -390,8 +399,9 @@ pub fn default_config_text(token: &str) -> String {
 # max_unsent_mib = 528
 # 排队超过 max_backlog_mib、并且这么多秒内对方一个字节都没读时断开它。
 # stall_timeout_secs = 30
-# 只读连接发来的单条消息的上限（KiB）。只读客户端只发 Hello、在线状态这类小消息。
-# read_only_max_message_kib = 1024
+# 只读连接发来的单条消息的上限（KiB）。只读客户端不发修改（应用知道令牌只读时就不发），
+# 但 Hello 随文档数和编辑过的会话数增长，不知道自己只读的客户端还会发它本地的修改，超过上限就会被断开。
+# read_only_max_message_kib = 16384
 
 # 团队令牌。客户端连接时带上其中一个。
 #   access = "write"：可以编辑，也可以新建工程
@@ -478,7 +488,7 @@ mod tests {
     fn limits() {
         let mut c = HubConfig::new("/data");
         assert_eq!(c.client_limits(Access::Write), HubLimits::default());
-        assert_eq!(c.client_limits(Access::Read).max_incoming, 1 << 20);
+        assert_eq!(c.client_limits(Access::Read).max_incoming, 16 << 20);
         // Read-only connections only take less; they are sent as much.
         assert_eq!(
             c.client_limits(Access::Read).max_message,

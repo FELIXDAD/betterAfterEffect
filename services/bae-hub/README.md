@@ -49,7 +49,7 @@ bae-hub healthcheck                   # 本机的服务正常就返回 0（Docke
 | 流量控制（MiB）：给某个客户端排队的数据超过这么多时先不发工程数据 | `[limits]` `max_backlog_mib` | — | — | 16 |
 | 给一个客户端排队的数据最多这么多（MiB），超过就断开 | `[limits]` `max_unsent_mib` | — | — | 528 |
 | 排队超过 `max_backlog_mib` 又一直不读的客户端几秒后断开 | `[limits]` `stall_timeout_secs` | — | — | 30 |
-| 只读连接发来的单条消息上限（KiB） | `[limits]` `read_only_max_message_kib` | — | — | 1024 |
+| 只读连接发来的单条消息上限（KiB） | `[limits]` `read_only_max_message_kib` | — | — | 16384 |
 
 令牌：
 
@@ -103,7 +103,9 @@ Authorization: Bearer <令牌>
 - **帧**：每条同步协议消息是一个二进制帧，编码见 `docs/spec/sync.md` 第 2.3 节。
 - **Hub 侧会话**：每个连接一个会话，`hello_interval` 为 5 秒，收到修改立即转发。
 - **在线状态**（`Presence`）由 `Relay` 转发：新连接马上收到所有人的状态；连接断开时，Hub 替它向其他人发"离开"。
-- **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。只读连接发来的单条消息最大 1 MiB（`read_only_max_message_kib`），更大的读到帧头就断开连接，不会先收进内存；发给它们的消息照样可以很大。
+- **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。只读连接发来的单条消息最大 16 MiB（`read_only_max_message_kib`），更大的读到帧头就断开连接，不会先收进内存；发给它们的消息照样可以很大。
+  - 客户端用只读令牌连接时（`/v1/status` 返回 `"access": "read"`），会话要设 `SessionConfig::send_data = false`：本地的修改不发出去，只收别人的。不设的话，会话会在 Hub 每个 `Hello`（5 秒一次）之后、每次重连之后把本地修改再发一遍，一个文档里超过上限就每次都被断开。
+  - 上限不能设得太小：`Hello` 随文档数和编辑过它们的会话数增长（每个文档、每个编辑过它的会话约 11 字节），超过上限的话这个查看者根本连不上。
 - **超时**：Hub 60 秒没有收到某个客户端的任何消息，就断开这个连接。正常客户端每 5 秒发一次 `Hello`，所以只有死掉的链路（比如合上盖子的笔记本）才会被断开。
 - **重连**：断线后重新 `connect`，再调用 `SyncSession::reset()`。双方交换 `Hello` 后各自补发对方缺的部分，什么都不会丢。
 - **延迟**：
@@ -156,7 +158,7 @@ Authorization: Bearer <令牌>
   - 不带 WebSocket 升级头访问同步地址：426。
   - `?token=` 可以代替请求头。
   - `/v1/projects` 只列出令牌能看到的工程。
-- **只读**：只读客户端收得到别人的修改，自己的修改不会传出去；状态接口里显示它是只读。只读客户端发来超过上限的消息时连接被断开，它照样收得到 1 MiB 的修改，可写客户端不受影响（`read_only_connections_cannot_send_large_messages`）。
+- **只读**：只读客户端收得到别人的修改，自己的修改不会传出去；状态接口里显示它是只读。只读客户端发来超过上限的消息时连接被断开，它照样收得到 1 MiB 的修改，可写客户端不受影响（`read_only_connections_cannot_send_large_messages`）。本地改了 1.5 MiB 的查看者：默认上限下不设 `send_data` 也不断开；设了 `send_data = false` 时上限只有 64 KiB 也不断开，什么数据都不发（`viewers_with_large_local_edits_stay_connected`）。
 - **匿名只读**：打开匿名只读后，不带令牌也能连接，但不能新建工程。
 - **在线状态和建议性锁**：经 Hub 转发；只读客户端也能发布在线状态；断开连接后其他人立刻看到离开。
 - **空闲卸载**：空闲的工程被卸载，再次连接时从磁盘重新加载，内容一致。
