@@ -3368,7 +3368,17 @@ impl Builder<'_, '_> {
                     }
                 })
             }
-            LayerContent::Footage(footage) => match self.sources.footage(footage)? {
+            LayerContent::Footage(footage) => match self.sources.footage(footage)?.map(|source| {
+                // A proxy is drawn at the item's size.
+                match footage.size.filter(|_| footage.scaled) {
+                    Some(size) => std::sync::Arc::new(crate::source::ScaledSource {
+                        inner: source,
+                        size,
+                    })
+                        as std::sync::Arc<dyn crate::source::LayerSource>,
+                    None => source,
+                }
+            }) {
                 Some(source) => Some(match (footage.blend, source.frame_rate()) {
                     (Some(blend), Some(rate)) => {
                         if blend.pixel_motion {

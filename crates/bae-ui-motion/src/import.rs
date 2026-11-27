@@ -614,6 +614,50 @@ pub(crate) fn edit_original(cx: &PanelContext<'_>, session: &SharedSession) {
     }
 }
 
+/// The footage items and comps selected in the Project panel that can have a
+/// proxy (not solids or folders).
+pub(crate) fn proxy_targets(cx: &PanelContext<'_>, session: &SharedSession) -> Vec<PrimPath> {
+    session
+        .lock()
+        .selected_items
+        .iter()
+        .filter(|p| {
+            cx.stage.prim(p).is_some_and(|v| {
+                v.is_a(&bae_model::PrimType::COMP)
+                    || (v.is_a(&bae_model::PrimType::ASSET)
+                        && !matches!(query::static_value(&v, "kind"), Some(bae_model::Value::Enum(k)) if k == "solid"))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// File > Set Proxy > File… (Cmd/Ctrl+Alt+P): the chosen file becomes the
+/// selected items' proxy, and is used.
+pub(crate) fn set_proxy_file(cx: &mut PanelContext<'_>, session: &SharedSession) {
+    let items = proxy_targets(cx, session);
+    if items.is_empty() {
+        return;
+    }
+    let request = OpenRequest {
+        title: tr("Set Proxy File").to_owned(),
+        filters: Vec::new(),
+        multiple: false,
+        folders: false,
+    };
+    let Some(path) = SharedFilePicker::open(cx.resources, &request)
+        .into_iter()
+        .next()
+    else {
+        return;
+    };
+    let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    let probed = probe(&[path], &defaults);
+    if let Some(file) = probed.files.into_iter().next() {
+        cx.invoke_with("item.set_proxy", json!({"items": items, "file": file}));
+    }
+}
+
 /// File > Replace Footage > File… (Cmd/Ctrl+H): the item takes another file.
 pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
     let Some(item) = replace_target(cx, session) else {

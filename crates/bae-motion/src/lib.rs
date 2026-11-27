@@ -91,6 +91,7 @@ pub mod path;
 pub mod photoshop;
 pub mod precompose;
 pub mod project_settings;
+pub mod proxy;
 pub mod puppet;
 pub mod query;
 mod roto;
@@ -172,6 +173,8 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(cleanup::RemoveUnusedFootage),
         r.register(cleanup::ConsolidateFootage),
         r.register(cleanup::ReduceProject),
+        r.register(proxy::SetProxy),
+        r.register(proxy::SetProxyEnabled),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),

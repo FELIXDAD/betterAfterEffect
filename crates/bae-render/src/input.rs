@@ -380,6 +380,7 @@ impl RenderLayer {
             file_revision: bae_model::asset::file_revision(&view),
             psd_layer: Some(selection),
             blend: None,
+            scaled: false,
         };
         let mut stencil = Self::new(mask.path, LayerContent::Footage(footage));
         stencil.blend_mode = BlendMode::StencilAlpha;
@@ -704,6 +705,9 @@ impl LayerContent {
                 f.psd_layer.hash(h);
                 f.file_revision.hash(h);
                 f.blend.hash(h);
+                if f.scaled {
+                    f.size.hash(h);
+                }
             }
             LayerContent::Comp(c) => c.hash_content(h, effects),
             LayerContent::Custom(c) => {
@@ -737,6 +741,9 @@ pub struct FootageRef {
     pub psd_layer: Option<bae_model::psd::LayerImage>,
     /// Frame blending, when the comp and layer switches are on.
     pub blend: Option<FrameBlend>,
+    /// `file` is a proxy (AE File ▸ Set Proxy): its frames are drawn at
+    /// `size`, the item's own size, whatever the proxy's resolution.
+    pub scaled: bool,
 }
 
 /// Frame blending of a footage layer (AE-CMP-065): the source frames one comp
@@ -957,6 +964,7 @@ mod tests {
                 psd_layer: None,
                 file_revision: 0,
                 blend: None,
+                scaled: false,
             }),
         ));
         let deps = comp.dependencies();

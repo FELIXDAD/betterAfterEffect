@@ -294,6 +294,47 @@ pub trait LayerSource: Send + Sync {
     ) -> Result<GpuImage, RenderError>;
 }
 
+/// A proxy's frames drawn at the size of the item it stands in for (AE File ▸
+/// Set Proxy): the layer keeps its size, the texels cover more layer pixels.
+pub(crate) struct ScaledSource {
+    pub inner: Arc<dyn LayerSource>,
+    /// The item's size, layer pixels.
+    pub size: [u32; 2],
+}
+
+impl LayerSource for ScaledSource {
+    fn size(&self) -> [u32; 2] {
+        self.size
+    }
+
+    fn content_hash(&self, time: Time) -> u64 {
+        let mut h = rustc_hash::FxHasher::default();
+        std::hash::Hash::hash(&(self.inner.content_hash(time), self.size), &mut h);
+        std::hash::Hasher::finish(&h)
+    }
+
+    fn frame_rate(&self) -> Option<bae_model::FrameRate> {
+        self.inner.frame_rate()
+    }
+
+    fn render(
+        &self,
+        ctx: &mut EncodeContext<'_>,
+        request: &SourceRequest,
+    ) -> Result<GpuImage, RenderError> {
+        let [w, h] = self.inner.size();
+        let full = SourceRequest {
+            roi: IRect::from_size(w, h),
+            ..*request
+        };
+        let mut image = self.inner.render(ctx, &full)?;
+        let scale = f64::from(self.size[0].max(1)) / f64::from(image.texture.width().max(1));
+        image.pixel_scale = scale;
+        image.rect = IRect::from_size(self.size[0], self.size[1]);
+        Ok(image)
+    }
+}
+
 impl fmt::Debug for dyn LayerSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LayerSource")

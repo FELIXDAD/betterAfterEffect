@@ -65,6 +65,18 @@ impl NestedSwitches {
     }
 }
 
+/// Which proxies a conversion draws (AE Render Settings ▸ Proxy Use).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProxyUse {
+    /// Use No Proxies (renders, unless their settings say otherwise).
+    #[default]
+    None,
+    /// Use Comp Proxies Only.
+    CompsOnly,
+    /// Use All Proxies / Current Settings: every proxy that is on (previews).
+    All,
+}
+
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
 /// frames; forward [`StageEvent`]s to [`CompEvaluator::invalidate`]).
 #[derive(Debug)]
@@ -81,6 +93,7 @@ pub struct AnimEvaluator {
     assets: AssetFiles,
     purpose: RenderPurpose,
     propagate_switches: bool,
+    proxies: ProxyUse,
     warnings: Vec<String>,
     /// Shape and text layers' content of the previous conversion, by layer:
     /// reused while what the provider draws is unchanged, so a layer that only
@@ -106,6 +119,7 @@ impl AnimEvaluator {
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             propagate_switches: true,
+            proxies: ProxyUse::None,
             warnings: Vec::new(),
             customs: rustc_hash::FxHashMap::default(),
         }
@@ -128,7 +142,81 @@ impl AnimEvaluator {
     #[must_use]
     pub fn with_purpose(mut self, purpose: RenderPurpose) -> Self {
         self.purpose = purpose;
+        // AE previews draw every proxy that is on; renders none by default.
+        if purpose == RenderPurpose::Preview {
+            self.proxies = ProxyUse::All;
+        }
         self
+    }
+
+    /// Which proxies to draw (Render Settings ▸ Proxy Use).
+    pub fn set_proxy_use(&mut self, proxies: ProxyUse) {
+        self.proxies = proxies;
+    }
+
+    /// The proxy of `item` to draw and its file, when proxies of its kind are
+    /// used, it has one that is on and the file is there (else the original
+    /// is drawn, with a warning).
+    fn proxy_for(
+        &mut self,
+        stage: &Stage,
+        item: &PrimPath,
+        comp: bool,
+    ) -> Option<(PrimPath, Option<PathBuf>)> {
+        let used = match self.proxies {
+            ProxyUse::All => true,
+            ProxyUse::CompsOnly => comp,
+            ProxyUse::None => false,
+        };
+        if !used {
+            return None;
+        }
+        let proxy = bae_model::asset::proxy_in_use(stage, item)?;
+        let view = stage.prim(&proxy)?;
+        match self.assets.file(&view) {
+            Ok(Some(file)) => Some((proxy, Some(file))),
+            _ => {
+                self.warn(format!(
+                    "{item}: the proxy file is missing; the original is used"
+                ));
+                None
+            }
+        }
+    }
+
+    /// Footage drawing `proxy` (with `file`) at `size` from `source_time`.
+    fn proxy_footage(
+        stage: &Stage,
+        proxy: PrimPath,
+        file: Option<PathBuf>,
+        size: [u32; 2],
+        source_time: Time,
+    ) -> FootageRef {
+        let view = stage.prim(&proxy);
+        let kind = view
+            .as_ref()
+            .and_then(|v| v.value("kind").and_then(|k| k.as_str().map(str::to_owned)));
+        FootageRef {
+            file_revision: view.as_ref().map_or(0, bae_model::asset::file_revision),
+            psd_layer: None,
+            file,
+            size: (size[0] > 0 && size[1] > 0).then_some(size),
+            source_time,
+            alphabetical: view.as_ref().is_some_and(|v| {
+                v.value("sequence:pattern")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s.starts_with("*."))
+            }),
+            sequence: (kind.as_deref() == Some("sequence")).then(|| {
+                match view.as_ref().and_then(|v| v.value("frame_rate")) {
+                    Some(bae_model::Value::FrameRate(rate)) => *rate,
+                    _ => bae_model::FrameRate::FPS_30,
+                }
+            }),
+            blend: None,
+            scaled: true,
+            asset: proxy,
+        }
     }
 
     /// Apply composition switches recursively when rendering nested comp instances.
@@ -649,6 +737,21 @@ impl AnimEvaluator {
                 })
             })),
             LayerSource::None => Ok(LayerContent::None),
+            LayerSource::Comp { comp, time, .. }
+                if let Some((proxy, file)) = self.proxy_for(stage, comp, true) =>
+            {
+                // A comp proxy stands in for the whole nested comp.
+                let dim = |a: &str| {
+                    stage
+                        .prim(comp)
+                        .and_then(|v| v.value(a).and_then(|v| v.as_f64()))
+                        .map_or(0, |v| v.max(0.0) as u32)
+                };
+                let size = [dim("width"), dim("height")];
+                Ok(LayerContent::Footage(Self::proxy_footage(
+                    stage, proxy, file, size, *time,
+                )))
+            }
             LayerSource::Comp { comp, nested, .. } => match nested {
                 // bae-anim evaluates nested comps itself (at the mapped time).
                 Some(nested) => {
@@ -674,6 +777,17 @@ impl AnimEvaluator {
                     width: info.width,
                     height: info.height,
                 },
+                "footage" | "sequence"
+                    if let Some((proxy, file)) = self.proxy_for(stage, asset, false) =>
+                {
+                    LayerContent::Footage(Self::proxy_footage(
+                        stage,
+                        proxy,
+                        file,
+                        [info.width, info.height],
+                        *time,
+                    ))
+                }
                 "footage" | "sequence" => LayerContent::Footage(FootageRef {
                     asset: asset.clone(),
                     file_revision: stage
@@ -706,6 +820,7 @@ impl AnimEvaluator {
                             span,
                             pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
                         }),
+                    scaled: false,
                 }),
                 "model" => LayerContent::Model(crate::input::ModelRef {
                     asset: asset.clone(),
