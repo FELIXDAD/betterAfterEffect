@@ -92,6 +92,8 @@ impl TimelinePanel {
         let stage = cx.stage;
         let p = ui.painter().with_clip_rect(strip);
         let locked = query::locked_layer_of(stage, owner).is_some();
+        // Lock Markers: still a menu (to unlock), no drag or dialog.
+        let pinned = bae_motion::markers::markers_locked(stage, owner);
         for m in shown(stage, owner) {
             let t = self.marker_preview(&m.path, m.time);
             let x = axis.x(t);
@@ -128,6 +130,8 @@ impl TimelinePanel {
             self.last_markers.push((m.path.clone(), hit.center()));
             let sense = if locked {
                 Sense::hover()
+            } else if pinned {
+                Sense::click()
             } else {
                 Sense::click_and_drag()
             };
@@ -151,7 +155,7 @@ impl TimelinePanel {
                     marker: m.path.clone(),
                 });
             }
-            if resp.double_clicked() {
+            if resp.double_clicked() && !pinned {
                 session.lock().key_dialog = MarkerDialog::edit(stage, info, &m.path)
                     .map(|d| KeyDialog::Marker(Box::new(d)));
             }
@@ -324,7 +328,12 @@ fn marker_menu(
     marker: &PrimPath,
 ) {
     let stage = cx.stage;
-    if ui.button(tr("Settings...")).clicked() {
+    // Locked markers (Lock Markers) cannot be edited, moved or deleted.
+    let free = !bae_motion::markers::markers_locked(stage, owner);
+    if ui
+        .add_enabled(free, egui::Button::new(tr("Settings...")))
+        .clicked()
+    {
         session.lock().key_dialog =
             MarkerDialog::edit(stage, info, marker).map(|d| KeyDialog::Marker(Box::new(d)));
         ui.close();
@@ -336,11 +345,17 @@ fn marker_menu(
         session.lock().set_time(info, t);
         ui.close();
     }
-    if ui.button(tr("Delete This Marker")).clicked() {
+    if ui
+        .add_enabled(free, egui::Button::new(tr("Delete This Marker")))
+        .clicked()
+    {
         cx.invoke_with("marker.delete", json!({"markers": [marker]}));
         ui.close();
     }
-    if ui.button(tr("Delete All Markers")).clicked() {
+    if ui
+        .add_enabled(free, egui::Button::new(tr("Delete All Markers")))
+        .clicked()
+    {
         let all: Vec<PrimPath> = markers_of(stage, owner)
             .into_iter()
             .map(|(p, _)| p)
@@ -349,7 +364,11 @@ fn marker_menu(
         ui.close();
     }
     ui.separator();
-    ui.add_enabled(false, egui::Button::new(tr("Lock Markers")));
+    let mut lock = !free;
+    if widgets::checkbox(ui, &mut lock, tr("Lock Markers")).clicked() {
+        cx.invoke_with("marker.lock", json!({"owners": [owner], "locked": lock}));
+        ui.close();
+    }
     if *owner == info.path {
         ui.separator();
         let mut on = stage
@@ -357,7 +376,13 @@ fn marker_menu(
             .and_then(|v| query::static_value(&v, "protected_region"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        if widgets::checkbox(ui, &mut on, tr("Enable Protected Region")).clicked() {
+        if ui
+            .add_enabled_ui(free, |ui| {
+                widgets::checkbox(ui, &mut on, tr("Enable Protected Region"))
+            })
+            .inner
+            .clicked()
+        {
             cx.invoke_with(
                 "marker.edit",
                 json!({"path": marker, "protected_region": on}),
