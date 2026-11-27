@@ -84,26 +84,25 @@ impl TargetEffect for Rolling {
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
         let v = Params::new(&self.def, p);
-        let Some(other) = self
-            .layer_dependencies(p)
-            .first()
-            .and_then(|d| target.effect_layer(d))
-            .cloned()
-        else {
+        let Some(dep) = self.layer_dependencies(p).pop() else {
+            return Ok(input.clone());
+        };
+        let Some(other) = target.effect_layer(&dep).cloned() else {
             return Ok(input.clone());
         };
         let grid = image_grid::grid_scale(p, input);
         let layer = image_grid::layer_rect(p).union(&roi);
         let detail = if v.popup(4) == 2 { v.f(6) } else { 20. };
-        let pyramid = flow::pyramid(
-            target,
-            input,
-            &other,
-            layer,
+        let field = flow::Pair {
+            images: [input, &other],
+            times: [p.comp_time, dep.time],
+            layer: &dep.layer,
+            roi: layer,
             grid,
-            detail * if v.b(5) { 2. } else { 1. },
-        )?;
-        let field = flow::flow(target, &pyramid, false)?;
+            detail: detail * if v.b(5) { 2. } else { 1. },
+            analysis: flow::Analysis::default(),
+        }
+        .forward(target)?;
         SHADER.dispatch_at(
             "main",
             target,

@@ -396,6 +396,30 @@ pub fn info_plist(version: &str) -> String {
             Array(vec![
                 document_type("BAE Project", PROJECT_UTI, true),
                 document_type("BAE Project Package", PACKAGE_UTI, false),
+                // Accept footage drops on the Dock without becoming the default viewer.
+                Plist::Dict(vec![
+                    ("CFBundleTypeName", Str("Footage")),
+                    ("CFBundleTypeRole", Str("Viewer")),
+                    ("LSHandlerRank", Str("Alternate")),
+                    (
+                        "LSItemContentTypes",
+                        strings(&[
+                            "public.png",
+                            "public.jpeg",
+                            "public.tiff",
+                            "com.adobe.photoshop-image",
+                            "com.adobe.photoshop-large-image",
+                            "org.webmproject.webp",
+                            "com.ilm.openexr-image",
+                            "com.apple.quicktime-movie",
+                            "public.mpeg-4",
+                            "com.microsoft.waveform-audio",
+                            "public.aiff-audio",
+                            "public.mp3",
+                            "org.xiph.flac",
+                        ]),
+                    ),
+                ]),
             ]),
         ),
         (
@@ -641,6 +665,11 @@ mod tests {
         plutil(&["-lint"]);
         let get = |key: &str| plutil(&["-extract", key, "raw", "-o", "-"]);
         assert_eq!(get("CFBundleIconFile"), "bae");
+        assert_eq!(get("CFBundleDocumentTypes.2.LSHandlerRank"), "Alternate");
+        assert_eq!(
+            get("CFBundleDocumentTypes.2.LSItemContentTypes.0"),
+            "public.png"
+        );
         assert_eq!(
             get("CFBundleDocumentTypes.0.LSItemContentTypes.0"),
             PROJECT_UTI

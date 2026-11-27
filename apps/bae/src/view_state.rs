@@ -127,6 +127,7 @@ pub fn run_file_command(
         prefs.as_deref().and_then(files::template_path),
     );
     if outcome == Some(FileOutcome::Replaced) {
+        workspace.dismiss_home();
         restore(app, doc);
         workspace.restore_project_workspace(doc);
         // The render queue belongs to the project (AE, #231).

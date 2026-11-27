@@ -22,6 +22,7 @@ use crate::session::SharedSession;
 /// Panel-local view state (twirled effects and parameters).
 #[derive(Default)]
 pub(crate) struct ControlsState {
+    rename: Option<(PrimPath, String)>,
     /// Collapsed effects (AE shows new effects expanded).
     collapsed: HashSet<String>,
     pub(crate) show_presets: bool,
@@ -49,6 +50,12 @@ pub(crate) fn show(
         return false;
     }
     let registries = super::registries(cx.resources);
+    if cx.focused && state.rename.is_none() && bae_ui::panel_key_pressed(ui, egui::Key::Enter) {
+        let s = session.lock();
+        if let Some(effect) = effects.iter().find(|p| s.selected_effects.contains(p)) {
+            state.rename = Some((effect.clone(), super::instance_name(cx.stage, effect)));
+        }
+    }
     for (index, effect) in effects.iter().enumerate() {
         let match_name = cx
             .stage
@@ -162,36 +169,52 @@ fn header(
                 json!({"effects": [effect], "enabled": !enabled}),
             );
         }
-        let title = ui.add(
-            egui::Label::new(
-                egui::RichText::new(&name)
-                    .strong()
-                    .color(color::TEXT_STRONG),
-            )
-            .sense(Sense::click_and_drag()),
-        );
-        if title.clicked() {
-            let toggle = ui.input(|i| i.modifiers.shift || i.modifiers.command);
-            let mut s = session.lock();
-            if !toggle {
-                s.selected_effects = vec![effect.clone()];
-            } else if let Some(i) = s.selected_effects.iter().position(|e| e == effect) {
-                s.selected_effects.remove(i);
-            } else {
-                s.selected_effects.push(effect.clone());
+        if let Some((_, buffer)) = state.rename.as_mut().filter(|(path, _)| path == effect) {
+            let (rect, _) =
+                ui.allocate_exact_size(vec2(ui.available_width().min(140.0), 18.0), Sense::hover());
+            if let Some(result) =
+                common::rename_field(ui, rect, buffer, ui.id().with(("effect-name", effect)))
+            {
+                if let Some(new_name) = result.filter(|s| !s.trim().is_empty() && s != &name) {
+                    cx.invoke_with(
+                        "attr.set",
+                        json!({"path":effect,"attr":"name","value":Value::String(new_name)}),
+                    );
+                }
+                state.rename = None;
             }
-        }
-        // Drag an effect header onto another one to reorder (AE).
-        title.dnd_set_drag_payload(EffectMove(effect.clone()));
-        if let Some(moved) = title.dnd_release_payload::<EffectMove>()
-            && moved.0 != *effect
-        {
-            cx.invoke_with(
-                "effect.reorder",
-                json!({"effects": [moved.0], "index": index}),
+        } else {
+            let title = ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&name)
+                        .strong()
+                        .color(color::TEXT_STRONG),
+                )
+                .sense(Sense::click_and_drag()),
             );
+            if title.clicked() {
+                let toggle = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+                let mut s = session.lock();
+                if !toggle {
+                    s.selected_effects = vec![effect.clone()];
+                } else if let Some(i) = s.selected_effects.iter().position(|e| e == effect) {
+                    s.selected_effects.remove(i);
+                } else {
+                    s.selected_effects.push(effect.clone());
+                }
+            }
+            // Drag an effect header onto another one to reorder (AE).
+            title.dnd_set_drag_payload(EffectMove(effect.clone()));
+            if let Some(moved) = title.dnd_release_payload::<EffectMove>()
+                && moved.0 != *effect
+            {
+                cx.invoke_with(
+                    "effect.reorder",
+                    json!({"effects": [moved.0], "index": index}),
+                );
+            }
+            title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         }
-        title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let about = widgets::link(ui, tr("About..."));
             egui::Popup::menu(&about).show(|ui| {
@@ -291,6 +314,44 @@ fn params(
             _ => {}
         }
         if param.flags.hidden || hidden_from.is_some_and(|d| depth >= d) {
+            continue;
+        }
+        if def.match_name == bae_effects::effects::liquify::MATCH_NAME
+            && param.id == bae_effects::effects::liquify::TOOL
+        {
+            let selected = session.lock().liquify_tool;
+            let labels = if super::chinese() {
+                &[
+                    "变形",
+                    "湍流",
+                    "顺时针旋转",
+                    "逆时针旋转",
+                    "褶皱",
+                    "膨胀",
+                    "移动像素",
+                    "反射",
+                    "仿制",
+                    "重建",
+                ]
+            } else {
+                bae_effects::effects::liquify::TOOLS
+            };
+            ui.horizontal_wrapped(|ui| {
+                for (index, name) in labels.iter().enumerate() {
+                    if ui.selectable_label(index == selected, *name).clicked()
+                        && let Some(layer) = super::layer_of(effect)
+                    {
+                        let mut s = session.lock();
+                        crate::tools::shared(cx.resources)
+                            .lock()
+                            .set(crate::tools::Tool::Selection);
+                        s.liquify_tool = index;
+                        s.layer_panel = Some(layer);
+                        s.open_liquify = Some(effect.clone());
+                        cx.open_panel("layer");
+                    }
+                }
+            });
             continue;
         }
         if def.match_name == "ADBE Param EQ" && param.kind == ParamKind::Display {

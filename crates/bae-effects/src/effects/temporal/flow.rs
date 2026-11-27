@@ -7,10 +7,11 @@
 //! error. The finest level follows Vector Detail (20 % → a quarter of the
 //! render size), so the default costs a few milliseconds at 1080p.
 
-use std::sync::Arc;
+use std::{hash::BuildHasher, sync::Arc};
 
 use bae_gpu::wgpu;
-use bae_render::{GpuImage, IRect, RenderError};
+use bae_model::{PrimPath, Time};
+use bae_render::{FrameKey, GpuImage, IRect, RenderError};
 
 use super::super::image_grid;
 use crate::EffectTarget;
@@ -21,12 +22,13 @@ const SHADER: &str = concat!(
     include_str!("flow_sampling.wgsl"),
     include_str!("flow.wgsl")
 );
-const BYTES: u32 = 160;
-const ENTRIES: [&str; 6] = [
+const BYTES: u32 = 224;
+const ENTRIES: [&str; 7] = [
     "luma_base",
     "luma_down",
     "search",
     "densify",
+    "smooth_vectors",
     "vector_blur",
     "interpolate",
 ];
@@ -65,6 +67,8 @@ fn kernel(
                 (3, Binding::Texture),
                 (4, Binding::Texture),
                 (5, Binding::Storage(format)),
+                (6, Binding::Texture),
+                (7, Binding::Texture),
             ],
             workgroup: [8, 8, 1],
         })
@@ -78,8 +82,61 @@ pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<
     Ok(())
 }
 
+/// Parameters that affect vector estimation, shared by both optical-flow effects.
+#[derive(Clone, Copy)]
+pub(crate) struct Analysis {
+    weights: [f32; 3],
+    global: f32,
+    local: f32,
+    iterations: u32,
+    block: u32,
+    correct_luma: bool,
+    threshold: f32,
+}
+
+impl Default for Analysis {
+    fn default() -> Self {
+        Self {
+            weights: [0.29899994, 0.58699995, 0.11440002],
+            global: 0.5,
+            local: 0.5,
+            iterations: 5,
+            block: 6,
+            correct_luma: false,
+            threshold: 0.01,
+        }
+    }
+}
+
+impl Analysis {
+    pub(super) fn timewarp(v: crate::params::Params<'_>) -> Self {
+        Self {
+            weights: [18, 19, 20].map(|id| (v.f(id) / 100.) as f32),
+            global: (v.f(8) / 1000.) as f32,
+            local: (v.f(9) / 1000.) as f32,
+            iterations: v.f(10).clamp(1., 300.) as u32,
+            block: v.f(16).clamp(4., 1000.) as u32,
+            correct_luma: v.b(13),
+            threshold: (v.f(15) / 100.) as f32,
+        }
+    }
+
+    fn key(self) -> impl std::hash::Hash {
+        (
+            self.weights.map(f32::to_bits),
+            self.global.to_bits(),
+            self.local.to_bits(),
+            self.iterations,
+            self.block,
+            self.correct_luma,
+            self.threshold.to_bits(),
+        )
+    }
+}
+
 #[derive(Default)]
-struct Call {
+struct Call<'a> {
+    guides: [Option<&'a GpuImage>; 2],
     region: IRect,
     roi: IRect,
     size: [u32; 4],
@@ -95,7 +152,7 @@ fn run(
     entry: &'static str,
     grid: f64,
     images: [Option<&GpuImage>; 4],
-    c: &Call,
+    c: &Call<'_>,
     out: &GpuImage,
     threads: [u32; 2],
 ) -> Result<(), RenderError> {
@@ -105,6 +162,11 @@ fn run(
     for (i, image) in images.iter().take(2).enumerate() {
         if let Some(image) = image {
             image_grid::image_coords(&mut w, i * 32, image, grid);
+        }
+    }
+    for (i, guide) in c.guides.iter().enumerate() {
+        if let Some(image) = guide {
+            image_grid::image_coords(&mut w, 160 + 32 * i, image, grid);
         }
     }
     w.i32s(64, &image_grid::rect4(c.region))
@@ -121,6 +183,11 @@ fn run(
                 .map(|i| i.map_or(Resource::Uniform, |i| Resource::View(&i.view))),
         )
         .chain(std::iter::once(Resource::View(&out.view)))
+        .chain(
+            c.guides
+                .iter()
+                .map(|g| g.map_or(Resource::Uniform, |i| Resource::View(&i.view))),
+        )
         .collect();
     let group = rt.bind_group(&kernel, &resources);
     let offset = gpu::push_uniform(&rt, &w);
@@ -135,7 +202,7 @@ fn run(
 }
 
 /// Both frames' luma from the finest flow level up.
-pub(crate) struct Pyramid {
+struct Pyramid {
     levels: Vec<(GpuImage, [u32; 2])>,
     finest: u32,
     region: IRect,
@@ -150,27 +217,21 @@ pub(crate) struct Field {
     pub(crate) region: IRect,
 }
 
-fn patches(n: u32) -> u32 {
-    if n <= 8 { 1 } else { (n - 8).div_ceil(4) + 1 }
+fn patches(n: u32, block: u32) -> u32 {
+    n.saturating_sub(block).div_ceil(block / 2) + 1
 }
 
 /// The luma pyramid of `a` and `b` around `roi` (render grid at `grid`).
 /// `detail` is AE's Vector Detail (percent).
-pub(crate) fn pyramid(
+fn pyramid(
     target: &mut dyn EffectTarget,
     a: &GpuImage,
     b: &GpuImage,
-    roi: IRect,
+    region: IRect,
     grid: f64,
-    detail: f64,
+    finest: u32,
+    analysis: Analysis,
 ) -> Result<Pyramid, RenderError> {
-    let region = IRect::new(
-        roi.x0 - MARGIN,
-        roi.y0 - MARGIN,
-        roi.x1 + MARGIN,
-        roi.y1 + MARGIN,
-    );
-    let finest = (100. / detail.clamp(5., 100.)).log2().round().clamp(0., 4.) as u32;
     let n = 1u32 << finest;
     let [w, h] = region.size();
     let size = [w.div_ceil(n).max(1), h.div_ceil(n).max(1)];
@@ -178,7 +239,12 @@ pub(crate) fn pyramid(
     let call = Call {
         region,
         size: [size[0], size[1], 0, 0],
-        data: [n as f32, 0., 0., 0.],
+        data: [
+            n as f32,
+            analysis.weights[0],
+            analysis.weights[1],
+            analysis.weights[2],
+        ],
         ..Call::default()
     };
     run(
@@ -224,22 +290,24 @@ pub(crate) fn pyramid(
 
 /// The flow from the pyramid's first frame to its second (`reverse`: second
 /// to first).
-pub(crate) fn flow(
+fn flow(
     target: &mut dyn EffectTarget,
     pyramid: &Pyramid,
     reverse: bool,
+    analysis: Analysis,
 ) -> Result<Field, RenderError> {
     let mut coarser: Option<(GpuImage, [u32; 2])> = None;
     for (k, (luma, size)) in pyramid.levels.iter().enumerate().rev() {
         let scale = (1u32 << (pyramid.finest + k as u32)) as f32;
-        let grid_n = [patches(size[0]), patches(size[1])];
+        let block = analysis.block.min(size[0].min(size[1])).max(4);
+        let grid_n = size.map(|n| patches(n, block));
         let found = target.allocate(IRect::from_size(grid_n[0], grid_n[1]), 1.)?;
         let call = Call {
             size: [size[0], size[1], grid_n[0], grid_n[1]],
-            data: [scale, 0., 0., 0.],
+            data: [scale, analysis.global, analysis.threshold, block as f32],
             flags: [
                 u32::from(reverse),
-                0,
+                u32::from(analysis.correct_luma),
                 ITERATIONS,
                 u32::from(coarser.is_some()),
             ],
@@ -256,7 +324,7 @@ pub(crate) fn flow(
             &found,
             grid_n,
         )?;
-        let field = target.allocate(IRect::from_size(size[0], size[1]), 1.)?;
+        let mut field = target.allocate(IRect::from_size(size[0], size[1]), 1.)?;
         run(
             target,
             "densify",
@@ -266,6 +334,25 @@ pub(crate) fn flow(
             &field,
             *size,
         )?;
+        if k == 0 && analysis.local != 0. {
+            let mut scratch = target.allocate(IRect::from_size(size[0], size[1]), 1.)?;
+            let smooth = Call {
+                data: [scale, analysis.local, analysis.threshold, block as f32],
+                ..call
+            };
+            for _ in 0..analysis.iterations {
+                run(
+                    target,
+                    "smooth_vectors",
+                    pyramid.grid,
+                    [Some(luma), Some(&field), None, None],
+                    &smooth,
+                    &scratch,
+                    *size,
+                )?;
+                std::mem::swap(&mut field, &mut scratch);
+            }
+        }
         coarser = Some((field, *size));
     }
     let (image, size) = coarser.expect("at least one level");
@@ -313,53 +400,121 @@ pub(crate) fn vector_blur(
 
 /// The frame at `phase` (0 = `a`, 1 = `b`) between two frames, given the flow
 /// each way.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn interpolate(
-    target: &mut dyn EffectTarget,
-    a: &GpuImage,
-    b: &GpuImage,
-    ab: &Field,
-    ba: &Field,
-    roi: IRect,
-    grid: f64,
-    phase: f32,
-) -> Result<GpuImage, RenderError> {
-    let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
-    let call = Call {
-        region: ab.region,
-        roi,
-        size: [ab.size[0], ab.size[1], 0, 0],
-        data: [ab.scale, phase, 0., 0.],
-        ..Call::default()
-    };
-    run(
-        target,
-        "interpolate",
-        grid,
-        [Some(a), Some(b), Some(&ab.image), Some(&ba.image)],
-        &call,
-        &out,
-        roi.size(),
-    )?;
-    Ok(out)
+impl Pair<'_> {
+    pub(super) fn interpolate(
+        &self,
+        target: &mut dyn EffectTarget,
+        frames: [&GpuImage; 2],
+        fields: [&Field; 2],
+        phase: f32,
+        single_image: bool,
+        extreme_filter: bool,
+    ) -> Result<GpuImage, RenderError> {
+        let [a, b] = frames;
+        let [ab, ba] = fields;
+        let (roi, grid) = (self.roi, self.grid);
+        let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
+        let call = Call {
+            guides: self.images.map(Some),
+            region: ab.region,
+            roi,
+            size: [ab.size[0], ab.size[1], 0, 0],
+            data: [ab.scale, phase, 0., 0.],
+            flags: [u32::from(single_image), u32::from(extreme_filter), 0, 0],
+            ..Call::default()
+        };
+        run(
+            target,
+            "interpolate",
+            grid,
+            [Some(a), Some(b), Some(&ab.image), Some(&ba.image)],
+            &call,
+            &out,
+            roi.size(),
+        )?;
+        Ok(out)
+    }
 }
 
-/// Both flows between `a` and `b`, then the frame at `phase`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn tween(
-    target: &mut dyn EffectTarget,
-    a: &GpuImage,
-    b: &GpuImage,
-    roi: IRect,
-    grid: f64,
-    detail: f64,
-    phases: &[f32],
-) -> Result<Vec<GpuImage>, RenderError> {
-    let pyramid = pyramid(target, a, b, roi, grid, detail)?;
-    let ab = flow(target, &pyramid, false)?;
-    let ba = flow(target, &pyramid, true)?;
-    phases
-        .iter()
-        .map(|&w| interpolate(target, a, b, &ab, &ba, roi, grid, w))
-        .collect()
+/// One source-frame pair. The two directions can share the luma pyramid on a miss.
+pub(crate) struct Pair<'a> {
+    pub images: [&'a GpuImage; 2],
+    pub times: [Time; 2],
+    pub layer: &'a PrimPath,
+    pub roi: IRect,
+    pub grid: f64,
+    pub detail: f64,
+    pub analysis: Analysis,
+}
+
+impl Pair<'_> {
+    fn field(
+        &self,
+        target: &mut dyn EffectTarget,
+        reverse: bool,
+        levels: &mut Option<Pyramid>,
+    ) -> Result<Field, RenderError> {
+        let region = self.roi.inflate(MARGIN);
+        let finest = (100. / self.detail.clamp(5., 100.))
+            .log2()
+            .round()
+            .clamp(0., 4.) as u32;
+        let i = usize::from(reverse);
+        let signature = |i: usize| {
+            let image = self.images[i];
+            Some((image.content_key()?, self.times[i]))
+        };
+        let key = signature(i).zip(signature(1 - i)).map(|pair| FrameKey {
+            comp: self.layer.clone(),
+            time: self.times[i],
+            request: rustc_hash::FxBuildHasher.hash_one((
+                LABEL,
+                pair,
+                region,
+                self.grid.to_bits(),
+                finest,
+                self.analysis.key(),
+                target.format(),
+            )),
+        });
+        if let Some(image) = key
+            .as_ref()
+            .and_then(|key| target.cached_image(key.clone()))
+        {
+            return Ok(Field {
+                size: image.texel_size(),
+                image,
+                scale: (1u32 << finest) as f32,
+                region,
+            });
+        }
+        let pyramid = match levels {
+            Some(levels) => levels,
+            None => levels.insert(pyramid(
+                target,
+                self.images[0],
+                self.images[1],
+                region,
+                self.grid,
+                finest,
+                self.analysis,
+            )?),
+        };
+        let field = flow(target, pyramid, reverse, self.analysis)?;
+        if let Some(key) = key {
+            target.remember_image(key, field.image.clone());
+        }
+        Ok(field)
+    }
+
+    pub(crate) fn forward(&self, target: &mut dyn EffectTarget) -> Result<Field, RenderError> {
+        self.field(target, false, &mut None)
+    }
+
+    pub(super) fn both(&self, target: &mut dyn EffectTarget) -> Result<[Field; 2], RenderError> {
+        let mut pyramid = None;
+        let ab = self.field(target, false, &mut pyramid)?;
+        let ba = self.field(target, true, &mut pyramid)?;
+        Ok([ab, ba])
+    }
 }

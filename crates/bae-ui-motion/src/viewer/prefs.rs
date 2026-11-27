@@ -17,6 +17,7 @@ pub(crate) struct ViewerPrefs {
     pub label_handles: bool,
     pub cycle_mask_colors: bool,
     pub center_shape_anchor: bool,
+    pub show_precomp_bounds: bool,
     pub checker_size: f32,
     pub checker_colors: [Color32; 2],
     /// Signed dolly steps per wheel notch. Zero leaves the wheel on composition zoom.
@@ -46,6 +47,7 @@ impl ViewerPrefs {
             label_handles: p.bool(keys::LABEL_HANDLES),
             cycle_mask_colors: p.bool("appearance.cycle_mask_colors"),
             center_shape_anchor: p.bool(keys::CENTER_SHAPE_ANCHOR),
+            show_precomp_bounds: p.bool("composition.show_bounding_box_precomp_layers"),
             checker_size: match p.str("grids_guides.transparency_grid_size") {
                 "small" => 4.0,
                 "large" => 16.0,
