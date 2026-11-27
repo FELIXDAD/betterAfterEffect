@@ -171,7 +171,38 @@ fn content_aware_fill_generates_a_masked_sequence_and_undo_removes_it() {
         .max_by(|a, b| a.right().total_cmp(&b.right()))
         .expect("alpha expansion control")
         .center();
-    drag(&mut h, number, number + egui::vec2(9., 0.), Modifiers::NONE);
+    let end = number + egui::vec2(24., 0.);
+    send(&mut h, Event::PointerMoved(number));
+    send(
+        &mut h,
+        Event::PointerButton {
+            pos: number,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    send(&mut h, Event::PointerMoved(end));
+    let live = h
+        .state()
+        .session()
+        .lock()
+        .scrub
+        .as_ref()
+        .filter(|edit| edit.path == layer && edit.attr == "vision:fill_expansion")
+        .and_then(|edit| edit.value.as_f64())
+        .expect("live expansion during drag");
+    assert!(live > 0.);
+    send(
+        &mut h,
+        Event::PointerButton {
+            pos: end,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    settle(&mut h);
     let expansion = |h: &Ui| {
         h.state()
             .stage()
@@ -179,7 +210,7 @@ fn content_aware_fill_generates_a_masked_sequence_and_undo_removes_it() {
             .and_then(|p| p.value("vision:fill_expansion").and_then(Value::as_f64))
             .unwrap_or(0.)
     };
-    assert!(expansion(&h) > 0.);
+    assert_eq!(expansion(&h), live);
     let (modifiers, z) = cmd(Key::Z);
     key(&mut h, modifiers, z);
     assert_eq!(expansion(&h), 0.);
