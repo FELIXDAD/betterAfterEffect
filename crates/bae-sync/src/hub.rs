@@ -24,37 +24,81 @@ use crate::transport::{Access, Transport};
 /// leave the client at [`Access::Unknown`].
 pub const ACCESS_HEADER: &str = "x-bae-access";
 
-/// Limits of a hub connection, the same in both directions.
+/// Limits of one hub connection (`docs/spec/sync.md` §3.1).
 ///
 /// tungstenite's defaults (16 MiB per frame, unlimited write queue) do not fit
 /// the protocol: messages are sent as single unfragmented frames, so a sublayer
 /// snapshot over 16 MiB was refused by the other side, the link dropped and the
 /// same message was sent again after every reconnect; and a peer that never
 /// reads made the other side queue without bound.
+///
+/// What waits for the peer is bounded twice. Sessions send no document data
+/// while more than `max_backlog` waits ([`Transport::backlog`],
+/// [`crate::SessionConfig::max_backlog`]), so a peer that reads slowly holds
+/// at most `max_backlog` plus one message (and the `Hello`s, presence and
+/// snapshot answers sent meanwhile, which are small or rare). Whatever sends,
+/// more than `max_unsent` never waits (as long as it is not below
+/// `max_message`: a message that finds nothing waiting is always taken): the
+/// link fails instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HubLimits {
-    /// Largest encoded protocol message either side sends or accepts (also the
-    /// frame limit, since a message is one frame). A whole sublayer snapshot
-    /// must fit: a larger one fails to send instead of being refused remotely
-    /// (the session still sends its other documents first).
+    /// Largest encoded protocol message this side sends. A whole sublayer
+    /// snapshot must fit: a larger one fails to send instead of being refused
+    /// remotely (the session still sends its other documents first). The
+    /// peer's `max_incoming` must not be smaller (except for document data the
+    /// peer will not take anyway: a read-only hub connection, whose session
+    /// sends none, [`crate::SessionConfig::send_data`]).
     pub max_message: usize,
-    /// Bytes that may wait for a peer that stopped reading. Once more than this
-    /// waits and nothing went out for `stall_timeout`, `send` and `recv` fail and
-    /// the connection is dropped (a relay drops it at once) instead of growing
-    /// without bound. How much waits alone never cuts a peer off: one that
-    /// keeps reading, however slowly, gets everything (a session sends all a
-    /// newcomer lacks back to back, on a first sync the whole project).
+    /// Largest message accepted from the peer (also the frame limit, since a
+    /// message is one frame): a larger one fails `recv` as soon as its frame
+    /// header arrives, before it is buffered, and the link is dropped. The hub
+    /// takes less from read-only connections (16 MiB by default), whose
+    /// sessions should send no document data.
+    pub max_incoming: usize,
+    /// Flow control: what may wait for a peer that reads slowly before sessions
+    /// hold back further document data (see above; sessions have their own
+    /// setting, [`crate::SessionConfig::max_backlog`], with the same default).
+    /// Also the stall rule: once more than this waits and nothing went out for
+    /// `stall_timeout`, `send` and `recv` fail and the connection is dropped
+    /// (a relay drops it at once). How much waits alone never cuts a peer off
+    /// below `max_unsent`: one that keeps reading, however slowly, gets
+    /// everything, one held-back batch after the other.
     pub max_backlog: usize,
+    /// Hard cap on what waits for the peer: a `send` that would make more than
+    /// this wait fails, and so does the link from then on (a relay drops it).
+    /// A message that finds nothing waiting is always taken, so any message up
+    /// to `max_message` can be sent. Sessions that hold back at `max_backlog`
+    /// stay below it if it is at least `max_message + max_backlog` (better
+    /// [`HubLimits::max_unsent_for`], the default); it stops what does not
+    /// hold back (snapshot requests sent over and over, a session without
+    /// flow control).
+    pub max_unsent: usize,
     /// How long nothing may go out while more than `max_backlog` waits; also
     /// how long [`Transport::close`] waits while nothing moves.
     pub stall_timeout: Duration,
 }
 
+impl HubLimits {
+    /// The `max_unsent` that fits `max_message` and `max_backlog`, as the
+    /// default is made: room for what a held-back session leaves waiting (one
+    /// message over `max_backlog`) plus one snapshot answer. It must be at
+    /// least `max_message + max_backlog`, or a peer that a session held back
+    /// for legitimately can be cut off.
+    pub fn max_unsent_for(max_message: usize, max_backlog: usize) -> usize {
+        max_message.saturating_mul(2).saturating_add(max_backlog)
+    }
+}
+
 impl Default for HubLimits {
+    /// 256 MiB messages both ways, flow control at 16 MiB, at most 528 MiB
+    /// waiting ([`HubLimits::max_unsent_for`]), 30 s stall timeout.
     fn default() -> Self {
+        const MAX_MESSAGE: usize = 256 << 20;
         HubLimits {
-            max_message: 256 << 20,
-            max_backlog: 16 << 20,
+            max_message: MAX_MESSAGE,
+            max_incoming: MAX_MESSAGE,
+            max_backlog: crate::session::DEFAULT_MAX_BACKLOG,
+            max_unsent: Self::max_unsent_for(MAX_MESSAGE, crate::session::DEFAULT_MAX_BACKLOG),
             stall_timeout: Duration::from_secs(30),
         }
     }
@@ -115,6 +159,9 @@ pub struct HubTransport {
     progress: Instant,
     /// A write failed; reported once what already arrived has been read.
     failed: Option<SyncError>,
+    /// More than `max_unsent` would have waited: every later call fails with
+    /// this (`recv` once what already arrived has been read).
+    over: Option<String>,
     /// [`set_idle_timeout`](HubTransport::set_idle_timeout).
     idle_timeout: Option<Duration>,
     /// `Counted::read` when we last looked, and when it last changed.
@@ -336,6 +383,7 @@ impl HubTransport {
             written,
             progress: Instant::now(),
             failed: None,
+            over: None,
             idle_timeout: None,
             read,
             heard: Instant::now(),
@@ -348,12 +396,12 @@ impl HubTransport {
     /// Change the limits of an open connection.
     pub fn set_limits(&mut self, limits: HubLimits) {
         self.limits = limits;
-        let max_message = limits.max_message.max(1);
+        let max_incoming = limits.max_incoming.max(1);
         self.ws.set_config(|c| {
-            c.max_message_size = Some(max_message);
-            c.max_frame_size = Some(max_message);
-            // A peer that stopped reading is told by the lack of progress
-            // (`track`), not by how much waits.
+            c.max_message_size = Some(max_incoming);
+            c.max_frame_size = Some(max_incoming);
+            // What waits is bounded by `send` (`max_unsent`) and a peer that
+            // stopped reading is told by the lack of progress (`track`).
             c.max_write_buffer_size = usize::MAX;
         });
     }
@@ -458,19 +506,31 @@ fn link_err(e: WsError) -> SyncError {
 
 impl Transport for HubTransport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+        if let Some(over) = &self.over {
+            return Err(SyncError::Hub(over.clone()));
+        }
         let bytes = msg.encode();
         // tungstenite only checks the size of incoming messages; the peer would
         // drop the link over an oversized one, so fail here with a clear reason.
-        if let Some(max) = self.ws.get_config().max_message_size
-            && bytes.len() > max
-        {
+        let max = self.limits.max_message;
+        if bytes.len() > max {
             return Err(SyncError::Hub(format!(
                 "message of {} bytes is over the {max}-byte limit of the hub link",
                 bytes.len()
             )));
         }
         // Frame header included (at most 14 bytes).
-        self.unsent += bytes.len() as u64 + 14;
+        let len = bytes.len() as u64 + 14;
+        if self.unsent > 0 && self.unsent + len > self.limits.max_unsent as u64 {
+            let over = format!(
+                "{} KiB would wait for the peer, over the limit of {} KiB",
+                (self.unsent + len) >> 10,
+                self.limits.max_unsent >> 10
+            );
+            self.over = Some(over.clone());
+            return Err(SyncError::Hub(over));
+        }
+        self.unsent += len;
         let drained = match self.ws.send(WsMessage::Binary(bytes.into())) {
             Ok(()) => true,
             // Queued; the rest goes out on later flushes.
@@ -509,9 +569,10 @@ impl Transport for HubTransport {
                 // Pings are answered by tungstenite on the next flush.
                 Ok(_) => continue,
                 Err(e) if would_block(&e) => {
-                    return match self.failed.take() {
-                        Some(e) => Err(e),
-                        None => self.check_idle().map(|()| None),
+                    return match (self.failed.take(), &self.over) {
+                        (Some(e), _) => Err(e),
+                        (None, Some(over)) => Err(SyncError::Hub(over.clone())),
+                        (None, None) => self.check_idle().map(|()| None),
                     };
                 }
                 Err(e) => return Err(self.failed.take().unwrap_or_else(|| link_err(e))),
@@ -528,6 +589,9 @@ impl Transport for HubTransport {
     fn close(&mut self) -> Result<(), SyncError> {
         if let Some(e) = self.failed.take() {
             return Err(e);
+        }
+        if let Some(over) = &self.over {
+            return Err(SyncError::Hub(over.clone()));
         }
         let mut written = self.ws.get_ref().written;
         let mut progress = Instant::now();
@@ -560,6 +624,12 @@ impl Transport for HubTransport {
                 r = self.ws.flush();
             }
         }
+    }
+
+    /// About how many bytes wait in the write buffer (not counting the
+    /// system's socket buffers), as of the last `send` or `recv`.
+    fn backlog(&self) -> usize {
+        usize::try_from(self.unsent).unwrap_or(usize::MAX)
     }
 }
 

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
-use bae_sync::{HubLimits, HubTransport};
+use bae_sync::HubTransport;
 use serde_json::json;
 
 use crate::auth::{Auth, AuthError, Grant, token_from_request};
@@ -423,14 +423,16 @@ fn sync(
     // Authentication is done above (several tokens, per project), so the
     // handshake itself checks nothing more. The response tells the client
     // whether it may edit (`x-bae-access`), so the app can grey out editing.
-    let transport =
-        match HubTransport::accept_granting(stream, None, HubLimits::default(), access.into()) {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::debug!(%addr, error = %e, "WebSocket handshake failed");
-                return Ok(());
-            }
-        };
+    // Read-only connections get a small incoming limit: a larger message
+    // fails as soon as its frame header arrives, before the hub buffers it.
+    let limits = shared.config.client_limits(access);
+    let transport = match HubTransport::accept_granting(stream, None, limits, access.into()) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::debug!(%addr, error = %e, "WebSocket handshake failed");
+            return Ok(());
+        }
+    };
     let link = PeerLink::new(transport, access, shared.config.peer_timeout);
     let info = PeerInfo {
         token: grant.name.clone(),

@@ -17,7 +17,7 @@ use std::io::{self, BufWriter, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -136,9 +136,44 @@ pub fn parse_filter(filter: &str) -> Result<Targets, LogError> {
 }
 
 /// Installs the global `tracing` subscriber.
+/// The filter while Help ▸ Enable Logging is on: everything of BAE at debug.
+const VERBOSE_FILTER: &str =
+    "debug,wgpu_core=warn,wgpu_hal=warn,naga=warn,egui_wgpu=warn,winit=warn";
+
+/// Switches the filter at run time (Help ▸ Enable Logging), and the filter
+/// [`init`] started with.
+static RELOAD: OnceLock<(
+    tracing_subscriber::reload::Handle<Targets, tracing_subscriber::Registry>,
+    Targets,
+)> = OnceLock::new();
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+
+/// Help ▸ Enable Logging: debug-level lines from now on (`true`), or back to
+/// the filter logging started with.
+pub fn set_verbose(on: bool) {
+    let Some((handle, start)) = RELOAD.get() else {
+        return;
+    };
+    let filter = if on {
+        Targets::from_str(VERBOSE_FILTER).unwrap_or_else(|_| start.clone())
+    } else {
+        start.clone()
+    };
+    if handle.reload(filter).is_ok() {
+        VERBOSE.store(on, Ordering::Relaxed);
+        tracing::info!(verbose = on, "logging level changed");
+    }
+}
+
+/// Whether Help ▸ Enable Logging is on.
+pub fn verbose() -> bool {
+    VERBOSE.load(Ordering::Relaxed)
+}
+
 pub fn init(options: &LogOptions) -> Result<LogGuard, LogError> {
     let filter_str = effective_filter(options.filter.as_deref());
     let targets = parse_filter(&filter_str)?;
+    let (filter, handle) = tracing_subscriber::reload::Layer::new(targets.clone());
 
     let file_sink = match &options.file_dir {
         Some(dir) => Some(FileSink::start(dir, options)?),
@@ -165,11 +200,12 @@ pub fn init(options: &LogOptions) -> Result<LogGuard, LogError> {
     });
 
     tracing_subscriber::registry()
-        .with(targets)
+        .with(filter)
         .with(stderr_layer)
         .with(file_layer)
         .try_init()
         .map_err(|_| LogError::AlreadyInitialized)?;
+    let _ = RELOAD.set((handle, targets));
 
     tracing::debug!(filter = %filter_str, file = ?file_path, "logging initialized");
     Ok(LogGuard { file: file_path })

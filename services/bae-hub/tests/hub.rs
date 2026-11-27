@@ -170,6 +170,142 @@ fn read_only_clients_see_but_cannot_edit() {
     assert_eq!(viewer["token"], "viewer");
 }
 
+/// The hub takes at most `read_only_max_incoming` from read-only connections:
+/// a read-only token cannot make it take in messages as large as writers may
+/// send (it used to take 256 MiB from anyone and drop the edits only once
+/// decoded). They are still sent large ones.
+#[test]
+fn read_only_connections_cannot_send_large_messages() {
+    use bae_sync::{Message, Transport};
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.read_only_max_incoming = 256 << 10;
+    let hub = start(cfg);
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "editor", &base),
+        Client::join(addr, PROJECT, READ, "viewer", &base),
+    ];
+    // A writer may send a message of 1 MiB, and the viewer gets it.
+    let mut rng = Rng::new(5);
+    let big: String = (0..1 << 20)
+        .map(|_| char::from(b'a' + rng.below(26) as u8))
+        .collect();
+    let editor = &mut clients[0];
+    editor.stage.set_edit_target(&SublayerId::root()).unwrap();
+    editor
+        .stage
+        .transact(&editor.who, "note", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main"),
+                attr: "note".into(),
+                value: Some(Value::String(big)),
+            })
+        })
+        .unwrap();
+    pump_until(&mut clients, Duration::from_secs(20), converged);
+    let viewer = &mut clients[1];
+    assert!(viewer.session.stats().bytes_received >= 1 << 20);
+
+    // The viewer sends one over its limit: the hub drops the connection as
+    // soon as the frame header arrives.
+    viewer
+        .link
+        .send(Message::Updates {
+            doc: DocKey::sublayer(&SublayerId::root()),
+            version: Default::default(),
+            data: vec![0; 512 << 10],
+        })
+        .unwrap();
+    let start = Instant::now();
+    loop {
+        if viewer
+            .session
+            .pump(&mut viewer.stage, &mut viewer.link)
+            .is_err()
+        {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the hub took a large message from a read-only connection"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // Writers are not affected.
+    let mut editor = clients.remove(0);
+    for _ in 0..3 {
+        editor.edit(&mut rng);
+    }
+    editor.pump();
+    let mut late = vec![editor, Client::join(addr, PROJECT, WRITE, "late", &base)];
+    pump_until(&mut late, Duration::from_secs(20), converged);
+}
+
+/// Viewers edit locally; their edits just go nowhere. A viewer whose session
+/// does not know it is read-only sends them after every `Hello` of the hub and
+/// every reconnect, so with a 1 MiB limit for read-only connections one with
+/// more than that in one document was dropped every time, forever. The default
+/// limit leaves room for that (and for `Hello`s, which grow with documents ×
+/// Loro peers), and a viewer whose session sends no document data
+/// (`SessionConfig::send_data`, as the app sets it for a read-only token) is
+/// never dropped for its edits, however small the limit.
+#[test]
+fn viewers_with_large_local_edits_stay_connected() {
+    for (limit, send_data) in [(None, true), (Some(64 << 10), false)] {
+        let data = tempfile::tempdir().unwrap();
+        let mut cfg = config(data.path());
+        if let Some(limit) = limit {
+            cfg.read_only_max_incoming = limit;
+        }
+        let hub = start(cfg);
+        let addr = hub.local_addr();
+        let base = base_snapshots();
+        let mut clients = vec![
+            Client::join(addr, PROJECT, WRITE, "editor", &base),
+            Client::join(addr, PROJECT, READ, "viewer", &base),
+        ];
+        clients[1].session.config_mut().send_data = send_data;
+        pump_until(&mut clients, Duration::from_secs(20), converged);
+        let mut rng = Rng::new(9);
+        let big: String = (0..3 << 19)
+            .map(|_| char::from(b'a' + rng.below(26) as u8))
+            .collect();
+        let viewer = &mut clients[1];
+        viewer.stage.set_edit_target(&SublayerId::root()).unwrap();
+        viewer
+            .stage
+            .transact(&viewer.who, "note", |tx| {
+                tx.apply(Op::SetValue {
+                    path: p("/comps/main"),
+                    attr: "note".into(),
+                    value: Some(Value::String(big)),
+                })
+            })
+            .unwrap();
+        let imports = viewer.session.stats().imports;
+        // The editor goes on editing and the viewer keeps up; a dropped link
+        // fails its pump.
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(2) {
+            clients[0].edit(&mut rng);
+            pump_for(&mut clients, Duration::from_millis(50));
+        }
+        let viewer = &clients[1];
+        assert!(viewer.session.stats().imports > imports + 10);
+        if send_data {
+            assert!(viewer.session.stats().bytes_sent >= 3 << 19);
+        } else {
+            assert_eq!(viewer.session.stats().bytes_sent, 0);
+        }
+        let list = http_get(addr, "/v1/projects", Some(WRITE));
+        let json: serde_json::Value = serde_json::from_str(&list.body).unwrap();
+        let peers = json["projects"][0]["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 2, "{peers:?}");
+    }
+}
+
 #[test]
 fn anonymous_access_when_enabled() {
     let data = tempfile::tempdir().unwrap();

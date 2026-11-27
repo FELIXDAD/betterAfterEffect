@@ -317,6 +317,10 @@ pub fn random_edit(stage: &mut Stage, who: &AuthorId, rng: &mut Rng, tag: &str, 
 
 /// [`random_edit`]; with `collide` false, clients never create the same name
 /// concurrently (the random sequence is the same either way).
+///
+/// TODO(#737): `collide: false` only works around the doc-model issue
+/// reported on #737 (same-name prims created concurrently get different
+/// names in two clients' mirrors); drop it from the tests once that is fixed.
 pub fn random_edit_with(
     stage: &mut Stage,
     who: &AuthorId,

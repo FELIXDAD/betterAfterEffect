@@ -13,6 +13,9 @@ use crate::presence::{PeerPresence, PresenceState, PresenceTable, initial_seq};
 use crate::protocol::{DocKey, Message, PROTOCOL_VERSION};
 use crate::transport::Transport;
 
+/// Default of [`SessionConfig::max_backlog`] (and of `HubLimits::max_backlog`).
+pub(crate) const DEFAULT_MAX_BACKLOG: usize = 16 << 20;
+
 /// Payloads received in one pump, per document: `(version, data)`.
 type Payloads = BTreeMap<DocKey, Vec<(VersionVector, Vec<u8>)>>;
 
@@ -137,6 +140,34 @@ pub struct SessionConfig {
     /// Others drop us after this long without a heartbeat (sent along with each
     /// update, so receivers do not need to agree on it).
     pub presence_ttl: Duration,
+    /// Flow control: no document data is sent while more than this many bytes
+    /// wait in the transport ([`Transport::backlog`]: a hub connection whose
+    /// peer reads slowly, a queue a background thread has not written yet).
+    /// Receiving, `Hello`s, presence and snapshot answers go on. Once it
+    /// drained, sending goes on with the document it stopped at, so every
+    /// document gets its turn. Checked before each document, so one message
+    /// of any size goes out when the backlog is below this (a newcomer's
+    /// first sync of a large sublayer): at most this plus one message waits.
+    ///
+    /// Without it, every `Hello` of a peer that has not read everything yet
+    /// (it says hello every few seconds, and on a slow link a large transfer
+    /// takes longer) made us queue everything it lacks once more. Some of
+    /// that still happens (a `Hello` cannot tell what is on its way), but at
+    /// most once per drained backlog instead of once per `Hello`.
+    ///
+    /// [`SyncSession::flush`] ignores it. `None`: no flow control. Default
+    /// 16 MiB, the hub link's default `HubLimits::max_backlog`.
+    pub max_backlog: Option<usize>,
+    /// Send document data (`Updates`, and `Snapshot` answers to snapshot
+    /// requests). `false` on a link that may not write: a hub connection with
+    /// a read-only token (`GET /v1/status` says `"access": "read"`). The hub
+    /// drops such data anyway, and takes only small messages from read-only
+    /// connections (its `read_only_max_incoming`): a viewer with more local
+    /// edits than that in one document would be dropped each time it sent
+    /// them, which is after every `Hello` of the hub and every reconnect.
+    /// `Hello`s, presence and receiving go on as usual; local edits stay local
+    /// ([`unsynced`](SyncSession::unsynced) keeps listing them). Default `true`.
+    pub send_data: bool,
     /// The remote does not take our edits (a read-only hub token, a folder we
     /// cannot write): never send document data (`Updates`, `Snapshot`, also
     /// not in answer to a `SnapshotRequest`). `Hello` and presence still go
@@ -154,6 +185,8 @@ impl SessionConfig {
             min_send_interval: Duration::ZERO,
             presence_heartbeat: Duration::from_secs(5),
             presence_ttl: Duration::from_secs(20),
+            max_backlog: Some(DEFAULT_MAX_BACKLOG),
+            send_data: true,
             read_only: false,
         }
     }
@@ -189,6 +222,9 @@ pub struct SyncStats {
     pub imports: u64,
     /// Payloads skipped because the document already had everything in them.
     pub redundant: u64,
+    /// Times document data was held back because the transport's backlog was
+    /// over [`SessionConfig::max_backlog`].
+    pub held_back: u64,
 }
 
 /// Keeps a [`DocSet`] in sync with one remote over a [`Transport`].
@@ -222,6 +258,8 @@ pub struct SyncSession {
     last_send: Option<Instant>,
     /// Documents announced in our last `Hello`.
     announced: BTreeSet<DocKey>,
+    /// Flow control stopped before this document: the next send starts here.
+    next_doc: Option<DocKey>,
     stats: SyncStats,
     presence: Option<PresenceState>,
     presence_dirty: bool,
@@ -246,6 +284,7 @@ impl SyncSession {
             last_hello: None,
             last_send: None,
             announced: BTreeSet::new(),
+            next_doc: None,
             stats: SyncStats::default(),
             presence: None,
             presence_dirty: false,
@@ -342,6 +381,7 @@ impl SyncSession {
         self.remote_protocol = None;
         self.last_hello = None;
         self.announced.clear();
+        self.next_doc = None;
         self.presence_dirty = self.presence.is_some();
         self.presence_seq = (self.presence_seq + 1).max(initial_seq());
         self.peers = PresenceTable::default();
@@ -433,18 +473,19 @@ impl SyncSession {
         let send_due = self
             .last_send
             .is_none_or(|t| now.saturating_duration_since(t) >= self.config.min_send_interval);
-        if send_due && self.send_missing(docs, transport, &mut out)? {
+        if send_due && self.send_missing(docs, transport, true, &mut out)? {
             self.last_send = Some(now);
         }
         Ok(out)
     }
 
     /// Send every document's ops the remote is not known to have right now,
-    /// ignoring `min_send_interval`. Nothing is received and no `Hello` or
-    /// presence goes out. Call it after the last [`pump`](Self::pump) before
+    /// ignoring `min_send_interval` and `max_backlog`. Nothing is received and
+    /// no `Hello` or presence goes out. Call it after the last [`pump`](Self::pump) before
     /// closing a link whose sends may be held back, or the last edits never
     /// leave. Sends nothing before the remote's first `Hello` (we do not know
-    /// what it has), and nothing when [`SessionConfig::read_only`].
+    /// what it has), and nothing without [`SessionConfig::send_data`] or when
+    /// [`SessionConfig::read_only`].
     ///
     /// Only [`PumpOutcome::sent`] and [`PumpOutcome::errors`] are filled in.
     /// Errors are transport failures, as in [`pump`](Self::pump).
@@ -465,7 +506,7 @@ impl SyncSession {
         now: Instant,
     ) -> Result<PumpOutcome, SyncError> {
         let mut out = PumpOutcome::default();
-        if self.send_missing(docs, transport, &mut out)? {
+        if self.send_missing(docs, transport, false, &mut out)? {
             self.last_send = Some(now);
         }
         Ok(out)
@@ -604,7 +645,7 @@ impl SyncSession {
 
     /// Answer a `SnapshotRequest` (after this pump's import): a snapshot of the
     /// whole document. Documents we do not have are not answered, nor is
-    /// anything when [`SessionConfig::read_only`].
+    /// anything without `send_data` or when [`SessionConfig::read_only`].
     fn send_snapshot(
         &mut self,
         docs: &dyn DocSet,
@@ -612,7 +653,7 @@ impl SyncSession {
         doc: DocKey,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        if self.config.read_only {
+        if self.config.read_only || !self.config.send_data {
             return Ok(());
         }
         let Some(version) = docs.version(&doc) else {
@@ -711,20 +752,33 @@ impl SyncSession {
     /// already counted as sent, and a transport can fail one message and take
     /// the next (a shared folder whose log for one document cannot be written,
     /// a message over the hub's size limit). The first error is returned.
+    ///
+    /// With `flow`, stops before a document while the transport's backlog is
+    /// over `max_backlog`; the next call starts with that document. Sends
+    /// nothing without `send_data`.
     fn send_missing(
         &mut self,
         docs: &dyn DocSet,
         transport: &mut dyn Transport,
+        flow: bool,
         out: &mut PumpOutcome,
     ) -> Result<bool, SyncError> {
-        if self.config.read_only {
+        if self.config.read_only || !self.config.send_data {
             return Ok(false);
         }
-        let Some(remote) = &mut self.remote else {
+        let Some(mut remote) = self.remote.take() else {
             return Ok(false);
         };
-        let mut batch = Vec::new();
-        for key in docs.doc_keys() {
+        let max_backlog = self.config.max_backlog.filter(|_| flow);
+        let mut keys = docs.doc_keys();
+        if let Some(next) = self.next_doc.take()
+            && let Some(i) = keys.iter().position(|k| *k == next)
+        {
+            keys.rotate_left(i);
+        }
+        let mut sent = false;
+        let mut failed = None;
+        for key in keys {
             let Some(local) = docs.version(&key) else {
                 continue;
             };
@@ -732,28 +786,33 @@ impl SyncSession {
             if known.includes_vv(&local) {
                 continue;
             }
+            if let Some(max) = max_backlog
+                && transport.backlog() > max
+            {
+                self.next_doc = Some(key);
+                self.stats.held_back += 1;
+                break;
+            }
             match docs.export_updates(&key, known) {
                 Ok(data) => {
                     known.merge(&local);
                     if self.config.hello_interval.is_some() {
                         self.in_flight.sent(&key, self.hello_seq, &local);
                     }
-                    batch.push(Message::Updates {
+                    sent = true;
+                    let msg = Message::Updates {
                         doc: key,
                         version: local,
                         data,
-                    });
+                    };
+                    if let Err(e) = self.send(transport, msg, out) {
+                        failed.get_or_insert(e);
+                    }
                 }
                 Err(e) => out.errors.push(e),
             }
         }
-        let sent = !batch.is_empty();
-        let mut failed = None;
-        for msg in batch {
-            if let Err(e) = self.send(transport, msg, out) {
-                failed.get_or_insert(e);
-            }
-        }
+        self.remote = Some(remote);
         match failed {
             Some(e) => Err(e),
             None => Ok(sent),
@@ -773,5 +832,210 @@ impl SyncSession {
         self.stats.messages_sent += 1;
         out.sent += 1;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use super::*;
+    use crate::docs::MemDocs;
+
+    /// A link whose backlog grows with every message sent and drains only when
+    /// the test says so.
+    #[derive(Default)]
+    struct Lagging {
+        inbox: VecDeque<Message>,
+        sent: Vec<Message>,
+        backlog: usize,
+    }
+
+    impl Transport for Lagging {
+        fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+            self.backlog += msg.approx_len();
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+            Ok(self.inbox.pop_front())
+        }
+
+        fn backlog(&self) -> usize {
+            self.backlog
+        }
+    }
+
+    impl Lagging {
+        /// Documents of the data messages sent since the last call.
+        fn data_sent(&mut self) -> Vec<String> {
+            self.sent
+                .drain(..)
+                .filter_map(|m| match m {
+                    Message::Updates { doc, .. } | Message::Snapshot { doc, .. } => {
+                        Some(doc.to_string())
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    fn key(s: &str) -> DocKey {
+        DocKey::parse(s).unwrap()
+    }
+
+    /// `n` pseudo-random characters (Loro does not get them much smaller).
+    fn text(seed: u64, n: usize) -> String {
+        let mut x = seed | 1;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                char::from(b'a' + (x % 26) as u8)
+            })
+            .collect()
+    }
+
+    fn set(docs: &MemDocs, doc: &str, value: String) {
+        let d = docs.get(&key(doc)).unwrap();
+        d.get_map("m").insert("v", value).unwrap();
+        d.commit();
+    }
+
+    #[test]
+    fn document_data_waits_while_the_transport_lags() {
+        let mut docs = MemDocs::new();
+        for (i, doc) in ["a", "b", "c"].into_iter().enumerate() {
+            let d = bae_model::loro::LoroDoc::new();
+            d.get_map("m")
+                .insert("v", text(i as u64 + 1, 4000))
+                .unwrap();
+            d.commit();
+            let snapshot = d.export(bae_model::loro::ExportMode::Snapshot).unwrap();
+            docs.load(key(doc), &snapshot).unwrap();
+        }
+        let mut config = SessionConfig::new(ClientId::new("relay").unwrap());
+        config.hello_interval = None;
+        config.max_backlog = Some(1000);
+        let mut s = SyncSession::new(config);
+        s.set_presence(PresenceState::default());
+        let peer = ClientId::new("peer").unwrap();
+        // The peer has nothing, and says so twice (the second time while the
+        // first message is still on its way).
+        let mut t = Lagging::default();
+        t.inbox.push_back(Message::hello(peer.clone(), Vec::new()));
+        let pump = |s: &mut SyncSession, docs: &mut MemDocs, t: &mut Lagging| {
+            s.pump(docs, t).unwrap();
+            t.data_sent()
+        };
+
+        // One document goes out, however large (over `max_backlog` on its
+        // own), then the rest waits.
+        assert_eq!(pump(&mut s, &mut docs, &mut t), ["a"]);
+        assert!(t.backlog > 4000);
+        assert_eq!(s.stats().held_back, 1);
+        // Waiting: the stale `Hello` is taken in, presence still goes out, no
+        // document data does.
+        t.inbox.push_back(Message::hello(peer.clone(), Vec::new()));
+        s.set_presence(PresenceState {
+            name: "relay".into(),
+            ..PresenceState::default()
+        });
+        s.pump(&mut docs, &mut t).unwrap();
+        assert!(t.inbox.is_empty());
+        assert!(
+            t.sent.iter().any(|m| matches!(m, Message::Presence { .. })),
+            "{:?}",
+            t.sent
+        );
+        assert!(t.data_sent().is_empty());
+        assert_eq!(s.unsynced(&docs).len(), 3);
+        // Each time the backlog drained, the next document: the one it stopped
+        // at first. The stale `Hello` costs one more copy of `a`, not one per
+        // `Hello`.
+        for want in ["b", "c", "a"] {
+            t.backlog = 0;
+            assert_eq!(pump(&mut s, &mut docs, &mut t), [want]);
+        }
+        t.backlog = 0;
+        assert!(pump(&mut s, &mut docs, &mut t).is_empty());
+        assert!(s.unsynced(&docs).is_empty());
+
+        // `flush` does not wait.
+        set(&docs, "b", "edit".into());
+        t.backlog = 1 << 20;
+        s.pump(&mut docs, &mut t).unwrap();
+        assert!(t.data_sent().is_empty());
+        s.flush(&docs, &mut t).unwrap();
+        assert_eq!(t.data_sent(), ["b"]);
+        // Without flow control, nothing waits.
+        set(&docs, "c", "edit".into());
+        s.config_mut().max_backlog = None;
+        assert_eq!(pump(&mut s, &mut docs, &mut t), ["c"]);
+    }
+
+    /// A session on a link that may not write (a read-only hub token) sends no
+    /// document data at all: not what the remote lacks, not snapshot answers,
+    /// not on `flush`. It still says hello, publishes presence and receives.
+    #[test]
+    fn a_session_without_send_data_only_receives() {
+        let mut docs = MemDocs::new();
+        for doc in ["a", "b"] {
+            let d = bae_model::loro::LoroDoc::new();
+            d.get_map("m").insert("v", text(7, 100)).unwrap();
+            d.commit();
+            let snapshot = d.export(bae_model::loro::ExportMode::Snapshot).unwrap();
+            docs.load(key(doc), &snapshot).unwrap();
+        }
+        let mut config = SessionConfig::new(ClientId::new("viewer").unwrap());
+        config.send_data = false;
+        let mut s = SyncSession::new(config);
+        s.set_presence(PresenceState::default());
+        let hub = ClientId::new("hub").unwrap();
+        let mut t = Lagging::default();
+        t.inbox.push_back(Message::hello(hub.clone(), Vec::new()));
+        t.inbox
+            .push_back(Message::SnapshotRequest { doc: key("a") });
+        // What the hub has: `b` with an edit we lack.
+        let theirs = bae_model::loro::LoroDoc::new();
+        theirs
+            .import(&docs.export_snapshot(&key("b")).unwrap())
+            .unwrap();
+        theirs.get_map("m").insert("w", "theirs").unwrap();
+        theirs.commit();
+        t.inbox.push_back(Message::Updates {
+            doc: key("b"),
+            version: theirs.oplog_vv(),
+            data: theirs
+                .export(bae_model::loro::ExportMode::updates(
+                    &docs.version(&key("b")).unwrap(),
+                ))
+                .unwrap(),
+        });
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(out.received, 3);
+        assert_eq!(docs.version(&key("b")).unwrap(), theirs.oplog_vv());
+        set(&docs, "a", "local".into());
+        s.pump(&mut docs, &mut t).unwrap();
+        s.flush(&docs, &mut t).unwrap();
+        let kinds: Vec<_> = t
+            .sent
+            .iter()
+            .map(|m| match m {
+                Message::Hello { .. } => "hello",
+                Message::Presence { .. } => "presence",
+                _ => "data",
+            })
+            .collect();
+        assert!(
+            kinds.contains(&"hello") && kinds.contains(&"presence"),
+            "{kinds:?}"
+        );
+        assert!(!kinds.contains(&"data"), "{kinds:?}");
+        assert_eq!(s.stats().bytes_sent, 0);
+        assert_eq!(s.unsynced(&docs), [key("a")]);
     }
 }

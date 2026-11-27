@@ -33,6 +33,7 @@ mod error;
 pub mod history;
 #[cfg(feature = "hub")]
 mod hub;
+mod identity;
 mod presence;
 mod protocol;
 mod relay;

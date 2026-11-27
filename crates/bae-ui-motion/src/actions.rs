@@ -58,6 +58,7 @@ pub mod ids {
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
+    pub const TEXT_ORIENTATION: &str = "motion.layer.text_orientation";
     /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid, Camera or Light
     /// Settings of the selected layer, or Solid Settings of the solid item
     /// selected in the focused Project panel.
@@ -78,6 +79,10 @@ pub mod ids {
     /// File > Import > Solid... / Placeholder...: a new solid or placeholder item.
     pub const IMPORT_SOLID: &str = "motion.file.import_solid";
     pub const IMPORT_PLACEHOLDER: &str = "motion.file.import_placeholder";
+    /// File ▸ Replace Footage ▸ Solid… / Placeholder…: a new solid or
+    /// placeholder takes the selected footage item's place.
+    pub const REPLACE_WITH_SOLID: &str = "motion.file.replace_footage_solid";
+    pub const REPLACE_WITH_PLACEHOLDER: &str = "motion.file.replace_footage_placeholder";
     /// File > New Comp from Selection... (Alt+\).
     pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
@@ -127,6 +132,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const TRACK_CAMERA: &str = "motion.anim.track_camera";
     pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
@@ -247,6 +253,13 @@ pub mod ids {
     /// Layer ▸ Camera ▸ Camera Settings… (and View ▸): the selected camera, else
     /// the comp's active camera.
     pub const CAMERA_SETTINGS: &str = "motion.layer.camera_settings";
+    /// Layer ▸ Reveal ▸ Reveal Layer Source in Project / Reveal Composition in
+    /// Project: the Project panel selects and scrolls to the item.
+    pub const REVEAL_SOURCE_IN_PROJECT: &str = "motion.layer.reveal_layer_source_in_project";
+    /// File ▸ Interpret Footage ▸ Remember Interpretation (Cmd/Ctrl+Alt+C) /
+    /// Apply Interpretation (Cmd/Ctrl+Alt+V).
+    pub const REMEMBER_INTERPRETATION: &str = "motion.file.remember_interpretation";
+    pub const APPLY_INTERPRETATION: &str = "motion.file.apply_interpretation";
     /// Composition ▸ Crop Comp to Region of Interest / to Selected Layer(s)
     /// Bounds.
     pub const CROP_TO_ROI: &str = "motion.comp.crop_comp_to_region_of_interest";
@@ -256,6 +269,24 @@ pub mod ids {
     pub const FOCUS_TO_POI: &str = "motion.layer.link_focus_distance_to_point_of_interest";
     pub const LINK_FOCUS_TO_LAYER: &str = "motion.layer.link_focus_distance_to_layer";
     pub const SET_FOCUS_TO_LAYER: &str = "motion.layer.set_focus_distance_to_layer";
+    /// Help ▸ Enable Logging (a toggle: debug-level lines in the session log)
+    /// and Reveal Logging File.
+    pub const ENABLE_LOGGING: &str = "motion.help.enable_logging";
+    /// File ▸ Dependencies ▸ Remove Unused Footage / Consolidate All Footage /
+    /// Reduce Project (the items selected in the Project panel are kept).
+    pub const REMOVE_UNUSED: &str = "motion.file.remove_unused_footage";
+    /// File ▸ Dependencies ▸ Find Missing Footage: the Project panel lists the
+    /// footage whose file is not found.
+    pub const FIND_MISSING_FOOTAGE: &str = "motion.file.find_missing_footage";
+    /// File ▸ Dependencies ▸ Find Missing Effects / Fonts: the Project panel
+    /// lists the comps that use them.
+    pub const FIND_MISSING_EFFECTS: &str = "motion.file.find_missing_effects";
+    pub const FIND_MISSING_FONTS: &str = "motion.file.find_missing_fonts";
+    /// Help ▸ System Compatibility Report…
+    pub const SYSTEM_REPORT: &str = "motion.help.system_compatibility_report";
+    pub const CONSOLIDATE: &str = "motion.file.consolidate_all_footage";
+    pub const REDUCE_PROJECT: &str = "motion.file.reduce_project";
+    pub const REVEAL_LOG: &str = "motion.help.reveal_logging_file";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -371,11 +402,17 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::COMP_FLOWCHART, "Composition Flowchart"),
     (ids::REVEAL_COMP_IN_PROJECT, "Reveal Composition in Project"),
     (ids::NEW_LAYER, "New"),
+    (ids::TEXT_ORIENTATION, "Text Orientation"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
     (ids::IMPORT_SOLID, "Solid..."),
     (ids::IMPORT_PLACEHOLDER, "Placeholder..."),
+    (ids::REPLACE_WITH_SOLID, "Replace Footage: Solid..."),
+    (
+        ids::REPLACE_WITH_PLACEHOLDER,
+        "Replace Footage: Placeholder...",
+    ),
     (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
@@ -468,6 +505,12 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EDIT_LABEL_COLORS, "Edit Label Colors..."),
     (ids::SEPARATE_DIMENSIONS, "Separate Dimensions"),
     (ids::CAMERA_SETTINGS, "Camera Settings..."),
+    (
+        ids::REVEAL_SOURCE_IN_PROJECT,
+        "Reveal Layer Source in Project",
+    ),
+    (ids::REMEMBER_INTERPRETATION, "Remember Interpretation"),
+    (ids::APPLY_INTERPRETATION, "Apply Interpretation"),
     (ids::CROP_TO_ROI, "Crop Comp to Region of Interest"),
     (ids::CROP_TO_LAYERS, "Crop Comp to Selected Layer(s) Bounds"),
     (
@@ -476,6 +519,15 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ),
     (ids::LINK_FOCUS_TO_LAYER, "Link Focus Distance to Layer"),
     (ids::SET_FOCUS_TO_LAYER, "Set Focus Distance to Layer"),
+    (ids::ENABLE_LOGGING, "Enable Logging"),
+    (ids::REMOVE_UNUSED, "Remove Unused Footage"),
+    (ids::FIND_MISSING_FOOTAGE, "Find Missing Footage"),
+    (ids::FIND_MISSING_EFFECTS, "Find Missing Effects"),
+    (ids::FIND_MISSING_FONTS, "Find Missing Fonts"),
+    (ids::SYSTEM_REPORT, "System Compatibility Report..."),
+    (ids::CONSOLIDATE, "Consolidate All Footage"),
+    (ids::REDUCE_PROJECT, "Reduce Project"),
+    (ids::REVEAL_LOG, "Reveal Logging File"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -490,6 +542,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
     (ids::TRACK_MOTION, "Track Motion"),
+    (ids::TRACK_CAMERA, "Track Camera"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
@@ -521,6 +574,11 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         ids::PLAY,
         r#"{"preview":"numpad0"}"#,
         "Play/Stop (Numpad 0)",
+    ),
+    (
+        ids::PLAY,
+        r#"{"preview":"shift_numpad0"}"#,
+        "Play/Stop (Shift + Numpad 0)",
     ),
     (
         ids::BLENDING_MODE_STEP,
@@ -1184,6 +1242,107 @@ fn transform_edits(
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
+/// Help ▸ System Compatibility Report…: AE's report (no known conflicts) and
+/// the system components BAE runs on.
+fn system_report(cx: &PanelContext<'_>) {
+    use bae_ui::tr;
+    let mut lines = vec![format!("BAE : {}", bae_platform::version_details())];
+    lines.push(format!(
+        "{} : {} {}",
+        tr("Operating System"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
+    if let Some(gpu) = cx.resources.get::<std::sync::Arc<bae_gpu::GpuContext>>() {
+        let a = gpu.adapter_info();
+        lines.push(format!(
+            "{} : {} ({:?}) {} {}",
+            tr("Video"),
+            a.name,
+            a.backend,
+            a.driver,
+            a.driver_info
+        ));
+    }
+    let message = format!(
+        "{}\n\n{}\n\n{}",
+        tr("No conflicts to report."),
+        tr("System Components:"),
+        lines.join("\n")
+    );
+    crate::dialogs::alert(cx, tr("System Compatibility Report"), message);
+}
+
+/// File ▸ Dependencies ▸ Remove Unused Footage, Consolidate All Footage and
+/// Reduce Project, then AE's alert with how many items went.
+fn clean_up(cx: &mut PanelContext<'_>, session: &SharedSession, id: &str) {
+    use bae_motion::cleanup;
+    use bae_ui::tr;
+    let stage = cx.stage;
+    let (command, title, n) = match id {
+        ids::REMOVE_UNUSED => (
+            "item.remove_unused",
+            "Remove Unused Footage",
+            cleanup::unused_footage(stage).len(),
+        ),
+        ids::CONSOLIDATE => (
+            "item.consolidate",
+            "Consolidate All Footage",
+            cleanup::duplicate_footage(stage).len(),
+        ),
+        _ => {
+            let keep = session.lock().selected_items.clone();
+            if keep.is_empty() {
+                crate::dialogs::alert(
+                    cx,
+                    tr("Reduce Project"),
+                    tr("Reduce Project removes all items from the project that are not used directly or indirectly by the selected items. Select one or more items before using this command.").to_owned(),
+                );
+                return;
+            }
+            let n = cleanup::unused_by(stage, &keep).len();
+            if n > 0 {
+                cx.invoke_with("item.reduce", json!({ "items": keep }));
+            }
+            let message = match n {
+                0 => tr("All project items are used directly or indirectly by the selected items. No items were removed.").to_owned(),
+                1 => tr("Removed one item not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.").to_owned(),
+                n => tr("Removed {n} items not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.").replace("{n}", &n.to_string()),
+            };
+            crate::dialogs::alert(cx, tr("Reduce Project"), message);
+            return;
+        }
+    };
+    if n > 0 {
+        cx.invoke_with(command, json!({}));
+    }
+    let message = if id == ids::REMOVE_UNUSED {
+        tr("{n} footage or folder items removed.")
+    } else {
+        tr("{n} footage or folder items consolidated.")
+    };
+    crate::dialogs::alert(cx, tr(title), message.replace("{n}", &n.to_string()));
+}
+
+/// The footage item File ▸ Replace Footage acts on: the first footage or solid
+/// selected in the Project panel, else the selected layer's source.
+fn footage_to_replace(stage: &bae_model::Stage, session: &SharedSession) -> Option<PrimPath> {
+    let asset = |p: &PrimPath| {
+        stage
+            .prim(p)
+            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+    };
+    let s = session.lock();
+    if let Some(item) = s.selected_items.iter().find(|p| asset(p)) {
+        return Some(item.clone());
+    }
+    let layer = s.selected_layers.first()?;
+    let source = stage
+        .prim(layer)
+        .and_then(|v| v.value("source").and_then(|v| v.as_prim_ref()).cloned())?;
+    asset(&source).then_some(source)
+}
+
 /// File ▸ Add Footage to Comp: the selected Project items (not folders) as
 /// layers of the active comp, the first one on top (AE).
 fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -1393,6 +1552,13 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::TRACK_CAMERA {
+        let layers = session.lock().selected_layers.clone();
+        if !layers.is_empty() && layers.iter().all(|l| !query::is_locked(stage, l)) {
+            crate::effects::apply(cx, &layers, bae_motion::camera_track::MATCH_NAME);
+        }
+        return true;
+    }
     if id == ids::CACHE_WHEN_IDLE {
         if let Some(store) = cx.resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
             let mut prefs = (*store.current()).clone();
@@ -1455,6 +1621,77 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::CAMERA_SETTINGS => {
             if let Some(camera) = camera_settings_target(stage, session) {
                 crate::dialogs::layer_settings(cx, session, &camera);
+            }
+            return true;
+        }
+        ids::FIND_MISSING_EFFECTS | ids::FIND_MISSING_FONTS => {
+            let term = if id == ids::FIND_MISSING_EFFECTS {
+                crate::project::MISSING_EFFECTS
+            } else {
+                crate::project::MISSING_FONTS
+            };
+            session.lock().project_search = Some(bae_ui::tr(term).to_owned());
+            cx.open_panel("project");
+            return true;
+        }
+        ids::FIND_MISSING_FOOTAGE => {
+            session.lock().project_search =
+                Some(bae_ui::tr(crate::project::MISSING_FOOTAGE).to_owned());
+            cx.open_panel("project");
+            return true;
+        }
+        ids::SYSTEM_REPORT => {
+            system_report(cx);
+            return true;
+        }
+        ids::REMOVE_UNUSED | ids::CONSOLIDATE | ids::REDUCE_PROJECT => {
+            clean_up(cx, session, id);
+            return true;
+        }
+        ids::ENABLE_LOGGING => {
+            bae_platform::logging::set_verbose(!bae_platform::logging::verbose());
+            return true;
+        }
+        ids::REVEAL_LOG => {
+            if let Some(file) = bae_platform::logging::current_log_file() {
+                bae_platform::logging::flush();
+                bae_platform::reveal(&file);
+            }
+            return true;
+        }
+        ids::REVEAL_SOURCE_IN_PROJECT | ids::REVEAL_COMP_IN_PROJECT => {
+            let item = {
+                let s = session.lock();
+                if id == ids::REVEAL_COMP_IN_PROJECT {
+                    s.active_comp.clone()
+                } else {
+                    s.selected_layers.first().and_then(|l| {
+                        stage
+                            .prim(l)
+                            .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned())
+                    })
+                }
+            };
+            if let Some(item) = item {
+                let mut s = session.lock();
+                s.selected_items = vec![item.clone()];
+                s.reveal_in_project = Some(item);
+                drop(s);
+                cx.open_panel("project");
+            }
+            return true;
+        }
+        ids::REMEMBER_INTERPRETATION | ids::APPLY_INTERPRETATION => {
+            use crate::dialogs::interpret_footage::InterpretFootage;
+            let selected = session.lock().selected_items.clone();
+            let Some(current) = InterpretFootage::new(stage, &selected) else {
+                return true;
+            };
+            if id == ids::REMEMBER_INTERPRETATION {
+                session.lock().remembered_interpretation = Some(current.settings());
+            } else if let Some(mut params) = session.lock().remembered_interpretation.clone() {
+                params["items"] = json!(current.items());
+                cx.invoke_with("footage.interpret", params);
             }
             return true;
         }
@@ -1577,6 +1814,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             let prefs = crate::prefs::current(cx.resources);
             let still = crate::import::ImportDefaults::of(&prefs).still_duration;
             crate::dialogs::comp_from_selection(cx, items, still);
+            return true;
+        }
+        ids::REPLACE_WITH_SOLID | ids::REPLACE_WITH_PLACEHOLDER => {
+            if let Some(item) = footage_to_replace(stage, session) {
+                crate::dialogs::replace_footage_with(
+                    cx,
+                    session,
+                    item,
+                    id == ids::REPLACE_WITH_SOLID,
+                );
+            }
             return true;
         }
         ids::IMPORT_SOLID => {
@@ -1704,6 +1952,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::dialogs::precompose(cx, layers);
             return true;
         }
+        ids::TEXT_ORIENTATION => {
+            let layers: Vec<_> = session
+                .lock()
+                .selected_layers
+                .iter()
+                .filter(|l| {
+                    query::layer_kind(stage, l).as_deref() == Some("text")
+                        && !query::is_locked(stage, l)
+                })
+                .cloned()
+                .collect();
+            if !layers.is_empty() {
+                cx.invoke_with(
+                    "text.convert_orientation",
+                    json!({"layers":layers,"orientation":inv.params["orientation"]}),
+                );
+            }
+            return true;
+        }
         ids::LAYER_SETTINGS => {
             let project = cx.panel.kind() == "project";
             if let Some(target) = layer_settings_target(cx.stage, session, project) {
@@ -1790,15 +2057,22 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if s.is_playing() {
                 s.stop_preview(&info);
             } else {
+                use crate::session::PreviewShortcut;
+                let editing = s.preview.selected;
+                s.preview.selected = match inv.params["preview"].as_str() {
+                    Some("numpad0") => PreviewShortcut::Numpad,
+                    Some("shift_numpad0") => PreviewShortcut::ShiftNumpad,
+                    Some("panel") => editing,
+                    _ => PreviewShortcut::Space,
+                };
                 s.preview(cx, &info);
+                s.preview.selected = editing;
+                // AE: playback neither moves the keyboard focus nor switches
+                // tabs (the timeline's [ ] Delete and marker keys keep working).
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
         ids::COMP_FLOWCHART => cx.open_panel("flowchart"),
-        ids::REVEAL_COMP_IN_PROJECT => {
-            s.selected_items = vec![info.path.clone()];
-            cx.open_panel("project");
-        }
         ids::MINI_FLOW => {
             s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
                 stage, &info.path,
@@ -3048,6 +3322,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Open Layer Source", "打开图层源"),
     ("Add Footage to Comp", "将素材添加到合成"),
     ("Edit Original...", "编辑原稿..."),
+    ("Replace Footage: Solid...", "替换素材：纯色..."),
+    ("Replace Footage: Placeholder...", "替换素材：占位符..."),
+    ("Reveal Layer Source in Project", "在项目中显示图层源"),
+    ("Remember Interpretation", "记住解释"),
+    ("Apply Interpretation", "应用解释"),
     // AE 2026 zh_CN menus.
     ("Crop Comp to Region of Interest", "裁剪合成到目标区域"),
     (
@@ -3060,6 +3339,47 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Link Focus Distance to Layer", "将焦距链接到图层"),
     ("Set Focus Distance to Layer", "将焦距设置为图层"),
+    ("Enable Logging", "启用日志记录"),
+    // File ▸ Dependencies (AE 2026 zh_CN: menu items and their alerts).
+    ("Remove Unused Footage", "删除未用过的素材"),
+    ("Find Missing Footage", "查找缺失的素材"),
+    ("Find Missing Effects", "查找缺失的效果"),
+    ("Find Missing Fonts", "查找缺失的字体"),
+    ("Missing Effects", "缺失效果"),
+    ("Missing Fonts", "缺失字体"),
+    ("Missing Footage", "缺失素材"),
+    ("System Compatibility Report...", "系统兼容性报告..."),
+    ("System Compatibility Report", "系统兼容性报告"),
+    ("No conflicts to report.", "无任何冲突要报告。"),
+    ("System Components:", "系统组件:"),
+    ("Operating System", "操作系统"),
+    ("Consolidate All Footage", "整合所有素材"),
+    ("Reduce Project", "减少项目"),
+    (
+        "{n} footage or folder items removed.",
+        "{n} 个素材或文件夹项目已移除。",
+    ),
+    (
+        "{n} footage or folder items consolidated.",
+        "{n} 个素材或文件夹项目已整合。",
+    ),
+    (
+        "Reduce Project removes all items from the project that are not used directly or indirectly by the selected items. Select one or more items before using this command.",
+        "“减少项目”会从项目中删除所选项没有直接或间接使用的所有项。请在使用此命令之前选择一个或多个项。",
+    ),
+    (
+        "All project items are used directly or indirectly by the selected items. No items were removed.",
+        "所有项目项都由所选项直接或间接使用。没有删除任何项。",
+    ),
+    (
+        "Removed one item not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.",
+        "已删除所选项没有使用的一项。如果您愿意，可以撤消。\n警告: 不保留仅由表达式引用的项。",
+    ),
+    (
+        "Removed {n} items not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.",
+        "已删除所选项没有使用的 {n} 项。如果您愿意，可以撤消。\n警告: 不保留仅由表达式引用的项。",
+    ),
+    ("Reveal Logging File", "显示日志记录文件"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

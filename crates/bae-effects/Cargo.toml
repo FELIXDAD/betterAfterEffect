@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+bae-vision.workspace = true
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 roxmltree = "0.21.2"
 glam.workspace = true

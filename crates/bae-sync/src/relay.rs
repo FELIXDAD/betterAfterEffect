@@ -4,7 +4,10 @@
 //! [`Transport`] per connected client. The relay keeps every document as a plain
 //! Loro document ([`MemDocs`]) and runs one [`SyncSession`] per client against it,
 //! so whatever one client sends reaches all others, and a client that reconnects
-//! gets exactly what it missed.
+//! gets exactly what it missed. Each session holds document data back while its
+//! peer's transport lags ([`crate::SessionConfig::max_backlog`]), so a client
+//! that reads slowly does not make the relay queue the project again for each
+//! of its `Hello`s.
 
 use std::time::{Duration, Instant};
 
@@ -248,7 +251,8 @@ impl Relay {
     }
 
     /// Send every peer what it is missing right now, ignoring each session's
-    /// `min_send_interval` (see [`SyncSession::flush`]); nothing is received.
+    /// `min_send_interval` and `max_backlog` (see [`SyncSession::flush`]);
+    /// nothing is received.
     /// Call it after the last [`pump`](Self::pump) before dropping the relay, or
     /// edits held back for a peer connected with
     /// [`connect_with`](Self::connect_with) are never sent. Peers whose transport
