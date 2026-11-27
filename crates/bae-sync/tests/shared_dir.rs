@@ -640,13 +640,16 @@ fn threaded_transport_moves_io_off_the_caller() {
 
 // ---- cleanup of departed clients (spec §4.7) ----
 
-/// Clients idle for an hour count as departed; a cleanup pass on every poll; no
-/// taking over of logs nobody holds (tests that want it turn it on).
+/// Clients idle for an hour count as departed; a cleanup pass on every poll,
+/// done in one go (no time budget: a slow machine must not split a pass the
+/// tests expect to finish); no taking over of logs nobody holds (tests that
+/// want it turn it on).
 fn cleaner() -> DirConfig {
     DirConfig {
         inactive_after: Some(Duration::from_secs(3600)),
         cleanup_interval: Duration::ZERO,
         absorb_departed: false,
+        cleanup_budget: Duration::MAX,
         ..fast()
     }
 }

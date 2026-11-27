@@ -58,6 +58,9 @@ const RECORD_HEADER: usize = 12;
 const MAX_RECORD: usize = 1 << 30;
 const MAX_HEADER: usize = 64 * 1024;
 const MAX_DEPTH: usize = 16;
+/// The cleanup reads a log at most this much at a time (§4.7): a poll that
+/// reads a large log on a slow share stops after this and goes on at the next.
+const SUMMARY_CHUNK: u64 = 8 << 20;
 /// `client` of the `Hello`s the folder sends.
 const FOLDER_CLIENT: &str = "shared-folder";
 
@@ -87,10 +90,22 @@ pub struct DirConfig {
     /// long after the first scan.
     pub cleanup_interval: Duration,
     /// When a departed client's log is not held by any other log, ask our session
-    /// for a snapshot of that document (at most once per pass, and again only
-    /// after the folder changed) so our own log holds it and a later pass can
-    /// delete it.
+    /// for a snapshot of that document (again only after the folder changed) so
+    /// our own log holds it and a later pass can delete it.
     pub absorb_departed: bool,
+    /// At most this many documents are taken over (`absorb_departed`) per pass:
+    /// the session answers every request of one pump at once, each a whole
+    /// snapshot exported on the thread that owns the stage. The others are
+    /// taken over in later passes.
+    pub absorb_per_pass: usize,
+    /// About how long one poll may spend on a cleanup pass. The cleanup runs
+    /// inside `recv` (on the transport's thread), and a first pass reads every
+    /// log of a document a departed client wrote to from its start; on a slow
+    /// share that would hold up reading and writing for long. A pass that needs
+    /// more goes on at the next poll where it stopped (what it read is kept in
+    /// its summaries). Checked between logs and between chunks of 8 MiB of one
+    /// log; every poll reads at least one, so a pass always ends.
+    pub cleanup_budget: Duration,
 }
 
 impl Default for DirConfig {
@@ -104,6 +119,8 @@ impl Default for DirConfig {
             inactive_after: Some(Duration::from_secs(3 * 24 * 3600)),
             cleanup_interval: Duration::from_secs(10 * 60),
             absorb_departed: true,
+            absorb_per_pass: 1,
+            cleanup_budget: Duration::from_millis(50),
         }
     }
 }
@@ -181,8 +198,14 @@ pub struct DirStats {
     /// (records it had not imported), so they were appended to the log instead
     /// of replacing it.
     pub snapshots_appended: u64,
-    /// Cleanup passes run (§4.7).
+    /// Cleanup passes started (§4.7).
     pub cleanups: u64,
+    /// Polls that worked on a cleanup pass: more than `cleanups` when passes
+    /// were split (`DirConfig::cleanup_budget`).
+    pub cleanup_slices: u64,
+    /// Reads of logs for the cleanup: each reads from where the last read of
+    /// that log stopped, at most 8 MiB.
+    pub cleanup_reads: u64,
     /// Departed clients' logs deleted because another log holds all of them.
     pub logs_removed: u64,
     /// Leftover temporary files of crashed writers and lock files of departed
@@ -221,6 +244,69 @@ struct LogSummary {
     /// ... and nothing follows the last of them (no torn or corrupt tail). Only
     /// then is `vmax` known to bound everything in the log.
     complete: bool,
+    /// Only part of the bytes at `stamp` were read (`SUMMARY_CHUNK`): not
+    /// `complete`, and the next read goes on from `end`.
+    partial: bool,
+}
+
+/// A cleanup pass (§4.7) under way: what its start listed, and the documents
+/// still to do. A pass may take several polls (`DirConfig::cleanup_budget`).
+/// What it decides from the listing is checked again right before anything is
+/// deleted (the log, the owner's presence file and lock, the container), so a
+/// listing a few polls old only widens the moment the owner could come back
+/// in, which those checks cover as before.
+#[derive(Debug)]
+struct CleanupPass {
+    /// "Now" on the file server's clock at the start (`server_now`). Later
+    /// slices use it too: files only look younger.
+    now: SystemTime,
+    after: Duration,
+    /// Our `owner_key`.
+    us: String,
+    /// Documents with logs of departed clients still to do: their logs
+    /// (owner, path).
+    docs: VecDeque<(DocKey, Vec<(String, PathBuf)>)>,
+    /// Lock files in `updates/` (owner, path), done last.
+    locks: Vec<(String, PathBuf)>,
+    /// How long each client (`owner_key`) has been idle.
+    idle: BTreeMap<String, Duration>,
+    /// Logs each client still has.
+    left: BTreeMap<String, usize>,
+    /// Documents taken over so far (`DirConfig::absorb_per_pass`).
+    absorbed: usize,
+}
+
+impl CleanupPass {
+    /// Whether `owner` counts as departed (rule 1, by the listing).
+    fn gone(&self, owner: &str) -> bool {
+        let key = owner_key(owner);
+        key != self.us
+            && ClientId::new(owner).is_ok()
+            && self.idle.get(&key).is_none_or(|&age| age > self.after)
+    }
+}
+
+/// How much one poll may still do of a cleanup pass.
+#[derive(Debug)]
+struct Budget {
+    /// `None`: no limit.
+    deadline: Option<Instant>,
+    /// Something was read or done: from now on the deadline counts (so every
+    /// poll gets something done).
+    worked: bool,
+}
+
+impl Budget {
+    fn new(time: Duration) -> Self {
+        Budget {
+            deadline: Instant::now().checked_add(time),
+            worked: false,
+        }
+    }
+
+    fn spent(&self) -> bool {
+        self.worked && self.deadline.is_some_and(|d| Instant::now() >= d)
+    }
 }
 
 /// Whether a cleanup may run while holding a departed client's lock.
@@ -258,8 +344,10 @@ pub struct DirTransport {
     stats: DirStats,
     /// `(len, mtime)` of other clients' presence files when last read.
     presence_seen: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
-    /// When the last cleanup pass ran (set at the first scan).
+    /// When the last cleanup pass started (set at the first scan).
     last_cleanup: Option<Instant>,
+    /// The cleanup pass under way, if it did not finish in one poll.
+    pass: Option<CleanupPass>,
     /// Cleanup summaries of logs, reused while a log's `(len, mtime)` is unchanged.
     summaries: BTreeMap<PathBuf, LogSummary>,
     /// Documents we asked our session to snapshot to take over a departed log,
@@ -320,6 +408,7 @@ impl DirTransport {
             stats: DirStats::default(),
             presence_seen: BTreeMap::new(),
             last_cleanup: None,
+            pass: None,
             summaries: BTreeMap::new(),
             absorbed: BTreeMap::new(),
             server_clock: None,
@@ -1026,30 +1115,53 @@ impl DirTransport {
         let Some(after) = self.config.inactive_after else {
             return;
         };
-        let now = Instant::now();
-        if self
-            .last_cleanup
-            .is_some_and(|t| now.saturating_duration_since(t) < self.config.cleanup_interval)
-        {
-            return;
+        let mut pass = match self.pass.take() {
+            Some(pass) => pass,
+            None => {
+                let now = Instant::now();
+                if self.last_cleanup.is_some_and(|t| {
+                    now.saturating_duration_since(t) < self.config.cleanup_interval
+                }) {
+                    return;
+                }
+                self.last_cleanup = Some(now);
+                self.stats.cleanups += 1;
+                match self.start_cleanup(after) {
+                    Some(pass) => pass,
+                    None => return,
+                }
+            }
+        };
+        self.stats.cleanup_slices += 1;
+        let mut budget = Budget::new(self.config.cleanup_budget);
+        if self.run_cleanup(&mut pass, &mut budget) {
+            self.finish_cleanup(pass);
+        } else {
+            self.pass = Some(pass);
         }
-        self.last_cleanup = Some(now);
-        self.stats.cleanups += 1;
-        self.cleanup(after);
     }
 
-    /// One cleanup pass. File-system errors only skip the file in question (and
-    /// end up in `last_error`); the transport keeps working.
-    fn cleanup(&mut self, after: Duration) {
-        let Some(now) = self.server_now() else {
-            return;
-        };
+    /// The start of a cleanup pass: list the files, delete leftover temporary
+    /// files, and find the documents with logs of departed clients. `None` (no
+    /// pass) if the file server's clock cannot be read. File-system errors only
+    /// skip the file in question (and end up in `last_error`); the transport
+    /// keeps working.
+    fn start_cleanup(&mut self, after: Duration) -> Option<CleanupPass> {
+        let now = self.server_now()?;
         // Logs by document, lock files, and how long each client has been idle
         // (the youngest of its logs and presence file). Clients are told apart
         // by `owner_key`, ignoring case.
         let mut logs: BTreeMap<DocKey, Vec<(String, PathBuf)>> = BTreeMap::new();
-        let mut locks: Vec<(String, PathBuf)> = Vec::new();
-        let mut idle: BTreeMap<String, Duration> = BTreeMap::new();
+        let mut pass = CleanupPass {
+            now,
+            after,
+            us: owner_key(self.client.as_str()),
+            docs: VecDeque::new(),
+            locks: Vec::new(),
+            idle: BTreeMap::new(),
+            left: BTreeMap::new(),
+            absorbed: 0,
+        };
         let mut files = Vec::new();
         walk_files(&self.root.join(UPDATES), String::new(), 0, &mut files);
         for (rel, name, path) in files {
@@ -1065,13 +1177,13 @@ impl DirTransport {
             };
             if rel.is_empty() {
                 if ext == LOCK_EXT {
-                    locks.push((stem, path));
+                    pass.locks.push((stem, path));
                 }
             } else if ext == LOG_EXT
                 && let Ok(doc) = DocKey::parse(&rel)
                 && let Some(age) = file_age(&path, now)
             {
-                note_idle(&mut idle, &stem, age);
+                note_idle(&mut pass.idle, &stem, age);
                 logs.entry(doc).or_default().push((stem, path));
             }
         }
@@ -1087,48 +1199,67 @@ impl DirTransport {
                 } else if let Some(owner) = name.strip_suffix(&suffix)
                     && let Some(age) = file_age(&path, now)
                 {
-                    note_idle(&mut idle, owner, age);
+                    note_idle(&mut pass.idle, owner, age);
                 }
             }
         }
-        let us = owner_key(self.client.as_str());
-        let gone = |owner: &str| {
-            let key = owner_key(owner);
-            key != us
-                && ClientId::new(owner).is_ok()
-                && idle.get(&key).is_none_or(|&age| age > after)
-        };
         let all: BTreeSet<&PathBuf> = logs.values().flatten().map(|(_, p)| p).collect();
         self.summaries.retain(|p, _| all.contains(p));
-        let mut left: BTreeMap<String, usize> = BTreeMap::new();
         for (owner, _) in logs.values().flatten() {
-            *left.entry(owner_key(owner)).or_default() += 1;
+            *pass.left.entry(owner_key(owner)).or_default() += 1;
         }
-        for (doc, entries) in logs {
-            if !entries.iter().any(|(owner, _)| gone(owner)) {
-                continue;
+        pass.docs = logs
+            .into_iter()
+            .filter(|(_, entries)| entries.iter().any(|(owner, _)| pass.gone(owner)))
+            .collect();
+        Some(pass)
+    }
+
+    /// Work on `pass` until it is done (`true`) or `budget` is spent; then it
+    /// goes on where it stopped at the next poll. A document whose logs were not
+    /// all read yet is taken up again from its start: what was read is in the
+    /// summaries, so only the rest is read.
+    fn run_cleanup(&mut self, pass: &mut CleanupPass, budget: &mut Budget) -> bool {
+        while let Some((doc, entries)) = pass.docs.pop_front() {
+            if budget.spent() {
+                pass.docs.push_front((doc, entries));
+                return false;
             }
-            for owner in self.cleanup_doc(&doc, entries, &gone, now, after) {
-                if let Some(n) = left.get_mut(&owner_key(&owner)) {
-                    *n -= 1;
+            match self.cleanup_doc(&doc, &entries, pass, budget) {
+                Some(removed) => {
+                    budget.worked = true;
+                    for owner in removed {
+                        if let Some(n) = pass.left.get_mut(&owner_key(&owner)) {
+                            *n -= 1;
+                        }
+                    }
+                }
+                None => {
+                    pass.docs.push_front((doc, entries));
+                    return false;
                 }
             }
         }
-        // Lock files of departed clients without logs: only while we hold the
-        // lock, so no session of theirs runs. One that opened the file just
-        // before we delete it finds it gone once it gets the lock, and takes a
-        // new one (`lock_client`).
-        for (owner, path) in locks {
-            if !gone(&owner)
-                || left.get(&owner_key(&owner)).is_some_and(|&n| n > 0)
-                || file_age(&path, now).is_none_or(|age| age <= after)
+        true
+    }
+
+    /// The end of a cleanup pass: lock files of departed clients without logs,
+    /// only while we hold the lock, so no session of theirs runs. One that
+    /// opened the file just before we delete it finds it gone once it gets the
+    /// lock, and takes a new one (`lock_client`).
+    fn finish_cleanup(&mut self, pass: CleanupPass) {
+        let (now, after) = (pass.now, pass.after);
+        for (owner, path) in &pass.locks {
+            if !pass.gone(owner)
+                || pass.left.get(&owner_key(owner)).is_some_and(|&n| n > 0)
+                || file_age(path, now).is_none_or(|age| age <= after)
             {
                 continue;
             }
-            if let OwnerLock::Held(guard) = self.lock_owner(&owner) {
-                match fs::remove_file(&path) {
+            if let OwnerLock::Held(guard) = self.lock_owner(owner) {
+                match fs::remove_file(path) {
                     Ok(()) => self.stats.stale_files_removed += 1,
-                    Err(e) => self.note_cleanup_error(&path, e),
+                    Err(e) => self.note_cleanup_error(path, e),
                 }
                 drop(guard);
             }
@@ -1136,38 +1267,39 @@ impl DirTransport {
     }
 
     /// The part of a cleanup pass for `doc`, whose logs are `entries` (owner,
-    /// path). Returns the owners whose log was deleted.
+    /// path). Returns the owners whose log was deleted; `None` if `budget` ran
+    /// out before every log needed was read (nothing was deleted then).
     fn cleanup_doc(
         &mut self,
         doc: &DocKey,
-        entries: Vec<(String, PathBuf)>,
-        gone: &dyn Fn(&str) -> bool,
-        now: SystemTime,
-        after: Duration,
-    ) -> Vec<String> {
+        entries: &[(String, PathBuf)],
+        pass: &mut CleanupPass,
+        budget: &mut Budget,
+    ) -> Option<Vec<String>> {
+        let (now, after) = (pass.now, pass.after);
         // The departed owners' logs first: unless one of them could go, the
         // others need not be read at all.
         let (departed, others): (Vec<_>, Vec<_>) =
-            entries.into_iter().partition(|(owner, _)| gone(owner));
+            entries.iter().partition(|(owner, _)| pass.gone(owner));
         let mut logs: Vec<(String, PathBuf, LogSummary)> = Vec::new();
         for (owner, path) in departed {
-            if let Some(summary) = self.summary(doc, &path, false) {
-                logs.push((owner, path, summary));
+            if let Some(summary) = self.whole_summary(doc, path, budget)? {
+                logs.push((owner.clone(), path.clone(), summary));
             }
         }
         if !logs.iter().any(|(.., l)| l.complete) {
-            return Vec::new();
+            return Some(Vec::new());
         }
         for (owner, path) in others {
-            if let Some(summary) = self.summary(doc, &path, false) {
-                logs.push((owner, path, summary));
+            if let Some(summary) = self.whole_summary(doc, path, budget)? {
+                logs.push((owner.clone(), path.clone(), summary));
             }
         }
         let mut deleted = vec![false; logs.len()];
         let mut removed = Vec::new();
         for i in 0..logs.len() {
             let (x, l_path, l) = logs[i].clone();
-            if !gone(&x) || !l.complete {
+            if !pass.gone(&x) || !l.complete {
                 continue;
             }
             let containers: Vec<usize> = (0..logs.len())
@@ -1181,7 +1313,7 @@ impl DirTransport {
                     .zip(&deleted)
                     .find(|((owner, ..), del)| !**del && owner == self.client.as_str())
                     .map(|((.., summary), _)| summary.clone());
-                self.maybe_absorb(doc, &l.vmax, ours.as_ref());
+                self.maybe_absorb(doc, &l.vmax, ours.as_ref(), pass);
                 continue;
             }
             // The first container that still holds L on disk (rule 3): one that
@@ -1206,7 +1338,7 @@ impl DirTransport {
                 }
             }
         }
-        removed
+        Some(removed)
     }
 
     /// Delete the departed client `owner`'s log at `path` (summarized at `stamp`)
@@ -1272,8 +1404,17 @@ impl DirTransport {
     /// that cannot help (our session lacks some of it, or does not have `doc`
     /// at all and never answers) is not repeated every pass; nothing waits for
     /// the answer. The answer replaces our log only if it holds everything in it
-    /// (`compact`).
-    fn maybe_absorb(&mut self, doc: &DocKey, vmax: &VersionVector, ours: Option<&LogSummary>) {
+    /// (`compact`). At most `absorb_per_pass` documents per pass: the session
+    /// answers all requests of one pump at once, each a whole snapshot exported
+    /// on the thread that owns the stage. The others are asked for in later
+    /// passes.
+    fn maybe_absorb(
+        &mut self,
+        doc: &DocKey,
+        vmax: &VersionVector,
+        ours: Option<&LogSummary>,
+        pass: &mut CleanupPass,
+    ) {
         if !self.config.absorb_departed {
             return;
         }
@@ -1290,15 +1431,45 @@ impl DirTransport {
         if self.absorbed.get(doc) == Some(&folder) {
             return;
         }
+        if pass.absorbed >= self.config.absorb_per_pass {
+            return;
+        }
+        pass.absorbed += 1;
         self.absorbed.insert(doc.clone(), folder);
         self.stats.absorb_requests += 1;
         self.inbox
             .push_back(Message::SnapshotRequest { doc: doc.clone() });
     }
 
+    /// [`summary`](Self::summary) read to the end of the log, a chunk at a time
+    /// (`SUMMARY_CHUNK`); `None` if `budget` ran out first (what was read is
+    /// kept: the next call goes on from there).
+    fn whole_summary(
+        &mut self,
+        doc: &DocKey,
+        path: &Path,
+        budget: &mut Budget,
+    ) -> Option<Option<LogSummary>> {
+        loop {
+            if budget.spent() {
+                return None;
+            }
+            let reads = self.stats.cleanup_reads;
+            let summary = self.summary(doc, path, false);
+            if self.stats.cleanup_reads > reads {
+                budget.worked = true;
+            }
+            match summary {
+                Some(s) if s.partial => {}
+                other => return Some(other),
+            }
+        }
+    }
+
     /// Summary of the log of `doc` at `path`: from the cache while its length
     /// and time are unchanged (unless `fresh`), otherwise from disk, reading only
-    /// what follows the cached part if the log is still the same generation.
+    /// what follows the cached part if the log is still the same generation, and
+    /// at most `SUMMARY_CHUNK` of it (then the summary is `partial`).
     fn summary(&mut self, doc: &DocKey, path: &Path, fresh: bool) -> Option<LogSummary> {
         if !fresh && let Some(cached) = self.summaries.get(path) {
             let stamp = match fs::metadata(path) {
@@ -1308,11 +1479,12 @@ impl DirTransport {
                     return None;
                 }
             };
-            if stamp.1.is_some() && cached.stamp == stamp {
+            if stamp.1.is_some() && !cached.partial && cached.stamp == stamp {
                 return Some(cached.clone());
             }
         }
-        match summarize_log(path, doc, self.summaries.get(path)) {
+        self.stats.cleanup_reads += 1;
+        match summarize_log(path, doc, self.summaries.get(path), SUMMARY_CHUNK) {
             Ok(Some(summary)) => {
                 self.summaries.insert(path.to_owned(), summary.clone());
                 Some(summary)
@@ -1728,11 +1900,15 @@ fn may_replace(m: &LogSummary, y: &str, l: &LogSummary, x: &str) -> bool {
 /// Read the log of `doc` at `path` for the cleanup. If it is still the
 /// generation `prev` (an earlier summary of it) summarized, only the bytes
 /// after `prev` are read: the owner only ever appends to a generation, so what
-/// `prev` covers is unchanged. `Ok(None)`: it changed while being read.
+/// `prev` covers is unchanged. At most about `max_read` bytes are read (more
+/// only to take in one whole record); if that is not the end of the log, the
+/// summary is `partial` and the next call goes on from there. `Ok(None)`: it
+/// changed while being read.
 fn summarize_log(
     path: &Path,
     doc: &DocKey,
     prev: Option<&LogSummary>,
+    max_read: u64,
 ) -> io::Result<Option<LogSummary>> {
     let stamp = |m: fs::Metadata| (m.len(), m.modified().ok());
     let mut f = File::open(path)?;
@@ -1747,21 +1923,43 @@ fn summarize_log(
         cont = Some(prev.clone());
     }
     let start = cont.as_ref().map_or(0, |p| p.end);
+    let size = before.0.saturating_sub(start);
+    // A record larger than `max_read` is read whole, or the next call would
+    // start at the same place again.
+    let mut want = size.min(max_read.max(1));
+    if want < size {
+        f.seek(SeekFrom::Start(start))?;
+        let mut head = [0u8; RECORD_HEADER];
+        if f.read_exact(&mut head).is_ok() {
+            let len = u64::from(u32::from_le_bytes(head[..4].try_into().expect("4 bytes")));
+            if len <= MAX_RECORD as u64 {
+                want = want.max((RECORD_HEADER as u64 + len).min(size));
+            }
+        }
+    }
     f.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
-    f.read_to_end(&mut bytes)?;
+    (&mut f).take(want).read_to_end(&mut bytes)?;
     let after = stamp(f.metadata()?);
-    if before != after || after.0 != start + bytes.len() as u64 {
+    if before != after || bytes.len() as u64 != want {
         return Ok(None);
     }
-    Ok(Some(match cont {
+    let partial = want < size;
+    let mut summary = match cont {
         Some(mut summary) => {
             summary.stamp = after;
             summary.extend(&bytes, doc);
             summary
         }
         None => summarize(&bytes, doc, after),
-    }))
+    };
+    if partial {
+        summary.partial = true;
+        summary.complete = false;
+    } else {
+        summary.partial = false;
+    }
+    Ok(Some(summary))
 }
 
 /// Summary of the whole log `bytes` of `doc` (read at `stamp`).
@@ -1775,6 +1973,7 @@ fn summarize(bytes: &[u8], doc: &DocKey, stamp: (u64, Option<SystemTime>)) -> Lo
         vmax: VersionVector::new(),
         understood: false,
         complete: false,
+        partial: false,
     };
     let Some((payload, size)) = next_record(bytes) else {
         return summary;
@@ -2087,6 +2286,7 @@ mod tests {
             vmax: vmax.clone(),
             understood: true,
             complete: true,
+            partial: false,
         };
         let small = log(Some(&v1), &v1);
         let full = log(Some(&v2), &v2);
@@ -2302,6 +2502,7 @@ mod tests {
             inactive_after: Some(Duration::from_secs(3600)),
             cleanup_interval: Duration::ZERO,
             absorb_departed: false,
+            cleanup_budget: Duration::MAX,
             ..quick()
         };
         let mut a = transport(tmp.path(), "a", config);
@@ -2336,7 +2537,9 @@ mod tests {
         let doc = root();
         let snap = record(snapshot(&b.v1, &b.snap1));
         let upd = record(updates(&b.v2, &b.update));
-        let read = |prev: Option<&LogSummary>| summarize_log(&path, &doc, prev).unwrap().unwrap();
+        let read = |prev: Option<&LogSummary>| {
+            summarize_log(&path, &doc, prev, u64::MAX).unwrap().unwrap()
+        };
         let fields = |s: &LogSummary| {
             (
                 s.generation.clone(),
@@ -2559,6 +2762,7 @@ mod tests {
             inactive_after: Some(Duration::from_secs(3600)),
             cleanup_interval: Duration::ZERO,
             absorb_departed: false,
+            cleanup_budget: Duration::MAX,
             ..quick()
         };
         let mut a = transport(tmp.path(), "a", config.clone());
@@ -2579,5 +2783,206 @@ mod tests {
         // found it gone, and neither took y.
         assert_eq!((a.stats().logs_removed, other.stats().logs_removed), (0, 1));
         assert_eq!((a.last_error(), other.last_error()), (None, None));
+    }
+
+    fn doc_record(doc: &DocKey, snapshot: bool, version: &VersionVector, data: &[u8]) -> Vec<u8> {
+        let (doc, version, data) = (doc.clone(), version.clone(), data.to_vec());
+        record(if snapshot {
+            Message::Snapshot { doc, version, data }
+        } else {
+            Message::Updates { doc, version, data }
+        })
+    }
+
+    fn two_hours_old(path: &Path) {
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(7200))
+            .unwrap();
+    }
+
+    /// A first pass over many documents reads every log a departed client
+    /// left from its start: one poll must not do all of that (it holds up the
+    /// transport). With no time at all, each poll reads one log or checks one
+    /// container, and the pass goes on where it stopped: nothing is read twice.
+    #[test]
+    fn a_pass_over_many_documents_is_split() {
+        const N: usize = 6;
+        let b = blobs();
+        let docs: Vec<DocKey> = (0..N)
+            .map(|i| DocKey::parse(&format!("layer{i}")).unwrap())
+            .collect();
+        // x left long ago; c's logs hold all of x's.
+        let folder = || {
+            let tmp = tempfile::tempdir().unwrap();
+            for doc in &docs {
+                let dir = tmp.path().join(UPDATES).join(doc.as_str());
+                fs::create_dir_all(&dir).unwrap();
+                let x = dir.join("x.log");
+                let held = doc_record(doc, false, &b.v1, &b.snap1);
+                fs::write(&x, [header(doc.as_str()), held].concat()).unwrap();
+                two_hours_old(&x);
+                let container = doc_record(doc, true, &b.v2, &b.snap2);
+                fs::write(
+                    dir.join("c.log"),
+                    [header(doc.as_str()), container].concat(),
+                )
+                .unwrap();
+            }
+            tmp
+        };
+        let config = |budget| DirConfig {
+            inactive_after: Some(Duration::from_secs(3600)),
+            cleanup_interval: Duration::ZERO,
+            absorb_departed: false,
+            cleanup_budget: budget,
+            ..quick()
+        };
+
+        // Without a time limit, one poll does it all.
+        let tmp = folder();
+        let mut a = transport(tmp.path(), "a", config(Duration::MAX));
+        a.poll();
+        a.poll();
+        assert_eq!(a.stats().logs_removed, N as u64);
+        assert_eq!(a.stats().cleanup_slices, 1);
+
+        let tmp = folder();
+        let mut a = transport(tmp.path(), "a", config(Duration::ZERO));
+        a.poll();
+        let mut removed = vec![0];
+        while a.stats().logs_removed < N as u64 {
+            a.poll();
+            removed.push(a.stats().logs_removed);
+            assert!(removed.len() < 10 * N, "{removed:?}");
+        }
+        assert!(removed.windows(2).all(|w| w[1] - w[0] <= 1), "{removed:?}");
+        let stats = a.stats().clone();
+        assert_eq!(stats.cleanups, 1, "{stats:?}");
+        assert!(stats.cleanup_slices >= 2 * N as u64, "{stats:?}");
+        // Each log once, and each container once more right before the
+        // deletion (its header and what was appended since).
+        assert_eq!(stats.cleanup_reads, 3 * N as u64, "{stats:?}");
+        assert!(a.pass.is_none());
+        for doc in &docs {
+            assert!(
+                !tmp.path()
+                    .join(UPDATES)
+                    .join(doc.as_str())
+                    .join("x.log")
+                    .exists()
+            );
+        }
+        assert_eq!(a.last_error(), None);
+    }
+
+    /// Our session answers all snapshot requests of one pump at once, each a
+    /// whole snapshot exported on the thread that owns the stage: a pass asks
+    /// for one document to take over (`absorb_per_pass`), the next for the
+    /// next, and in the end every departed log goes.
+    #[test]
+    fn departed_logs_are_taken_over_one_document_per_pass() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let docs = [DocKey::parse("anim/a").unwrap(), root()];
+        for doc in &docs {
+            let dir = tmp.path().join(UPDATES).join(doc.as_str());
+            fs::create_dir_all(&dir).unwrap();
+            let x = dir.join("x.log");
+            let deltas = doc_record(doc, false, &b.v1, &b.snap1);
+            fs::write(&x, [header(doc.as_str()), deltas].concat()).unwrap();
+            two_hours_old(&x);
+        }
+        let config = DirConfig {
+            inactive_after: Some(Duration::from_secs(3600)),
+            cleanup_interval: Duration::ZERO,
+            cleanup_budget: Duration::MAX,
+            ..quick()
+        };
+        assert!(config.absorb_departed && config.absorb_per_pass == 1);
+        let mut a = transport(tmp.path(), "a", config);
+        a.poll();
+        a.inbox.clear();
+        // What one pass asks our session for.
+        let asked = |a: &mut DirTransport| -> Vec<DocKey> {
+            a.poll();
+            a.inbox
+                .drain(..)
+                .filter_map(|m| match m {
+                    Message::SnapshotRequest { doc } => Some(doc),
+                    _ => None,
+                })
+                .collect()
+        };
+        let first = asked(&mut a);
+        assert_eq!(first.len(), 1, "{first:?}");
+        let second = asked(&mut a);
+        assert_eq!(second.len(), 1, "{second:?}");
+        assert_ne!(first, second);
+        // Each asked once, while the folder does not change.
+        assert!(asked(&mut a).is_empty());
+        assert_eq!(a.stats().absorb_requests, 2);
+        // The answers make our logs hold x's, and the next pass deletes them.
+        for doc in first.into_iter().chain(second) {
+            a.send(Message::Snapshot {
+                doc,
+                version: b.v2.clone(),
+                data: b.snap2.clone(),
+            })
+            .unwrap();
+        }
+        a.poll();
+        assert_eq!(a.stats().logs_removed, 2);
+        for doc in &docs {
+            assert!(
+                !tmp.path()
+                    .join(UPDATES)
+                    .join(doc.as_str())
+                    .join("x.log")
+                    .exists()
+            );
+        }
+    }
+
+    /// A large log is not read in one go either: a chunk at a time, each read
+    /// going on where the last stopped (a record larger than a chunk is read
+    /// whole), with the same result as reading it all.
+    #[test]
+    fn summaries_are_read_a_chunk_at_a_time() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("x.log");
+        let b = blobs();
+        let doc = root();
+        let mut bytes = [header("root"), record(snapshot(&b.v1, &b.snap1))].concat();
+        for _ in 0..5 {
+            bytes.extend(record(updates(&b.v2, &b.update)));
+        }
+        fs::write(&path, &bytes).unwrap();
+        let fields = |s: &LogSummary| {
+            (
+                s.generation.clone(),
+                s.end,
+                s.records,
+                s.base.clone(),
+                s.vmax.clone(),
+                s.complete,
+                s.partial,
+            )
+        };
+        let whole = summarize_log(&path, &doc, None, u64::MAX).unwrap().unwrap();
+        assert!(whole.complete && !whole.partial && whole.records == 6);
+        // Every record is larger than 16 bytes.
+        let mut s = summarize_log(&path, &doc, None, 16).unwrap().unwrap();
+        let mut reads = 1;
+        while s.partial {
+            assert!(!s.complete);
+            s = summarize_log(&path, &doc, Some(&s), 16).unwrap().unwrap();
+            reads += 1;
+            assert!(reads <= 7, "no progress");
+        }
+        assert_eq!(reads, 7, "one record per read");
+        assert_eq!(fields(&s), fields(&whole));
     }
 }
