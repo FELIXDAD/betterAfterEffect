@@ -507,7 +507,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "PrefsStartupAndRepairV2", "Ctrl+Alt+;", "app.settings", r#"{"page":"startup_repair"}"#, D, Todo, BOUND_ELSEWHERE | SHADOWED),
     k("CSwitchboard", "PrevXferMode", "Shift+-", "motion.layer.blending_mode_step", r#"{"step":-1}"#, B, Done, 0),
     k("CSwitchboard", "ProjectSettings", "Ctrl+Alt+Shift+K", "motion.file.project_settings", "", E, Done, 0),
-    k("CSwitchboard", "PurgeAllMemory", "macControl+PadClear|Ctrl+Alt+PadSlash", "motion.edit.purge", r#"{"what":"all_memory"}"#, B, Later, 0),
+    k("CSwitchboard", "PurgeAllMemory", "macControl+PadClear|Ctrl+Alt+PadSlash", "motion.edit.purge", r#"{"what":"all_memory"}"#, B, Done, 0),
     k("CSwitchboard", "Quit", "Ctrl+Q", "app.quit", "", B, Done, 0),
     k("CSwitchboard", "RecentFavorite00", "Ctrl+Alt+Shift+F", "motion.anim.recent_animation_preset", "", E, Dynamic, 0),
     k("CSwitchboard", "RecentProject00", "Ctrl+Alt+Shift+P", "motion.file.open_recent", "", B, Dynamic, 0),

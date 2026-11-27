@@ -286,6 +286,15 @@ impl Document {
         self.watch_history();
     }
 
+    /// Edit ▸ Purge ▸ Undo (and All Memory): no undo or redo steps left; the
+    /// History panel empties too.
+    pub fn clear_undo(&mut self) {
+        self.project.stage.clear_undo();
+        if let Some(log) = &self.history {
+            log.clear();
+        }
+    }
+
     /// Undo steps kept (Preferences > General > Levels of Undo), now and for every
     /// project opened later.
     pub fn set_undo_limit(&mut self, limit: usize) {
@@ -661,6 +670,20 @@ mod tests {
         let labels: Vec<_> = log.entries().into_iter().map(|e| e.label).collect();
         assert_eq!(labels, ["Create Prim", "Create Prim"]);
         assert_eq!(log.entries()[1].origin, bae_model::EventOrigin::Undo);
+    }
+
+    /// Edit ▸ Purge ▸ Undo: nothing left to undo or redo, the project stays.
+    #[test]
+    fn clear_undo_forgets_the_steps_and_the_history() {
+        let log = Arc::new(HistoryLog::new());
+        let mut doc = Document::new(Some(log.clone()));
+        create(&mut doc, "/Comp1");
+        create(&mut doc, "/Comp2");
+        doc.run(&Invocation::new(ids::UNDO));
+        doc.clear_undo();
+        assert_eq!(doc.undo_state(), (None, None));
+        assert!(log.entries().is_empty());
+        assert!(has(&doc, "/Comp1") && !has(&doc, "/Comp2"));
     }
 
     #[test]
