@@ -1890,6 +1890,7 @@ impl Panel for CompositionViewer {
             &session,
             &comp,
             &view,
+            self.type_tool.editing.is_some(),
         );
 
         // Items dropped from the project panel become layers.
