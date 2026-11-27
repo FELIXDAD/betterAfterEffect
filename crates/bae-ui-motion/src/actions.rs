@@ -278,6 +278,9 @@ pub mod ids {
     /// File ▸ Dependencies ▸ Find Missing Footage: the Project panel lists the
     /// footage whose file is not found.
     pub const FIND_MISSING_FOOTAGE: &str = "motion.file.find_missing_footage";
+    /// Edit ▸ Purge ▸ … (`{"what": …}`): the memory caches here; the undo
+    /// steps and the disk cache in the shell (not handled here).
+    pub const PURGE: &str = "motion.edit.purge";
     /// File ▸ Dependencies ▸ Find Missing Effects / Fonts: the Project panel
     /// lists the comps that use them.
     pub const FIND_MISSING_EFFECTS: &str = "motion.file.find_missing_effects";
@@ -539,6 +542,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ENABLE_LOGGING, "Enable Logging"),
     (ids::REMOVE_UNUSED, "Remove Unused Footage"),
     (ids::FIND_MISSING_FOOTAGE, "Find Missing Footage"),
+    (ids::PURGE, "Purge"),
     (ids::FIND_MISSING_EFFECTS, "Find Missing Effects"),
     (ids::FIND_MISSING_FONTS, "Find Missing Fonts"),
     (ids::SYSTEM_REPORT, "System Compatibility Report..."),
@@ -587,6 +591,24 @@ const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
 /// Variants with fixed parameters: (command, parameters as JSON, English name). A
 /// table rather than `json!` calls keeps the code small (parsed once at startup).
 const VARIANTS: &[(&str, &str, &str)] = &[
+    // Edit ▸ Purge (AE 2026's names).
+    (
+        ids::PURGE,
+        r#"{"what":"memory_and_disk_cache"}"#,
+        "Purge All Memory & Disk Cache",
+    ),
+    (ids::PURGE, r#"{"what":"all_memory"}"#, "Purge All Memory"),
+    (
+        ids::PURGE,
+        r#"{"what":"disk_cache"}"#,
+        "Purge All Disk Cache",
+    ),
+    (ids::PURGE, r#"{"what":"undo"}"#, "Purge Undo"),
+    (
+        ids::PURGE,
+        r#"{"what":"image_cache_memory"}"#,
+        "Purge Image Cache Memory",
+    ),
     (
         ids::PLAY,
         r#"{"preview":"numpad0"}"#,
@@ -1640,6 +1662,20 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 crate::dialogs::layer_settings(cx, session, &camera);
             }
             return true;
+        }
+        ids::PURGE => {
+            let what = inv.params.get("what").and_then(|w| w.as_str());
+            if matches!(
+                what,
+                Some("image_cache_memory" | "all_memory" | "memory_and_disk_cache")
+            ) {
+                if let Some(media) = cx.resources.get::<std::sync::Arc<bae_media::FrameCache>>() {
+                    media.clear();
+                }
+                session.lock().purge += 1;
+            }
+            // Undo steps and the disk cache: the shell's.
+            return what == Some("image_cache_memory");
         }
         ids::FIND_MISSING_EFFECTS | ids::FIND_MISSING_FONTS => {
             let term = if id == ids::FIND_MISSING_EFFECTS {
@@ -3357,6 +3393,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // File ▸ Dependencies (AE 2026 zh_CN: menu items and their alerts).
     ("Remove Unused Footage", "删除未用过的素材"),
     ("Find Missing Footage", "查找缺失的素材"),
+    ("Purge", "清理"),
+    ("Purge All Memory & Disk Cache", "清理所有内存与磁盘缓存"),
+    ("Purge All Memory", "清理所有内存"),
+    ("Purge All Disk Cache", "清理所有磁盘缓存"),
+    ("Purge Undo", "清理撤消"),
+    ("Purge Image Cache Memory", "清理图像缓存内存"),
     ("Find Missing Effects", "查找缺失的效果"),
     ("Find Missing Fonts", "查找缺失的字体"),
     ("Missing Effects", "缺失效果"),
