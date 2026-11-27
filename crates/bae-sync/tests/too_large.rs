@@ -491,10 +491,28 @@ fn a_presence_that_does_not_fit_is_skipped_by_the_relay() {
     assert_eq!(errors.len(), 2, "{errors:?}");
 
     // Alice leaves and comes back with it: reported again (the relay
-    // forgot what it skipped of hers when she left).
+    // forgot what it skipped of hers when she left). Her new session's
+    // presence numbers start from the wall clock, so wait out the "left"
+    // the others keep (`presence_ttl`) rather than rely on real time.
     net.leave(alice);
-    net.step(Duration::from_millis(10));
+    for _ in 0..5 {
+        net.step(Duration::from_secs(5));
+    }
     assert_eq!(net.names(carol), ["bob"]);
+    let alice = net.join("alice", false);
+    net.session(alice).set_presence(presence("alice", 3000));
+    let errors = net.step(Duration::from_millis(10));
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert_eq!(net.names(bob), ["alice"]);
+
+    // The same when she went quiet first (her presence expired, so the
+    // relay sends no "left" when her connection drops).
+    net.sessions[alice] = None;
+    for _ in 0..5 {
+        net.step(Duration::from_secs(5));
+    }
+    assert_eq!(net.names(bob), Vec::<String>::new());
+    net.relay.disconnect(net.handles[alice]);
     let alice = net.join("alice", false);
     net.session(alice).set_presence(presence("alice", 3000));
     let errors = net.step(Duration::from_millis(10));

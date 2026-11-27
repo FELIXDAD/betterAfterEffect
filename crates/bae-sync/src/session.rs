@@ -947,9 +947,10 @@ impl SyncSession {
     /// values free more state than the ops since added): later requests for
     /// that document are not answered on this link (not exported again on
     /// every request) until [`reset`](Self::reset), or until the document is
-    /// replaced under the same key. Snapshot requests come from shared
-    /// folders (compaction, takeover, repair: spec 4.3); over a hub link
-    /// they do not occur.
+    /// replaced under the same key. BAE's own snapshot requests come from
+    /// shared folders (compaction, takeover, repair: spec 4.3); BAE clients
+    /// do not send them over a hub link, but the protocol allows it and the
+    /// relay answers them like any other.
     fn send_snapshot(
         &mut self,
         docs: &dyn DocSet,

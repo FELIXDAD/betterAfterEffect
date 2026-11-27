@@ -184,10 +184,13 @@ impl Relay {
                 .peers
                 .iter()
                 .any(|p| p.session.remote_client() == Some(client))
-            && let Some(leave) = self.presence.leave(client, now)
         {
+            // No "left" when its presence already expired (it went quiet).
+            let leave = self.presence.leave(client, now);
             for p in &mut self.peers {
-                let _ = p.transport.send(leave.clone());
+                if let Some(leave) = &leave {
+                    let _ = p.transport.send(leave.clone());
+                }
                 // It left: a presence of its that did not fit is no longer
                 // being skipped, and a later one is reported again.
                 p.presence_too_large.remove(client);

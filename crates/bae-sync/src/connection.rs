@@ -394,8 +394,9 @@ pub struct ConnectionOutcome {
     /// what `session().too_large(docs)` lists, e.g. "this layer is too large
     /// to sync through the hub", rather than one notice per error. Our
     /// presence that does not fit (a very long selection; no `doc`) is
-    /// reported once per link and not again for a changed one that still
-    /// does not fit: show [`Connection::presence_too_large`] instead.
+    /// reported once, and again only after a smaller one (or "left") went
+    /// out or after a reconnect, not for a changed one that still does not
+    /// fit: show [`Connection::presence_too_large`] instead.
     pub errors: Vec<SyncError>,
 }
 
@@ -925,7 +926,8 @@ impl Connection {
     }
 
     /// Increases whenever [`status`](Self::status) or
-    /// [`link_notes`](Self::link_notes) change.
+    /// [`link_notes`](Self::link_notes) change, someone's presence changes,
+    /// or [`presence_too_large`](Self::presence_too_large) changes.
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -996,9 +998,10 @@ impl Connection {
     }
 
     /// While online, our presence does not fit in one message on the link
-    /// ([`SyncSession::presence_too_large`]): the others do not see us or
-    /// our selection until a smaller one fits. A change of it changes
-    /// [`ConnectionStatus::generation`].
+    /// ([`SyncSession::presence_too_large`]): it is not sent, so the others
+    /// see our last presence that fitted (an older selection) until it
+    /// expires (`presence_ttl`), then not us, until a smaller one fits. A
+    /// change of it changes [`ConnectionStatus::generation`].
     pub fn presence_too_large(&self) -> bool {
         self.is_online() && self.session.presence_too_large()
     }
