@@ -1043,14 +1043,22 @@ impl SettingsDialog {
                 }
             }
             Kind::Path => {
+                let value = draft.str(p.key);
                 let resolved;
                 let path = if p.key == "disk.disk_cache_folder"
                     && let Some(root) = &self.cache_root
                 {
                     resolved = draft.preview_cache_dir(root);
                     resolved.to_string_lossy()
+                } else if value.is_empty()
+                    && matches!(
+                        p.key,
+                        "disk.media_cache_folder" | "disk.media_cache_database_folder"
+                    )
+                    && let Some(root) = &self.cache_root
+                {
+                    root.to_string_lossy()
                 } else {
-                    let value = draft.str(p.key);
                     std::borrow::Cow::Borrowed(if value.is_empty() { "—" } else { value })
                 };
                 let response = ui
