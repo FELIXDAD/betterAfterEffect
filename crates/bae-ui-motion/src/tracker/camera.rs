@@ -26,6 +26,8 @@ use std::{
 struct Analysis {
     jobs: BTreeMap<PrimPath, Job>,
     finished: BTreeMap<PrimPath, (Settings, String)>,
+    /// Solve again once the stage moved past this revision (points were deleted).
+    resolve: BTreeMap<PrimPath, u64>,
 }
 type Shared = Arc<Mutex<Analysis>>;
 struct Job {
@@ -252,6 +254,15 @@ fn start(
         .map_err(|e| e.to_string())?;
     Ok(Some(job))
 }
+/// Solves `effect` again once the stage moved past `revision` (its points were
+/// just deleted; the delete applies after this frame).
+pub(crate) fn request_solve(r: &Resources, effect: &PrimPath, revision: u64) {
+    shared(r)
+        .lock()
+        .unwrap()
+        .resolve
+        .insert(effect.clone(), revision);
+}
 fn shared(r: &Resources) -> Shared {
     r.get::<Shared>().expect("camera tracker state").clone()
 }
@@ -282,22 +293,24 @@ pub(crate) fn controls(ui: &mut egui::Ui, cx: &PanelContext<'_>, effect: &PrimPa
             .and_then(Value::as_str)
             .and_then(|v| serde_json::from_str::<Settings>(v).ok())
     });
-    let restart = completed
-        .map(|(s, _)| *s)
-        .or(prior_settings)
-        .is_some_and(|s| s != settings);
+    // Settings that match the stored solution (an undo back to it) or the last
+    // attempt are not analyzed again.
+    let tried = completed.map(|(s, _)| *s);
+    let restart = (prior_settings.is_some() || tried.is_some())
+        && prior_settings != Some(settings)
+        && tried != Some(settings);
     let dirty = cx
         .stage
         .prim(effect)
         .and_then(|v| query::static_value(&v, "tracker:needs_solve"))
         == Some(Value::Bool(true));
-    let mut analyze = restart
-        || (!stored && completed.is_none())
-        || (dirty && completed.is_none_or(|(_, msg)| msg == "Camera solved"));
+    let mut analyze = restart || (!stored && completed.is_none());
     if !analyze {
         ui.horizontal(|ui| {
             let status = completed.map_or("Camera solved", |(_, s)| s.as_str());
-            ui.label(tr(status));
+            if !dirty {
+                ui.label(tr(status));
+            }
             analyze = ui.button(tr("Analyze Camera")).clicked();
         });
     }
@@ -325,6 +338,32 @@ impl bae_ui::DialogHost for Host {
         let shared = shared(cx.resources);
         let mut state = shared.lock().unwrap();
         state.finished.retain(|p, _| cx.stage.has_prim(p));
+        let revision = cx.stage.revision();
+        let due: Vec<_> = state
+            .resolve
+            .iter()
+            .filter(|(p, r)| **r != revision && !state.jobs.contains_key(*p))
+            .map(|(p, _)| p.clone())
+            .collect();
+        for effect in due {
+            if !cx.stage.has_prim(&effect) || query::locked_layer_of(cx.stage, &effect).is_some() {
+                state.resolve.remove(&effect);
+                continue;
+            }
+            let settings = Settings::read(cx.stage, &effect);
+            match start(cx, ctx, &effect, settings) {
+                Ok(Some(job)) => {
+                    state.resolve.remove(&effect);
+                    state.jobs.insert(effect, job);
+                }
+                // Warming up: tried again next frame.
+                Ok(None) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(e) => {
+                    state.resolve.remove(&effect);
+                    state.finished.insert(effect, (settings, e));
+                }
+            }
+        }
         let mut completed = Vec::new();
         state.jobs.retain(|p, j| {
             if !cx.stage.has_prim(p) {
@@ -333,6 +372,13 @@ impl bae_ui::DialogHost for Host {
             let invalid = cx.stage.changes_since(j.revision).is_none_or(|events| {
                 events.flat_map(|e| &e.changes).any(|change| {
                     let path = change.path();
+                    // The points it solves changed (an undo or redo of a delete).
+                    if let bae_model::Change::AttrChanged { attr, .. } = change
+                        && path == p
+                        && (attr == camera_track::SOLUTION || attr == "tracker:needs_solve")
+                    {
+                        return true;
+                    }
                     if p.is_prefix_of(path) {
                         return Settings::read(cx.stage, p) != j.settings;
                     }

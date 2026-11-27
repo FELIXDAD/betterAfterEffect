@@ -826,6 +826,9 @@ impl Panel for CompositionViewer {
                 self.puppet.delete_selected(cx);
                 true
             }
+            crate::actions::ids::DELETE if self.camera_tracks.has_selection() => {
+                self.camera_tracks.delete_selected(cx)
+            }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
                     self.delete_vertices(cx, &session, &info);

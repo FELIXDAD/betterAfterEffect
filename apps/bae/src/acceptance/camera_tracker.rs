@@ -151,6 +151,12 @@ fn marquee_and_context_actions_create_camera_keys_in_one_undo_step() {
                 3
             );
         }
+        // Above the ground plane: AE's Y points down.
+        let start = query::attr_spec(stage, camera, "transform:position").unwrap();
+        let Some(Value::Vec3(p)) = start.keyframes.values().next().map(|k| k.value.clone()) else {
+            panic!("camera position")
+        };
+        assert!(p[1] < 0.0, "{label}: camera at {p:?}");
         let object = layers
             .iter()
             .find(|p| *p != &plate && query::layer_kind(stage, p).as_deref() == Some(kind))
@@ -178,4 +184,17 @@ fn marquee_and_context_actions_create_camera_keys_in_one_undo_step() {
         key(&mut h, Modifiers::COMMAND, Key::Z);
         assert_eq!(h.state().layers(), vec![plate.clone()]);
     }
+    // Delete removes the selected points, not the selected layer.
+    h.state_mut().dispatched.clear();
+    key(&mut h, Modifiers::NONE, Key::Delete);
+    settle(&mut h);
+    assert_eq!(h.state().layers(), vec![plate.clone()]);
+    assert!(
+        h.state()
+            .dispatched
+            .iter()
+            .any(|i| i.id == "camera_tracker.attach" && i.params["action"] == "delete"),
+        "{:?}",
+        h.state().dispatched
+    );
 }

@@ -13,6 +13,9 @@ pub(super) struct Selection {
     effect: Option<PrimPath>,
     ids: BTreeSet<u32>,
     start: Option<Pos2>,
+    /// The selected points shown at `time` (what Delete removes).
+    visible: BTreeSet<u32>,
+    time: Time,
 }
 const ACTIONS: [(&str, &str); 6] = [
     ("Set Ground Plane and Origin", "ground"),
@@ -56,14 +59,23 @@ impl Selection {
         painter: &Painter,
         tool: Tool,
     ) -> bool {
-        let selected = session.lock().selected_effects.clone();
-        let Some((layer, effect)) = comp.layers.iter().find_map(|layer| {
-            layer
-                .effects
-                .iter()
-                .find(|e| e.enabled && e.match_name == MATCH_NAME && selected.contains(&e.path))
-                .map(|e| (layer, e))
-        }) else {
+        let (selected, layers) = {
+            let s = session.lock();
+            (s.selected_effects.clone(), s.selected_layers.clone())
+        };
+        // Only a selected layer's selected tracker owns the Selection tool.
+        let Some((layer, effect)) = comp
+            .layers
+            .iter()
+            .filter(|layer| layers.contains(&layer.path))
+            .find_map(|layer| {
+                layer
+                    .effects
+                    .iter()
+                    .find(|e| e.enabled && e.match_name == MATCH_NAME && selected.contains(&e.path))
+                    .map(|e| (layer, e))
+            })
+        else {
             *self = Self::default();
             return false;
         };
@@ -110,6 +122,7 @@ impl Selection {
             });
         }
         if marks.is_empty() || tool != Tool::Selection {
+            self.visible.clear();
             return false;
         }
         let nearest = |p: Pos2| {
@@ -225,18 +238,39 @@ impl Selection {
                     }
                 }
             });
-            if resp.hovered()
-                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
-            {
-                action = Some("delete");
-            }
         }
+        self.time = time;
+        self.visible = visible;
         if let Some(action) = action {
-            cx.invoke_with("camera_tracker.attach",serde_json::json!({"effect":effect.path,"time":time,"points":visible,"action":action}));
             if action == "delete" {
-                self.ids.clear();
+                self.delete_selected(cx);
+            } else {
+                cx.invoke_with("camera_tracker.attach",serde_json::json!({"effect":effect.path,"time":time,"points":self.visible,"action":action}));
             }
         }
+        true
+    }
+
+    /// Selected track points are shown: Delete removes them, not the layer.
+    pub(super) fn has_selection(&self) -> bool {
+        self.effect.is_some() && !self.visible.is_empty()
+    }
+
+    /// Deletes the selected points and solves the camera again without them.
+    pub(super) fn delete_selected(&mut self, cx: &mut PanelContext<'_>) -> bool {
+        let Some(effect) = self.effect.clone() else {
+            return false;
+        };
+        if self.visible.is_empty() {
+            return false;
+        }
+        let points = std::mem::take(&mut self.visible);
+        cx.invoke_with(
+            "camera_tracker.attach",
+            serde_json::json!({"effect":effect,"time":self.time,"points":points,"action":"delete"}),
+        );
+        crate::tracker::camera::request_solve(cx.resources, &effect, cx.stage.revision());
+        self.ids.clear();
         true
     }
 }

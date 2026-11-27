@@ -158,7 +158,8 @@ impl Command for Attach {
         let center = DVec3::new(info.width as f64 * 0.5, info.height as f64 * 0.5, 0.);
         let (rotation, offset) = match super::attr(tx.stage(), &p.effect, GROUND) {
             Some(Value::FloatList(g)) if g.len() == 7 => {
-                let q = DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2)
+                // The normal points from the camera into the ground: AE's +Y (down).
+                let q = DQuat::from_rotation_x(-std::f64::consts::FRAC_PI_2)
                     * DQuat::from_array([g[3], g[4], g[5], g[6]]).conjugate();
                 (q, -(q * DVec3::new(g[0], g[1], g[2])) * unit)
             }
