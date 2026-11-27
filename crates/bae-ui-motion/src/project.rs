@@ -599,6 +599,14 @@ impl Panel for ProjectPanel {
                 }
             });
         let effects = crate::effects::registries(cx.resources);
+        // Proxies whose file is not found (the square shows a warning).
+        let proxy_files = bae_model::asset::AssetResolver::new(base.clone(), Vec::new());
+        let proxy_missing = |item: &PrimPath| {
+            bae_model::asset::proxy_of(stage, item)
+                .and_then(|p| stage.prim(&p))
+                .and_then(|v| bae_model::asset::AssetFile::from_prim(&v))
+                .is_some_and(|f| proxy_files.resolve(&f).is_missing())
+        };
         let rows = self.rows(stage, base, effects.as_ref());
         let footer_h = 28.0;
         let list_h = (ui.available_height()
@@ -708,10 +716,18 @@ impl Panel for ProjectPanel {
                         && let Some(on) = proxy_state(stage, &row.path)
                     {
                         let r = Rect::from_center_size(pos2(x + 6.0, rect.center().y), vec2(7.0, 7.0));
+                        // A proxy whose file is gone: drawn in the warning color;
+                        // the original is used (its tooltip says so).
+                        let missing = proxy_missing(&row.path);
+                        let ink = if missing { ui.visuals().warn_fg_color } else { color::TEXT };
                         if on {
-                            ui.painter().rect_filled(r, 0.0, color::TEXT);
+                            ui.painter().rect_filled(r, 0.0, ink);
                         } else {
-                            ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(1.0, color::TEXT), egui::StrokeKind::Inside);
+                            ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(1.0, ink), egui::StrokeKind::Inside);
+                        }
+                        if missing {
+                            ui.interact(r.expand(3.0), ui.id().with(("proxy_missing", row.path.as_str())), egui::Sense::hover())
+                                .on_hover_text(tr("The proxy file is missing; the original is used."));
                         }
                         if ui.input(|i| i.pointer.primary_clicked())
                             && ui.input(|i| i.pointer.interact_pos()).is_some_and(|pos| r.expand(3.0).contains(pos))

@@ -19,7 +19,7 @@ use bae_gpu::GpuContext;
 use bae_model::{FrameRate, PrimPath, Stage, Time};
 use bae_motion::query::CompInfo;
 use bae_render::{
-    AnimEvaluator, ExportAlpha, ExportFormat, ExportJob, ExportSettings, RenderError,
+    AnimEvaluator, ExportAlpha, ExportFormat, ExportJob, ExportSettings, ProxyUse, RenderError,
     RenderPurpose, RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames,
 };
 use bae_ui::Accessible as _;
@@ -57,12 +57,28 @@ pub const FORMATS: &[ExportFormat] = &[
 
 /// Available render presets use the composition's work area. Field rendering
 /// and multi-machine output require export modes the renderer does not provide.
-const RS_TEMPLATES: [(&str, Option<QueueResolution>); 5] = [
-    ("Best Settings", Some(QueueResolution::Full)),
-    ("DV Settings", None),
-    ("Multi-Machine Settings", None),
-    ("Current Settings", Some(QueueResolution::Current)),
-    ("Draft Settings", Some(QueueResolution::Half)),
+const RS_TEMPLATES: [(&str, Option<QueueResolution>, ProxyUse); 5] = [
+    ("Best Settings", Some(QueueResolution::Full), ProxyUse::None),
+    ("DV Settings", None, ProxyUse::None),
+    ("Multi-Machine Settings", None, ProxyUse::None),
+    (
+        "Current Settings",
+        Some(QueueResolution::Current),
+        ProxyUse::Current,
+    ),
+    (
+        "Draft Settings",
+        Some(QueueResolution::Half),
+        ProxyUse::Current,
+    ),
+];
+
+/// Render Settings ▸ Proxy Use, in AE's menu order.
+pub(crate) const PROXY_USES: [(ProxyUse, &str); 4] = [
+    (ProxyUse::Current, "Current Settings"),
+    (ProxyUse::All, "Use All Proxies"),
+    (ProxyUse::CompsOnly, "Use Comp Proxies Only"),
+    (ProxyUse::None, "Use No Proxies"),
 ];
 
 /// What BAE writes for an Output Module template: format, channels, video
@@ -357,6 +373,8 @@ pub struct QueueItem {
     pub end: i64,
     /// The rendered size, independent of the output module.
     pub(crate) resolution: QueueResolution,
+    /// Render Settings ▸ Proxy Use (Best Settings: none).
+    pub(crate) proxy_use: ProxyUse,
     /// Current state.
     pub status: ItemStatus,
     /// The Render column's check box: unchecked items stay in the queue but
@@ -555,6 +573,7 @@ impl RenderQueue {
             start,
             end,
             resolution: QueueResolution::Full,
+            proxy_use: ProxyUse::None,
             status: ItemStatus::Queued,
             render: true,
             comment: String::new(),
@@ -744,6 +763,7 @@ impl RenderQueue {
             start: item.start,
             end: item.end,
             resolution: item.resolution,
+            proxy_use: item.proxy_use,
             cancel: item.cancel.clone(),
         })
     }
@@ -895,6 +915,7 @@ pub(crate) struct Job {
     start: i64,
     end: i64,
     resolution: QueueResolution,
+    proxy_use: ProxyUse,
     cancel: Arc<AtomicBool>,
 }
 
@@ -986,6 +1007,7 @@ pub(crate) fn render_job(
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<ItemStatus, RenderError> {
     let started = Instant::now();
+    evaluator.set_proxy_use(job.proxy_use);
     let info = bae_motion::query::comp_info(stage, &job.comp)
         .ok_or_else(|| RenderError::Other(tr("The composition no longer exists.").to_owned()))?;
     // AE limits the range to the comp.
@@ -1968,7 +1990,7 @@ fn item_ui(
             let render = comp.map(|comp| templates::Render::capture(item, comp));
             let mut rs: Vec<_> = RS_TEMPLATES
                 .iter()
-                .map(|(label, resolution)| (tr(label), resolution.is_some() && comp.is_some()))
+                .map(|(label, resolution, _)| (tr(label), resolution.is_some() && comp.is_some()))
                 .collect();
             if let Some(lib) = library {
                 rs.extend(lib.render.keys().map(|n| (n.as_str(), comp.is_some())));
@@ -1983,10 +2005,11 @@ fn item_ui(
                 })
                 .or_else(|| {
                     let settings = render.as_ref()?;
-                    RS_TEMPLATES.iter().find_map(|(name, resolution)| {
+                    RS_TEMPLATES.iter().find_map(|(name, resolution, proxies)| {
                         (settings.span == Span::WorkArea
-                            && *resolution == Some(settings.resolution))
-                        .then(|| tr(name))
+                            && *resolution == Some(settings.resolution)
+                            && *proxies == settings.proxy_use)
+                            .then(|| tr(name))
                     })
                 });
             let render_label = selected.unwrap_or_else(|| tr("Custom")).to_owned();
@@ -2004,13 +2027,15 @@ fn item_ui(
                         if let Some(preset) = library.and_then(|l| l.render.get(&n)) {
                             preset.apply(item, comp);
                             item.render_template = Some(n);
-                        } else if let Some(resolution) = RS_TEMPLATES
-                            .iter()
-                            .find_map(|(label, r)| (tr(label) == n).then_some(*r).flatten())
+                        } else if let Some((resolution, proxy_use)) =
+                            RS_TEMPLATES.iter().find_map(|(label, r, proxies)| {
+                                (tr(label) == n).then(|| r.map(|r| (r, *proxies))).flatten()
+                            })
                         {
                             templates::Render {
                                 span: Span::WorkArea,
                                 resolution,
+                                proxy_use,
                             }
                             .apply(item, comp);
                             item.render_template = None;

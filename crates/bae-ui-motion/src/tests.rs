@@ -4195,6 +4195,13 @@ fn previews_draw_proxies_at_the_item_size() {
         json!({"items": [item], "enabled": false}),
     );
     assert!(!footage(&mut preview, &h.stage).1, "a proxy that is off");
+    // Render Settings ▸ Proxy Use: Use All Proxies draws it even when off,
+    // Use Comp Proxies Only draws no footage proxies.
+    assert!(footage(&mut render, &h.stage).1, "Use All Proxies");
+    render.set_proxy_use(ProxyUse::CompsOnly);
+    assert!(!footage(&mut render, &h.stage).1, "Use Comp Proxies Only");
+    render.set_proxy_use(ProxyUse::Current);
+    assert!(!footage(&mut render, &h.stage).1, "Current Settings: off");
     h.run(
         "item.set_proxy_enabled",
         json!({"items": [item], "enabled": true}),

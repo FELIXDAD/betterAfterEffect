@@ -43,6 +43,7 @@ pub struct RenderSettings {
     title: String,
     span: Span,
     resolution: QueueResolution,
+    proxy_use: bae_render::ProxyUse,
     start: f64,
     end: f64,
 }
@@ -66,6 +67,7 @@ impl RenderSettings {
             comp: it.comp.clone(),
             title: it.comp_name.clone(),
             resolution: it.resolution,
+            proxy_use: it.proxy_use,
             span,
             start: it.start as f64,
             end: it.end as f64,
@@ -89,6 +91,7 @@ impl RenderSettings {
                     it.start = start;
                     it.end = end;
                     it.resolution = self.resolution;
+                    it.proxy_use = self.proxy_use;
                 }
                 false
             }
@@ -138,7 +141,20 @@ impl RenderSettings {
                 ui.label(format!("{} {w} × {h}", tr("Size:")));
             });
             fixed(ui, "Disk Cache:", "Read Only");
-            fixed(ui, "Proxy Use:", "Use No Proxies");
+            dialog::row(ui, LW, tr("Proxy Use:"), |ui| {
+                let uses = render_queue::PROXY_USES;
+                let names = uses.map(|(_, label)| tr(label));
+                let mut i = uses
+                    .iter()
+                    .position(|(p, _)| *p == self.proxy_use)
+                    .unwrap_or(3);
+                if bae_ui::widgets::dropdown(ui, "rq-proxy-use", &mut i, &names, 170.0)
+                    .labeled_value(egui::WidgetType::ComboBox, tr("Proxy Use:"), names[i])
+                    .changed()
+                {
+                    self.proxy_use = uses[i].0;
+                }
+            });
             fixed(ui, "Effects:", "Current Settings");
             fixed(ui, "Solo Switches:", "Current Settings");
             fixed(ui, "Guide Layers:", "All Off");
@@ -405,6 +421,8 @@ pub(crate) const STRINGS: &[&str] = &[
     "Disk Cache:",
     "Read Only",
     "Proxy Use:",
+    "Use All Proxies",
+    "Use Comp Proxies Only",
     "Use No Proxies",
     "Effects:",
     "Current Settings",

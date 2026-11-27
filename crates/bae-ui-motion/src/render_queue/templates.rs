@@ -46,6 +46,38 @@ impl Span {
 pub(super) struct Render {
     pub span: Span,
     pub resolution: QueueResolution,
+    /// Proxy Use; templates saved before it was stored use none.
+    #[serde(default, with = "proxy_use")]
+    pub proxy_use: ProxyUse,
+}
+
+/// [`ProxyUse`] in template files: `none`, `comps`, `all`, `current`.
+mod proxy_use {
+    use super::ProxyUse;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    const IDS: [(ProxyUse, &str); 4] = [
+        (ProxyUse::None, "none"),
+        (ProxyUse::CompsOnly, "comps"),
+        (ProxyUse::All, "all"),
+        (ProxyUse::Current, "current"),
+    ];
+
+    pub fn serialize<S: Serializer>(v: &ProxyUse, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(
+            IDS.iter()
+                .find(|(p, _)| p == v)
+                .map_or("none", |(_, id)| id),
+        )
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ProxyUse, D::Error> {
+        let id = String::deserialize(d)?;
+        Ok(IDS
+            .iter()
+            .find(|(_, i)| *i == id)
+            .map_or(ProxyUse::None, |(p, _)| *p))
+    }
 }
 
 impl Render {
@@ -53,12 +85,14 @@ impl Render {
         Self {
             span: Span::capture(item, comp),
             resolution: item.resolution,
+            proxy_use: item.proxy_use,
         }
     }
 
     pub fn apply(&self, item: &mut QueueItem, comp: &CompInfo) {
         (item.start, item.end) = self.span.range(comp);
         item.resolution = self.resolution;
+        item.proxy_use = self.proxy_use;
     }
 }
 
@@ -246,7 +280,7 @@ impl NameDialog {
                     match &self.value {
                         Template::Filename(_) | Template::DefaultFilename(_) => false,
                         Template::Render(_) => {
-                            !RS_TEMPLATES.iter().any(|(s, _)| reserved(s))
+                            !RS_TEMPLATES.iter().any(|(s, ..)| reserved(s))
                                 && !library.render.keys().any(|s| taken(s))
                         }
                         Template::Output(_) => {
