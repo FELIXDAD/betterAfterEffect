@@ -345,24 +345,19 @@ fn combo(ui: &mut Ui, current: &str, width: f32) -> egui::Response {
     use bae_ui::a11y::Accessible as _;
     let resp = resp.labeled_value(egui::WidgetType::ComboBox, tr("Align Layers to:"), current);
     let p = ui.painter();
-    let bg = if resp.hovered() {
-        bae_ui::theme::color::FIELD_HOVER
-    } else {
-        bae_ui::theme::color::DROPDOWN
-    };
-    p.rect_filled(rect, 3.0, bg);
+    let ink = bae_ui::widgets::field_frame(p, rect, resp.hovered(), ui.is_enabled());
     p.text(
         pos2(rect.left() + 8.0, rect.center().y),
         Align2::LEFT_CENTER,
         current,
         bae_ui::theme::body(),
-        bae_ui::theme::color::TEXT_STRONG,
+        ink,
     );
     icons::paint(
         p,
         Rect::from_center_size(pos2(rect.right() - 12.0, rect.center().y), vec2(14.0, 14.0)),
         Icon::ChevronDown,
-        bae_ui::theme::color::TEXT_STRONG,
+        ink,
     );
     resp
 }

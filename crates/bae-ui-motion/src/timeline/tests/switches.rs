@@ -57,7 +57,7 @@ fn hide_shy_layers_switch_hides_shy_layers_from_the_timeline() {
     let drawn = |tl: &TimelinePanel| tl.last_modes.len();
     assert_eq!(drawn(&tl), 2);
     // The comp switch three left of the Graph Editor switch (AE order).
-    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0 - 78.0, 22.0 + 17.0);
+    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0 - 78.0, 17.0);
     let r = h.click(&mut tl, sw, Modifiers::NONE);
     h.apply(&r);
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
@@ -181,7 +181,7 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     h.apply(&r);
     assert!(request(&h).motion_blur.is_none());
     // Enable Motion Blur, the comp switch second from the Graph Editor switch.
-    let ge = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
+    let ge = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 17.0);
     let r = h.click(&mut tl, ge - vec2(26.0, 0.0), Modifiers::NONE);
     h.apply(&r);
     let rc = request(&h);
@@ -407,7 +407,7 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
     let x = right - 120.0 - 134.0 + 4.5 * 15.0;
     let row = pos2(x, y(&layer));
     let solid = pos2(x, y(&h.layer));
-    let master = pos2(right - 14.0 - 52.0, 39.0);
+    let master = pos2(right - 14.0 - 52.0, 17.0);
     assert!(
         h.click(&mut tl, solid, Modifiers::NONE)
             .invocations

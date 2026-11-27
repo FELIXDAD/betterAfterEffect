@@ -29,7 +29,8 @@ pub(super) fn paint_key(p: &egui::Painter, c: Pos2, k: &Keyframe, selected: bool
         p.circle(c, 2.5, fill, stroke);
         return;
     }
-    let r = 5.0;
+    // AE 26's keyframes are 13 pt tall.
+    let r = 6.5;
     let half = |left: bool, interp: Interpolation, auto: bool| -> Vec<Pos2> {
         let s = if left { -1.0 } else { 1.0 };
         match interp {

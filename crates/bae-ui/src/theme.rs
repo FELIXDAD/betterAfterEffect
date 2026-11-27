@@ -46,8 +46,6 @@ pub mod color {
     pub const UNDERLINE: Color32 = rgb(0x6a, 0x6a, 0x6a);
     /// Keyframe navigator diamond when the playhead is not on a key.
     pub const KEY_OFF: Color32 = rgb(0x8c, 0x8c, 0x8c);
-    /// Dropdown fields (Parent & Link, viewer resolution).
-    pub const DROPDOWN: Color32 = rgb(0x00, 0x00, 0x00);
     pub const FIELD_HOVER: Color32 = rgb(0x16, 0x16, 0x16);
     /// Empty switch cells in the timeline.
     pub const SWITCH_BG: Color32 = rgb(0x0e, 0x0e, 0x0e);
@@ -139,11 +137,16 @@ pub fn label_name(index: usize) -> String {
     }
 }
 
-/// Layer bar color in the timeline: the label color pulled toward the timeline background.
+/// Layer bar color in the timeline (AE 26): the label color pulled toward the
+/// timeline background, the label color itself when the layer is selected
+/// (Red: #753737, selected #a94747).
 pub fn layer_bar_color(label: usize, selected: bool) -> Color32 {
     let c = label_color(label);
-    let t = if selected { 0.86 } else { 0.55 };
-    lerp(color::TIMELINE_BG, c, t)
+    if selected {
+        brighten(c, 2)
+    } else {
+        lerp(color::TIMELINE_BG, c, 0.62)
+    }
 }
 
 pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {

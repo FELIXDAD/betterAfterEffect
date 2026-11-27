@@ -140,7 +140,7 @@ impl AeToolbar {
             let t = self.tools.lock();
             (t.shown(group), t.current().group() == group)
         };
-        let resp = icons::button(ui, shown.icon(), BUTTON, selected).labeled_toggle(
+        let resp = icons::tool_button(ui, shown.icon(), BUTTON, selected).labeled_toggle(
             egui::WidgetType::RadioButton,
             tr(shown.name()),
             selected,
