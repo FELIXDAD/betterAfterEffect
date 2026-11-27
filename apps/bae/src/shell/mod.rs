@@ -155,6 +155,23 @@ impl From<egui_winit::accesskit_winit::Event> for UserEvent {
     }
 }
 
+fn media_folders(
+    p: &bae_prefs::Preferences,
+    root: &std::path::Path,
+) -> bae_media::conform::CacheFolders {
+    let folder = |key| {
+        if p.str(key).is_empty() {
+            root.to_owned()
+        } else {
+            std::path::PathBuf::from(p.str(key))
+        }
+    };
+    bae_media::conform::CacheFolders::new(
+        &folder("disk.media_cache_database_folder"),
+        &folder("disk.media_cache_folder"),
+    )
+}
+
 fn measure_cache_volume(proxy: EventLoopProxy<UserEvent>, dir: std::path::PathBuf) {
     let _ = std::thread::Builder::new()
         .name("bae-cache-volume".into())
@@ -331,6 +348,18 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     prefs.update_capacity(bae_platform::memory::total_bytes(), None);
     app.insert_resource(prefs.clone());
     if let Some(dirs) = dirs.as_ref().filter(|_| global.smoke_test.is_none()) {
+        let root = dirs.cache.clone();
+        let cache = Arc::new(bae_media::conform::ConformedAudio::new(media_folders(
+            &prefs.current(),
+            &root,
+        )));
+        let weak = Arc::downgrade(&cache);
+        prefs.subscribe(move |p| {
+            if let Some(cache) = weak.upgrade() {
+                cache.configure(media_folders(p, &root));
+            }
+        });
+        app.insert_resource(cache);
         measure_cache_volume(
             proxy.clone(),
             prefs.current().preview_cache_dir(&dirs.cache),
@@ -575,6 +604,12 @@ impl Shell {
                 .get_registry::<dyn bae_gpu::WarmUp>()
                 .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
                 .unwrap_or_default();
+            if let Some(cache) = self
+                .app
+                .resource::<Arc<bae_media::conform::ConformedAudio>>()
+            {
+                tasks.push(cache.clone());
+            }
             if let Some(disk) = self
                 .app
                 .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
@@ -768,6 +803,9 @@ impl Shell {
                 }
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
+            // Edit ▸ Purge: the motion module empties the memory caches; the
+            // undo steps and the disk cache belong to the shell.
+            "motion.edit.purge" => self.purge(inv.params.get("what").and_then(|w| w.as_str())),
             _ => match self.document.run(&inv) {
                 Outcome::Changed => self.set_notice(String::new()),
                 Outcome::Unchanged => {}
@@ -827,6 +865,44 @@ impl Shell {
         self.request_redraw();
     }
 
+    /// Edit ▸ Purge ▸ Undo, All Memory (undo steps too) and the disk cache items
+    /// (asking first, like Preferences ▸ Media & Disk Cache ▸ Empty Disk Cache).
+    fn purge(&mut self, what: Option<&str>) {
+        if matches!(what, Some("undo" | "all_memory" | "memory_and_disk_cache")) {
+            self.document.clear_undo();
+            if let Some(menu) = &mut self.menu {
+                menu.set_undo_state(self.document.undo_state());
+            }
+        }
+        if !matches!(what, Some("disk_cache" | "memory_and_disk_cache")) {
+            return;
+        }
+        let Some(cache) = self
+            .app
+            .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
+            .cloned()
+        else {
+            return;
+        };
+        let mut dialog = rfd::MessageDialog::new()
+            .set_title(crate::i18n::tr("Empty Disk Cache"))
+            .set_description(crate::i18n::tr(
+                "Delete cached preview frames from this folder?",
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo);
+        if let Some(view) = &self.view {
+            dialog = dialog.set_parent(&*view.window);
+        }
+        if dialog.show() == rfd::MessageDialogResult::Yes {
+            let prefs = self
+                .app
+                .resource::<Arc<bae_prefs::PrefsStore>>()
+                .map(|s| s.current())
+                .unwrap_or_default();
+            cache.clear_folder(&prefs);
+        }
+    }
+
     /// Builds the menu bar from the registered menus in the current language and
     /// attaches it in place of the previous one.
     fn build_menu(&mut self) {
@@ -861,6 +937,16 @@ impl Shell {
     /// Buttons of the Preferences window that need the system.
     fn run_settings_requests(&mut self, event_loop: &ActiveEventLoop) {
         for request in self.workspace.take_settings_requests() {
+            if request == "disk.clean_database_and_cache" {
+                if let (Some(cache), Some(dirs)) = (
+                    self.app
+                        .resource::<Arc<bae_media::conform::ConformedAudio>>(),
+                    self.app.resource::<AppDirs>(),
+                ) {
+                    cache.clean(media_folders(self.workspace.settings_draft(), &dirs.cache));
+                }
+                continue;
+            }
             if request == "disk.measure_free_space" {
                 if let Some(dirs) = self.app.resource::<AppDirs>() {
                     measure_cache_volume(
@@ -925,6 +1011,18 @@ impl Shell {
                     let mut dialog = rfd::FileDialog::new();
                     if let Some(view) = &self.view {
                         dialog = dialog.set_parent(&*view.window);
+                    }
+                    if matches!(
+                        key,
+                        "disk.media_cache_database_folder" | "disk.media_cache_folder"
+                    ) && let Some(dirs) = self.app.resource::<AppDirs>()
+                    {
+                        let chosen = self.workspace.settings_draft().str(key);
+                        dialog = dialog.set_directory(if chosen.is_empty() {
+                            dirs.cache.as_path()
+                        } else {
+                            std::path::Path::new(chosen)
+                        });
                     }
                     dialog.pick_folder()
                 };

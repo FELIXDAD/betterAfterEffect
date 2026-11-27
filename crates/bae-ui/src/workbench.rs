@@ -797,6 +797,31 @@ impl Workbench {
         std::mem::take(&mut self.requests.invocations)
     }
 
+    /// Draw an existing panel across the window without changing the dock.
+    /// The ordinary shortcuts still reach the workbench during presentation.
+    pub fn present_panel(
+        &mut self,
+        ui: &mut Ui,
+        cx: &WorkbenchContext<'_>,
+        panel: PanelId,
+    ) -> Vec<Invocation> {
+        self.collect_shortcuts(ui.ctx());
+        let kinds = self.kinds.snapshot();
+        let mut host = Host {
+            dismissed_coachmarks: None,
+            save_requested: &mut self.save_requested,
+            panels: &mut self.panels,
+            kinds: &kinds,
+            saved: &mut self.state.panels,
+            cx,
+            requests: &mut self.requests,
+            focused: Some(panel.clone()),
+        };
+        host.ui(ui, &panel);
+        self.apply_panel_requests(cx);
+        std::mem::take(&mut self.requests.invocations)
+    }
+
     /// A module's toolbar (tools and tool options) left of the workspace bar.
     fn module_toolbar(
         &mut self,

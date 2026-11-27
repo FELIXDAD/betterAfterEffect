@@ -512,7 +512,7 @@ fn panels_render_a_project() {
     let mut viewer = CompositionViewer::new(None);
     let mut props = crate::PropertiesPanel::default();
     let mut fx = crate::EffectControlsPanel::default();
-    let mut preview = crate::PreviewPanel;
+    let mut preview = crate::PreviewPanel::default();
     h.session().lock().selected_layers = vec![shape.clone()];
     for _ in 0..2 {
         assert!(
@@ -782,6 +782,38 @@ fn gpu_preview_publishes_the_rendered_comp() {
         Some(first),
         "pending: last reading"
     );
+    // Playback recycles textures: a new frame in the texture of the one shown
+    // before is read again, not answered from the old reading.
+    let target = bae_render::OutputTarget::new(device.device(), [4, 4]);
+    let texture = target.view().texture().clone();
+    let rect = bae_render::IRect::new(0, 0, 4, 4);
+    let fill = |rgba: [u8; 4]| {
+        let region = bae_gpu::transfer::TextureRegion::full(&texture);
+        bae_gpu::transfer::upload_texture(&device, &texture, region, &rgba.repeat(16)).unwrap();
+    };
+    let wait = |preview: &mut crate::gpu_preview::GpuPreview, want: [u8; 4]| {
+        let mut got = None;
+        for _ in 0..200 {
+            got = preview.pixel([1.0, 1.0], &ctx);
+            if got == Some(want) {
+                break;
+            }
+            let _ = device
+                .device()
+                .poll(bae_gpu::wgpu::PollType::wait_indefinitely());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        got
+    };
+    for (n, colour) in [[0, 255, 0, 255], [0, 0, 255, 255]].into_iter().enumerate() {
+        fill(colour);
+        preview.show_cached(crate::playback::ShownFrame {
+            texture: texture.clone(),
+            rect,
+            hold: std::sync::Arc::new(n),
+        });
+        assert_eq!(wait(&mut preview, colour), Some(colour), "frame {n}");
+    }
     let id = preview.viewport();
     drop(preview);
     assert!(registry.get(id).is_none(), "removed on drop");
@@ -965,7 +997,12 @@ fn menu_bar_follows_the_ae_catalog() {
         .position(|line| line == "File > Scripts > Choose Script Folder...")
         .unwrap();
     built.remove(grant);
-    let wanted = catalog_lines();
+    let mut wanted = catalog_lines();
+    let install = wanted
+        .iter()
+        .position(|line| line == "File > Scripts > Install ScriptUI Panel...")
+        .unwrap();
+    wanted.insert(install, "File > Scripts > Open Script Editor...".to_owned());
     let first_diff = built
         .iter()
         .zip(&wanted)
@@ -3971,6 +4008,47 @@ fn find_missing_footage_lists_footage_without_a_file() {
             .count(),
         1
     );
+}
+
+/// Edit ▸ Purge: the memory caches here (the viewers' frames through
+/// `Session::purge`); Undo and the disk cache go on to the shell.
+#[test]
+fn purge_memory_here_undo_and_disk_in_the_shell() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let purge = |what: &str| Invocation::with_params(ids::PURGE, json!({ "what": what }));
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("timeline");
+    let mut cx = PanelContext::new(
+        &id,
+        "Timeline",
+        &h.stage,
+        &h.author,
+        &h.resources,
+        &mut requests,
+    );
+    let session = h.session();
+    assert!(crate::actions::handle(
+        &purge("image_cache_memory"),
+        &mut cx,
+        &session
+    ));
+    assert_eq!(session.lock().purge, 1);
+    assert!(
+        !crate::actions::handle(&purge("all_memory"), &mut cx, &session),
+        "undo: the shell"
+    );
+    assert_eq!(session.lock().purge, 2);
+    assert!(!crate::actions::handle(&purge("undo"), &mut cx, &session));
+    assert!(!crate::actions::handle(
+        &purge("disk_cache"),
+        &mut cx,
+        &session
+    ));
+    assert_eq!(session.lock().purge, 2);
 }
 
 /// File ▸ Dependencies ▸ Find Missing Effects: the Project panel lists the
