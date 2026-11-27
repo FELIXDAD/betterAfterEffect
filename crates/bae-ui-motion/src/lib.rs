@@ -31,6 +31,7 @@ mod common;
 mod context_menu;
 pub mod demo;
 pub mod dialogs;
+pub mod disk_frames;
 pub mod effects;
 mod expr;
 mod expr_menu;

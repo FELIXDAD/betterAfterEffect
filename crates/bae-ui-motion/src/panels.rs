@@ -745,6 +745,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Light Transmission", "透光率"),
     ("Accepts Shadows", "接受阴影"),
     ("Accepts Lights", "接受灯光"),
+    // Environment light (AE 26's zh terms).
+    ("Source", "源"),
+    ("Background Visible", "背景可见"),
+    ("Background Opacity", "背景不透明度"),
+    ("Background Blur", "背景模糊"),
     ("Diffuse", "漫射"),
     ("Specular Intensity", "镜面强度"),
     ("Specular Shininess", "镜面反光度"),
