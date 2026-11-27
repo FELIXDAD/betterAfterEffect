@@ -54,6 +54,9 @@ struct Draw {
     clips: array<vec4<f32>, 4>,
     // Clip count, first motion sample, sample count, lighting record (vec4 index).
     extra: vec4<u32>,
+    // FLAG_OCCLUDE: the plane's camera depth a·x + b·y + c at target texel
+    // (x, y); w: 1 perspective (1 / depth), 2 orthographic (depth).
+    occl: vec4<f32>,
 }
 
 // One motion-blur placement: target texel -> input texel (rows of the inverse
@@ -119,6 +122,10 @@ const FLAG_MOTION: u32 = 512u;
 const FLAG_LIT: u32 = 1024u;
 // Motion blur: a lighting record per sample, back to back from extra.w.
 const FLAG_LIT_SAMPLES: u32 = 2048u;
+// A 3D plane over 3D models: t_matte holds the models' camera depth (hi, lo
+// halves) and alpha (exec/mesh.rs); the plane goes under them where it is
+// farther.
+const FLAG_OCCLUDE: u32 = 16384u;
 
 @group(0) @binding(0) var<storage, read> draws: array<Draw>;
 @group(0) @binding(1) var<storage, read> samples: array<Sample>;
@@ -530,7 +537,7 @@ fn fs_motion(in: VsOut) -> @location(0) vec4<f32> {
     if lit && (d.mode.y & FLAG_LIT_SAMPLES) != 0u {
         let o = d.extra.w;
         let nl = u32(lighting[o + 3u].w);
-        stride = 7u + 5u * nl + (8u + nl) * u32(lighting[o + 6u].y) + 1u + 64u * nl;
+        stride = 7u + 5u * nl + (9u + nl) * u32(lighting[o + 6u].y) + 1u + 64u * nl;
     }
     for (var i = 0u; i < n; i++) {
         let s = samples[d.extra.y + i];
@@ -561,6 +568,21 @@ fn finish(d: Draw, p: vec2<f32>, src_in: vec4<f32>, light: vec3<f32>, k_in: f32)
             v = 1.0 - v;
         }
         k = k * clamp(v, 0.0, 1.0);
+    }
+    if (flags & FLAG_OCCLUDE) != 0u {
+        let mt = vec2<i32>(floor(p - d.matte.xy));
+        if all(mt >= vec2<i32>(0)) && all(vec2<f32>(mt) < d.matte.zw) {
+            let m = textureLoad(t_matte, mt, 0);
+            let kz = d.occl.x * p.x + d.occl.y * p.y + d.occl.z;
+            var z = kz;
+            if d.occl.w < 1.5 {
+                z = select(-1.0, 1.0 / kz, kz > 0.0);
+            }
+            let model = m.x + m.y;
+            if m.z > 0.0 && z > model * (1.0 + 1e-4) + 1e-3 {
+                k = k * (1.0 - m.z);
+            }
+        }
     }
     src = src * k;
 

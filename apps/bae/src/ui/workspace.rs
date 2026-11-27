@@ -233,9 +233,9 @@ impl Workspace {
             audio_page_visible: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
-                .with_media_cache_root(
+                .with_cache_root(
                     app.resource::<bae_platform::AppDirs>()
-                        .map(|d| d.cache.clone()),
+                        .map(|dirs| dirs.cache.clone()),
                 )
                 .with_installed_ram(bae_platform::memory::total_bytes())
                 .with_host_buttons(&[
@@ -244,20 +244,21 @@ impl Workspace {
                     "startup_repair.start_in_safe_mode",
                     MEMORY_DETAILS,
                     GPU_INFORMATION,
+                    "disk.empty_disk_cache",
                     "choose",
                     "disk.clean_database_and_cache",
                 ]),
         }
     }
 
-    pub fn settings_draft(&self) -> &bae_prefs::Preferences {
-        self.settings.draft()
-    }
-
     /// Opens Preferences (macOS: Settings) on `page` (`general`, …).
     pub fn show_settings(&mut self, page: Option<&str>) {
         let current = self.prefs.current();
         self.settings.open(page, &current);
+    }
+
+    pub fn settings_draft(&self) -> &bae_prefs::Preferences {
+        self.settings.draft()
     }
 
     /// The Preferences window for application acceptance tests.
@@ -278,6 +279,10 @@ impl Workspace {
             true
         });
         requests
+    }
+
+    pub fn cache_free_space(&mut self, dir: &std::path::Path, free: u64) {
+        self.settings.set_cache_free_space(dir, free);
     }
 
     /// Answers a Choose Folder… button.

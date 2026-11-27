@@ -83,6 +83,7 @@ fn light(kind: LightKind, at: DVec3, aim: DVec3) -> Light {
         shadow_darkness: 100.0,
         shadow_diffusion: 0.0,
         scope_below: None,
+        environment: None,
     }
 }
 
@@ -383,6 +384,7 @@ fn shadow_worst(img: &Image, comp: &RenderComp) -> u8 {
         opacity: 1.0,
         transmission: caster.material.light_transmission,
         pixels: CasterPixels::Solid(color),
+        shadow_color: caster.material.shadow_color,
         footprints: Arc::new([]),
     }];
     let cam = comp.view_camera();
@@ -437,6 +439,16 @@ fn shadows_match_the_reference_model() {
     // Deep in the hard shadow: no light at all.
     let img = render(&mut r, &shadow_scene(0.0, 100.0, 0.0));
     assert_eq!(img.px(185, 185), [0, 0, 0, 255]);
+    // Advanced 3D Shadow Color: the shadow lets that colour through.
+    let mut red = shadow_scene(0.0, 100.0, 0.0);
+    red.layers[0].material.shadow_color = [1.0, 0.0, 0.0];
+    let img = render(&mut r, &red);
+    assert!(shadow_worst(&img, &red) <= 3, "shadow colour vs reference");
+    let px = img.px(185, 185);
+    assert!(
+        px[0] > 100 && px[1] == 0 && px[2] == 0,
+        "a red shadow: {px:?}"
+    );
 }
 
 #[test]
@@ -499,6 +511,48 @@ fn shadow_only_modes() {
     let shadow = only_shadows.px(185, 185);
     assert!(shadow[3] > 240 && shadow[0] < 8, "the shadow: {shadow:?}");
     assert!(only_shadows.px(10, 190)[3] < 8, "no receiver where lit");
+}
+
+/// An environment light's Source and Background options reach the renderer;
+/// a hidden source layer still counts (the frame depends on its pixels).
+#[test]
+fn evaluator_passes_environment_light_sources() {
+    let mut b = SceneBuilder::new();
+    let comp = b
+        .comp(
+            "main",
+            200,
+            200,
+            bae_model::FrameRate::FPS_30,
+            Time::ONE_SECOND,
+        )
+        .unwrap();
+    let light = b.layer(&comp, "light", "light", None).unwrap();
+    b.set(&light, "light:type", Value::Enum("environment".into()))
+        .unwrap();
+    let hdri = b
+        .solid_layer(&comp, "hdri", [1.0, 0.5, 0.0, 1.0], [400, 200], [0.0, 0.0])
+        .unwrap();
+    b.set(&hdri, "enabled", Value::Bool(false)).unwrap();
+    b.set(&light, "light:source", Value::PrimRef(hdri.clone()))
+        .unwrap();
+    b.set(&light, "light:background_visible", Value::Bool(true))
+        .unwrap();
+    b.set(&light, "light:background_opacity", Value::Float(50.0))
+        .unwrap();
+    let stage = b.into_stage();
+    let mut eval = AnimEvaluator::new(None);
+    let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
+    let index = rc.layers.iter().position(|l| l.path == hdri).unwrap();
+    assert_eq!(
+        rc.lights[0].environment,
+        Some(bae_render::light::EnvironmentSource {
+            layer: index,
+            background: Some([0.5, 0.0]),
+        })
+    );
+    assert!(!rc.layers[index].visible);
+    assert!(!rc.layers[index].inert, "the light reads it");
 }
 
 /// Shadows that hold still are drawn into a receiver-space map once (the

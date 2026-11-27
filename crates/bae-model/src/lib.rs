@@ -53,7 +53,7 @@ pub use stage::{DEFAULT_UNDO_LIMIT, Stage, SubscriptionId, Transaction, editable
 pub use sublayer::Sublayer;
 pub use text::{
     BaselineDirection, BaselineOption, LineOrientation, ParagraphStyle, StyleRun, TextDocument,
-    TextStyle,
+    TextJoin, TextStyle,
 };
 pub use time::{FrameRate, Time, TimeRange};
 pub use value::{BezierPath, FeatherPoint, Value, ValueType};

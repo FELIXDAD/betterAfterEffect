@@ -44,7 +44,16 @@ fn main() -> ExitCode {
     {
         return bae_plugin::native::runner_main();
     }
-    startup::run(app_builder().build())
+    let dirs = match bae_platform::AppDirs::resolve() {
+        Ok(dirs) => dirs,
+        Err(error) => {
+            eprintln!("{}: {error}", bae_platform::BINARY_NAME);
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut builder = AppBuilder::new();
+    builder.insert_resource(dirs.clone());
+    startup::run(assemble_modules(builder).build(), dirs)
 }
 
 /// The AE scripting prelude's bytecode, otherwise compiled by the first script
@@ -63,8 +72,12 @@ impl bae_gpu::WarmUp for ScriptPrelude {
 
 /// Every module of the app, in order. Tests assemble the same app from it (so they
 /// see the same commands, panels and translation tables).
+#[cfg(test)]
 fn app_builder() -> AppBuilder {
-    let mut builder = AppBuilder::new();
+    assemble_modules(AppBuilder::new())
+}
+
+fn assemble_modules(mut builder: AppBuilder) -> AppBuilder {
     builder
         .add_module(bae_platform::PlatformModule)
         .add_module(bae_gpu::GpuModule)
