@@ -32,6 +32,7 @@ mod context_menu;
 pub mod demo;
 pub mod dialogs;
 pub mod disk_frames;
+mod display_color;
 pub mod effects;
 mod expr;
 mod expr_menu;

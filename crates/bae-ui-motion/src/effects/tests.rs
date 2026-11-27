@@ -771,3 +771,42 @@ fn effect_controls_flyout_uses_only_the_measured_panel_commands() {
         Some("管理效果...")
     );
 }
+
+/// Effects go only onto layers that take them: a light or camera alone gets
+/// AE's message, mixed with others it is left out.
+#[test]
+fn effects_skip_lights_and_cameras() {
+    let mut fx = Fx::new();
+    let solid = fx.comp_with_layer();
+    let comp = fx
+        .resources
+        .get::<SharedSession>()
+        .unwrap()
+        .lock()
+        .active_comp
+        .clone()
+        .unwrap();
+    let out = fx.run("layer.create", json!({"comp": comp, "kind": "camera"}));
+    let camera = PrimPath::new(out["path"].as_str().unwrap()).unwrap();
+    let apply = |fx: &Fx, layers: Vec<PrimPath>| {
+        fx.resources
+            .get::<SharedSession>()
+            .unwrap()
+            .lock()
+            .selected_layers = layers;
+        let inv = Invocation::with_params(APPLY, json!({"match_name": "ADBE Gaussian Blur 2"}));
+        fx.handle(inv)
+            .invocations
+            .into_iter()
+            .find(|i| i.id == "effect.apply")
+            .map(|i| i.params["layers"].clone())
+    };
+    assert_eq!(apply(&fx, vec![camera.clone()]), None);
+    let dialogs = crate::dialogs::shared(&fx.resources);
+    assert!(dialogs.lock().open.is_some(), "AE's message");
+    dialogs.lock().open = None;
+    assert_eq!(
+        apply(&fx, vec![camera, solid.clone()]),
+        Some(json!([solid]))
+    );
+}

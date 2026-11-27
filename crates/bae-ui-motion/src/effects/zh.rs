@@ -14,6 +14,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Missing effect", "缺失效果"),
     ("BAE built-in effect", "BAE 内置效果"),
     ("Not available in BAE yet", "BAE 暂不支持"),
+    // AE 26 zh_CN ($$$/AE/EGG/LStr/1926).
+    (
+        "Effects cannot be applied to lights or cameras.",
+        "无法将效果应用于灯或摄像机。",
+    ),
     ("Effect", "效果"),
     ("Effects & Presets", "效果和预设"),
     ("Search", "搜索"),
