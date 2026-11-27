@@ -74,4 +74,56 @@ impl Transport for PeerLink {
     fn close(&mut self) -> Result<(), SyncError> {
         self.inner.close()
     }
+
+    /// The WebSocket's: the relay's session holds document data back while it
+    /// is over the connection's `max_backlog`.
+    fn backlog(&self) -> usize {
+        self.inner.backlog()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::TcpListener;
+
+    use bae_sync::DocKey;
+
+    use super::*;
+
+    /// The relay's flow control sees what waits in the WebSocket: without it, a
+    /// slow client would be sent everything it lacks again on every `Hello`.
+    #[test]
+    fn the_backlog_is_the_websockets() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            HubTransport::accept(stream, None).unwrap()
+        });
+        // Never reads.
+        let _client = HubTransport::connect(
+            &format!("ws://{addr}/projects/x"),
+            None,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let mut link = PeerLink::new(server.join().unwrap(), Access::Write, Duration::MAX);
+        assert_eq!(link.backlog(), 0);
+        // Send until something waits in the WebSocket. One send is not enough
+        // everywhere: Windows takes a non-blocking send of any size into the
+        // kernel as long as less than SO_SNDBUF is outstanding, so only a later
+        // send backs up in our own buffer.
+        let mut sent = 0;
+        while link.backlog() == 0 {
+            assert!(sent < 16, "nothing waits after {sent} sends of 8 MiB");
+            link.send(Message::Updates {
+                doc: DocKey::parse("root").unwrap(),
+                version: Default::default(),
+                data: vec![1; 8 << 20],
+            })
+            .unwrap();
+            sent += 1;
+        }
+        assert!(link.backlog() > 0);
+    }
 }
