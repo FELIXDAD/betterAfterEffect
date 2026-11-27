@@ -33,9 +33,13 @@
 
 mod blur;
 pub mod catalog;
+mod categories;
+pub use categories::channel_3d::settings as exr_controls;
 mod common;
 pub mod effects;
 mod gpu;
+mod module;
+mod obsolete;
 mod params;
 pub mod profile;
 mod target;
@@ -46,45 +50,23 @@ use bae_gpu::{GpuContext, wgpu};
 use bae_model::{EffectDef, EffectRegistry};
 use bae_plugin::declarative::DeclarativeEffect;
 use bae_plugin::manifest::{ParamType, ShaderStyle};
-use bae_plugin::{Diagnostic, MemorySource};
 use bae_render::{Effect, EffectLibrary, EffectParams, GpuImage, IRect, RenderError};
 
 pub use catalog::{EffectInfo, Form, category_zh};
+pub use categories::color::ocio::embed_color_file;
+pub use categories::simulation::{particle_scene_projection, particle_world_projection};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
+pub use effects::color::lumetri::{
+    LumetriCurve, LumetriLut, lumetri_key_edits, prepare_lumetri_lut,
+};
+pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
+
+/// Slider settings used by the Lumetri white balance selector.
+pub use effects::color::lumetri::lumetri_white_balance_settings;
 
 /// Plugin id of the built-in effects (`bae.effects/<id>`).
 pub const PLUGIN_ID: &str = "bae.effects";
-
-/// One embedded declarative package.
-struct Embedded {
-    dir: &'static str,
-    manifest: &'static str,
-    zh: &'static str,
-    files: &'static [(&'static str, &'static str)],
-}
-
-macro_rules! embedded {
-    ($dir:literal, [$($file:literal),* $(,)?]) => {
-        Embedded {
-            dir: $dir,
-            manifest: include_str!(concat!("../packages/", $dir, "/bae-plugin.toml")),
-            zh: include_str!(concat!("../packages/", $dir, "/locales/zh-CN.toml")),
-            files: &[$(($file, include_str!(concat!("../packages/", $dir, "/", $file)))),*],
-        }
-    };
-}
-
-/// The embedded declarative packages, in catalog order.
-const PACKAGES: &[Embedded] = &[
-    embedded!("brightness-contrast", ["shaders/brightness_contrast.wgsl"]),
-    embedded!("exposure", ["shaders/exposure.wgsl"]),
-    embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),
-    embedded!("levels", ["shaders/levels.wgsl"]),
-    embedded!("pro-levels", ["shaders/pro_levels.wgsl"]),
-    embedded!("tint", ["shaders/tint.wgsl"]),
-    embedded!("tritone", ["shaders/tritone.wgsl"]),
-];
 
 /// The implementation of a built-in effect.
 #[derive(Clone)]
@@ -111,11 +93,15 @@ pub struct Builtin {
     pub info: EffectInfo,
     /// Implementation.
     pub implementation: Implementation,
+    alias: Option<Arc<obsolete::Alias>>,
 }
 
 impl Builtin {
     /// The effect as the render graph sees it.
     pub fn effect(&self) -> Arc<dyn Effect> {
+        if let Some(alias) = &self.alias {
+            return alias.clone();
+        }
         match &self.implementation {
             Implementation::Declarative(fx) => fx.clone(),
             Implementation::Rust(fx) => {
@@ -127,6 +113,9 @@ impl Builtin {
 
     /// The parameter definition.
     pub fn def(&self) -> &EffectDef {
+        if let Some(alias) = &self.alias {
+            return &alias.def;
+        }
         match &self.implementation {
             Implementation::Declarative(fx) => fx.def(),
             Implementation::Rust(fx) => fx.def(),
@@ -141,11 +130,16 @@ impl Builtin {
         input: &GpuImage,
         output_roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        match &self.implementation {
+        let mut render = |params: &EffectParams<'_>| match &self.implementation {
             Implementation::Declarative(fx) => {
                 target.render_declarative(fx, params, input, output_roi)
             }
             Implementation::Rust(fx) => fx.encode(target, params, input, output_roi),
+        };
+        if let Some(alias) = &self.alias {
+            alias.with_params(params, render)
+        } else {
+            render(params)
         }
     }
 }
@@ -154,8 +148,21 @@ impl Builtin {
 struct Forward(Arc<dyn TargetEffect>);
 
 impl Effect for Forward {
+    fn prepare_scene(
+        &self,
+        instance: &mut bae_render::RenderEffect,
+        comp: &bae_render::RenderComp,
+        layer: &bae_render::RenderLayer,
+    ) {
+        self.0.prepare_scene(instance, comp, layer);
+    }
+
     fn def(&self) -> &EffectDef {
         self.0.def()
+    }
+
+    fn renders_pixels(&self) -> bool {
+        self.0.renders_pixels()
     }
 
     fn output_bounds(&self, params: &EffectParams<'_>, input: IRect) -> IRect {
@@ -166,11 +173,51 @@ impl Effect for Forward {
         self.0.input_roi(params, output_roi)
     }
 
+    fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        self.0.uses_scene(p)
+    }
+
+    fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_times(p)
+    }
+    fn parameter_ids(&self) -> &'static [u32] {
+        self.0.parameter_ids()
+    }
+    fn integrated_parameters(&self) -> &'static [u32] {
+        self.0.integrated_parameters()
+    }
+    fn feedback_source(
+        &self,
+        p: &EffectParams<'_>,
+        stack: &[bae_render::RenderEffect],
+    ) -> Option<bae_model::PrimPath> {
+        self.0.feedback_source(p, stack)
+    }
+
+    fn full_surface(&self) -> bool {
+        self.0.full_surface()
+    }
+
     fn layer_dependencies(
         &self,
         params: &EffectParams<'_>,
     ) -> Vec<bae_render::effect::LayerDependency> {
         self.0.layer_dependencies(params)
+    }
+
+    fn mask_dependencies(&self, params: &EffectParams<'_>) -> Vec<bae_render::effect::MaskSelect> {
+        self.0.mask_dependencies(params)
+    }
+
+    fn path_dependencies(
+        &self,
+        params: &EffectParams<'_>,
+    ) -> Option<bae_render::effect::MaskSelect> {
+        self.0.path_dependencies(params)
+    }
+
+    fn parameter_sample_times(&self, params: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_sample_times(params)
     }
 
     fn render(
@@ -184,15 +231,50 @@ impl Effect for Forward {
     }
 }
 
+type Prewarm = fn(&gpu::Runtime, wgpu::TextureFormat) -> Result<(), RenderError>;
+
+#[derive(Default)]
+struct Registry {
+    effects: Vec<Builtin>,
+    prewarm: Vec<Prewarm>,
+}
+
+fn registry() -> &'static Registry {
+    static BUILTINS: OnceLock<Registry> = OnceLock::new();
+    BUILTINS.get_or_init(|| {
+        let mut r = Registry::default();
+        categories::blur_sharpen::register(&mut r);
+        categories::channel::register(&mut r);
+        categories::channel_3d::register(&mut r);
+        categories::color::register(&mut r);
+        categories::audio::register(&mut r);
+        categories::controls::register(&mut r);
+        categories::distort::register(&mut r);
+        categories::generate::register(&mut r);
+        categories::immersive::register(&mut r);
+        categories::keying::register(&mut r);
+        categories::matte::register(&mut r);
+        categories::layer_styles::register(&mut r);
+        categories::noise_grain::register(&mut r);
+        categories::perspective::register(&mut r);
+        categories::simulation::register(&mut r);
+        categories::stylize::register(&mut r);
+        categories::text::register(&mut r);
+        categories::time::register(&mut r);
+        categories::transition::register(&mut r);
+        categories::utility::register(&mut r);
+        obsolete::register(&mut r);
+        r.effects.sort_by(|a, b| {
+            (a.info.category.as_str(), a.info.name.as_str())
+                .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
+        });
+        r
+    })
+}
+
 /// Every built-in effect (loaded once, on first use).
 pub fn builtins() -> &'static [Builtin] {
-    static BUILTINS: OnceLock<Vec<Builtin>> = OnceLock::new();
-    BUILTINS.get_or_init(|| match load() {
-        Ok(list) => list,
-        // The packages are compiled in and checked by the tests; a failure here
-        // is a build defect.
-        Err(d) => panic!("bae-effects: built-in packages are invalid: {d:?}"),
-    })
+    &registry().effects
 }
 
 /// The built-in effect with document identity `match_name`.
@@ -213,85 +295,57 @@ pub fn register(defs: &mut EffectRegistry, library: &mut EffectLibrary) -> usize
         defs.register(b.def().clone());
         library.register(b.effect());
     }
+    library.set_frame_interpolator(effects::temporal::interpolator());
     builtins().len()
 }
 
 /// Compiles every pipeline for working format `format` ahead of the first
 /// frame (call on a worker thread when a project opens).
+///
+/// Two low-priority workers share the work (most used categories first: the
+/// registration order); an item that fails is logged and skipped. The first
+/// error is returned at the end.
 pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let rt = gpu::runtime(gpu);
-    blur::prewarm(&rt, format)?;
-    for b in builtins() {
-        if let Implementation::Declarative(fx) = &b.implementation {
-            fx.prewarm(gpu, format)?;
-        }
-    }
-    Ok(())
-}
-
-fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
-    let mut out = Vec::new();
-    for pkg in PACKAGES {
-        let mut source = MemorySource::new(format!("builtin:{PLUGIN_ID}/{}", pkg.dir))
-            .with_file("bae-plugin.toml", pkg.manifest);
-        for (path, text) in pkg.files {
-            source = source.with_file(*path, *text);
-        }
-        let zh: toml::Table = toml::from_str(pkg.zh).map_err(|e| {
-            vec![Diagnostic::error(
-                format!("{}/locales/zh-CN.toml", pkg.dir),
-                e.to_string(),
-            )]
-        })?;
-        for fx in DeclarativeEffect::load_builtin(&source)? {
-            let info = declarative_info(&fx, &zh);
-            out.push(Builtin {
-                info,
-                implementation: Implementation::Declarative(fx),
+    let modules = &registry().prewarm;
+    let declarative: Vec<_> = builtins()
+        .iter()
+        .filter(|b| b.alias.is_none())
+        .filter_map(|b| match &b.implementation {
+            Implementation::Declarative(fx) => Some(fx.clone()),
+            Implementation::Rust(_) => None,
+        })
+        .collect();
+    let total = modules.len() + declarative.len();
+    let next = AtomicUsize::new(0);
+    let first_error = parking_lot::Mutex::new(None);
+    std::thread::scope(|scope| {
+        for _ in 0..PREWARM_THREADS {
+            scope.spawn(|| {
+                bae_gpu::warm_up::lower_priority();
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= total {
+                        break;
+                    }
+                    let result = match modules.get(i) {
+                        Some(warm) => warm(&rt, format),
+                        None => declarative[i - modules.len()].prewarm(gpu, format),
+                    };
+                    if let Err(e) = result {
+                        tracing::warn!("effect prewarm: {e}");
+                        first_error.lock().get_or_insert(e);
+                    }
+                }
             });
         }
-    }
-    {
-        use effects::*;
-        let blur = |fx: GaussianBlur| {
-            let names = fx.names_zh.clone();
-            (Arc::new(fx) as Arc<dyn TargetEffect>, names)
-        };
-        let boxed = |fx: BoxBlur| {
-            let names = fx.names_zh.clone();
-            (Arc::new(fx) as Arc<dyn TargetEffect>, names)
-        };
-        out.push(rust_builtin(
-            blur(GaussianBlur::new()),
-            "gaussian-blur",
-            "高斯模糊",
-            &["blur", "gaussian", "soften", "模糊", "高斯", "柔化"],
-        ));
-        out.push(rust_builtin(
-            blur(GaussianBlur::legacy()),
-            "gaussian-blur-legacy",
-            "高斯模糊（旧版）",
-            &["blur", "gaussian", "legacy", "模糊", "高斯", "旧版"],
-        ));
-        out.push(rust_builtin(
-            boxed(BoxBlur::new()),
-            "fast-box-blur",
-            "快速方框模糊",
-            &["blur", "box", "fast", "模糊", "方框", "快速"],
-        ));
-        out.push(rust_builtin(
-            boxed(BoxBlur::legacy()),
-            "box-blur",
-            "方框模糊",
-            &["blur", "box", "legacy", "模糊", "方框"],
-        ));
-    }
-    out.sort_by(|a, b| {
-        (a.info.category.as_str(), a.info.name.as_str())
-            .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
     });
-    Ok(out)
+    first_error.into_inner().map_or(Ok(()), Err)
 }
+
+/// Workers compiling effect pipelines during the warm-up.
+const PREWARM_THREADS: usize = 2;
 
 /// Catalog entry of a Rust effect (implementation and Chinese param names).
 fn rust_builtin(
@@ -312,9 +366,35 @@ fn rust_builtin(
             form: Form::Rust,
             obsolete: def.category == "Obsolete",
             param_names_zh: names_zh,
+            param_options_zh: rust_options_zh(def),
         },
         implementation: Implementation::Rust(fx),
+        alias: None,
     }
+}
+
+/// Chinese popup options of the Rust effects (AE 26 zh_CN): each effect
+/// module's `options_zh` table, then the blurs' Blur Dimensions popup.
+fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
+    const DIMENSIONS_ZH: &[&str] = &["水平和垂直", "水平", "垂直"];
+    def.params
+        .iter()
+        .filter_map(|p| {
+            let m = def.match_name.as_str();
+            let zh = catalog::options_zh(m, p.id)
+                .or_else(|| effects::options_zh(m, p.id))
+                .or_else(|| effects::spatial::options_zh(m, p.id))
+                .or_else(|| effects::distort::options_zh(m, p.id))
+                .or_else(|| categories::generate::strokes::options_zh(m, p.id))
+                .or_else(|| {
+                    (m == effects::liquify::MATCH_NAME)
+                        .then(|| effects::liquify::options_zh(p.id))
+                        .flatten()
+                })
+                .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
+            Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
+        })
+        .collect()
 }
 
 fn declarative_info(fx: &DeclarativeEffect, zh: &toml::Table) -> EffectInfo {
@@ -361,5 +441,42 @@ fn declarative_info(fx: &DeclarativeEffect, zh: &toml::Table) -> EffectInfo {
         },
         obsolete: def.category == "Obsolete",
         param_names_zh,
+        param_options_zh: choices_zh(decl, entry),
     }
+}
+
+/// `[effect.<id>.choices]`: per parameter key either an array of options
+/// (`channel = ["RGB", "红色", …]`) or a table by 1-based index (`1 = "…"`),
+/// as option lists by parameter id.
+fn choices_zh(
+    decl: &bae_plugin::manifest::EffectDecl,
+    entry: Option<&toml::Table>,
+) -> Vec<(u32, Vec<String>)> {
+    let Some(choices) = entry
+        .and_then(|e| e.get("choices"))
+        .and_then(toml::Value::as_table)
+    else {
+        return Vec::new();
+    };
+    decl.params
+        .iter()
+        .filter_map(|p| match choices.get(&p.key)? {
+            toml::Value::Array(list) => Some((
+                p.id,
+                list.iter()
+                    .filter_map(toml::Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            )),
+            toml::Value::Table(table) => {
+                let mut items: Vec<(u32, String)> = table
+                    .iter()
+                    .filter_map(|(k, v)| Some((k.parse().ok()?, v.as_str()?.to_owned())))
+                    .collect();
+                items.sort_by_key(|(i, _)| *i);
+                Some((p.id, items.into_iter().map(|(_, s)| s).collect()))
+            }
+            _ => None,
+        })
+        .collect()
 }

@@ -5,14 +5,13 @@ use std::sync::Arc;
 
 use bae_anim::Evaluator;
 use bae_app::Resources;
-use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
+use bae_model::{LayerKind, PrimPath, PrimType, Stage, StageEvent, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
-use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
-use egui::{Id, Ui, vec2};
+use egui::{Color32, Id, Ui, vec2};
 use serde_json::json;
 
 use crate::session::{Pending, Scrub, SharedSession};
@@ -47,7 +46,7 @@ pub(crate) fn expression_style(
     let rgb = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
     match resources.get::<Arc<bae_prefs::PrefsStore>>() {
         Some(store) => {
-            let p = store.current();
+            let p = store.display();
             (
                 egui::FontId::monospace(p.int(bae_prefs::keys::EXPR_FONT_SIZE).clamp(6, 72) as f32),
                 rgb(p.color("scripting_expressions.expr_color_default")),
@@ -75,21 +74,48 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
         })
 }
 
-/// An [`Evaluator`] whose compiled comps are dropped whenever the stage changed
-/// (detected through the shell's history log; without one, every frame).
+/// A panel evaluator that invalidates only the compositions touched by an edit.
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
-    seq: Option<u64>,
+    changes: StageChanges,
+}
+
+#[derive(Default)]
+pub(crate) struct StageChanges {
+    revision: Option<u64>,
+}
+
+impl StageChanges {
+    /// Visit new edits once. A missing event means the project was replaced or
+    /// the consumer fell behind the stage's retained history.
+    pub(crate) fn sync(
+        &mut self,
+        stage: &Stage,
+        mut apply: impl FnMut(Option<&StageEvent>),
+    ) -> bool {
+        let revision = stage.revision();
+        if self.revision == Some(revision) {
+            return false;
+        }
+        let previous = self.revision.replace(revision).unwrap_or(revision);
+        if let Some(events) = stage.changes_since(previous) {
+            for event in events {
+                apply(Some(event));
+            }
+        } else {
+            apply(None);
+        }
+        true
+    }
 }
 
 impl EvalCache {
-    pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        if seq.is_none() || seq != self.seq {
-            self.eval.clear();
-            self.seq = seq;
-        }
+    pub(crate) fn get(&mut self, stage: &Stage) -> &mut Evaluator {
+        self.changes.sync(stage, |event| match event {
+            Some(event) => self.eval.invalidate(event),
+            None => self.eval.clear(),
+        });
         &mut self.eval
     }
 }
@@ -111,8 +137,31 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 }
 
 /// English label of a property (displayed through `tr`).
+/// Integer properties AE shows as a dropdown: their values and names.
+pub(crate) fn int_choices(attr: &str) -> Option<&'static [(i64, &'static str)]> {
+    match attr {
+        "material:casts_shadows" | "material:accepts_shadows" => {
+            Some(&[(0, "Off"), (1, "On"), (2, "Only")])
+        }
+        "camera:iris_shape" => Some(&[
+            (1, "Fast Rectangle"),
+            (3, "Triangle"),
+            (4, "Square"),
+            (5, "Pentagon"),
+            (6, "Hexagon"),
+            (7, "Heptagon"),
+            (8, "Octagon"),
+            (9, "Nonagon"),
+            (10, "Decagon"),
+        ]),
+        _ => None,
+    }
+}
+
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
+        "audio:levels" => "Audio Levels",
+        "time_remap" => "Time Remap",
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
         "transform:position_x" => "X Position",
@@ -129,6 +178,44 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "transform:skew" => "Skew",
         "transform:skew_axis" => "Skew Axis",
         "text:source" => "Source Text",
+        "text:path" => "Path",
+        "text:reverse_path" => "Reverse Path",
+        "text:perpendicular_to_path" => "Perpendicular To Path",
+        "text:force_alignment" => "Force Alignment",
+        "text:first_margin" => "First Margin",
+        "text:last_margin" => "Last Margin",
+        // Text animators (AE: Animator N > Range Selector N, properties).
+        "animator:anchor_point" => "Anchor Point",
+        "animator:position" => "Position",
+        "animator:scale" => "Scale",
+        "animator:skew" => "Skew",
+        "animator:rotation" => "Rotation",
+        "animator:opacity" => "Opacity",
+        "animator:fill_color" => "Fill Color",
+        "animator:stroke_color" => "Stroke Color",
+        "animator:stroke_width" => "Stroke Width",
+        "animator:tracking" => "Tracking Amount",
+        "animator:line_spacing" => "Line Spacing",
+        "animator:blur" => "Blur",
+        // AE's Chinese UI says 起始 here but 开始 for Trim Paths.
+        "start" if prim_type == Some(&PrimType::TEXT_SELECTOR) => {
+            return match bae_ui::i18n::lang() {
+                bae_ui::i18n::Lang::Zh => "起始".into(),
+                _ => "Start".into(),
+            };
+        }
+        "end" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "End",
+        "offset" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "Offset",
+        "units" => "Units",
+        "based_on" => "Based On",
+        "mode" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "Mode",
+        "amount" => "Amount",
+        "shape" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "Shape",
+        "smoothness" => "Smoothness",
+        "ease_high" => "Ease High",
+        "ease_low" => "Ease Low",
+        "randomize_order" => "Randomize Order",
+        "random_seed" => "Random Seed",
         "size" => "Size",
         "position" => "Position",
         "roundness" => "Roundness",
@@ -147,8 +234,42 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "feather" => "Mask Feather",
         "expansion" => "Mask Expansion",
         "camera:zoom" => "Zoom",
+        "camera:depth_of_field" => "Depth of Field",
+        "camera:focus_distance" => "Focus Distance",
+        "camera:aperture" => "Aperture",
+        "camera:blur_level" => "Blur Level",
+        "camera:iris_shape" => "Iris Shape",
+        "camera:iris_rotation" => "Iris Rotation",
+        "camera:iris_roundness" => "Iris Roundness",
+        "camera:iris_aspect_ratio" => "Iris Aspect Ratio",
+        "camera:iris_diffraction_fringe" => "Iris Diffraction Fringe",
+        "camera:highlight_gain" => "Highlight Gain",
+        "camera:highlight_threshold" => "Highlight Threshold",
+        "camera:highlight_saturation" => "Highlight Saturation",
         "light:intensity" => "Intensity",
         "light:color" => "Color",
+        "light:cone_angle" => "Cone Angle",
+        "light:cone_feather" => "Cone Feather",
+        "light:falloff" => "Falloff",
+        "light:radius" => "Radius",
+        "light:falloff_distance" => "Falloff Distance",
+        "light:casts_shadows" | "material:casts_shadows" => "Casts Shadows",
+        "light:shadow_darkness" => "Shadow Darkness",
+        "light:shadow_diffusion" => "Shadow Diffusion",
+        "material:light_transmission" => "Light Transmission",
+        "material:accepts_shadows" => "Accepts Shadows",
+        "material:accepts_lights" => "Accepts Lights",
+        // AE's Chinese UI calls the material's Ambient 周围 (the light type is 环境).
+        "material:ambient" => {
+            return match bae_ui::i18n::lang() {
+                bae_ui::i18n::Lang::Zh => "周围".into(),
+                _ => "Ambient".into(),
+            };
+        }
+        "material:diffuse" => "Diffuse",
+        "material:specular_intensity" => "Specular Intensity",
+        "material:specular_shininess" => "Specular Shininess",
+        "material:metal" => "Metal",
         other => {
             // Effect parameters and unknown attributes: a readable form of the name.
             let s = other.rsplit(':').next().unwrap_or(other).replace('_', " ");
@@ -201,13 +322,22 @@ enum Num {
 }
 
 /// A hot number whose scrubbed value is kept until the drag ends (one command per drag).
-fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str) -> Num {
+fn number(
+    ui: &mut Ui,
+    id: Id,
+    model: f64,
+    attr: &str,
+    suffix: &str,
+    name: &str,
+    tint: Color32,
+) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
+                    .tint(tint)
                     .decimals(decimals(attr))
                     .speed(if attr.ends_with("opacity") { 1.0 } else { 0.5 })
                     .suffix(suffix)
@@ -229,6 +359,9 @@ fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str)
     Num::None
 }
 
+/// Values an enabled expression drives are red (AE).
+pub(crate) const EXPRESSION_VALUE: Color32 = Color32::from_rgb(0xe0, 0x5a, 0x5a);
+
 /// Editor for one property value (hot numbers, color swatch, checkbox, text).
 /// `dims` limits vector components (2 for 2D layers). `name` is what screen
 /// readers call the property ("Layer “Solid 1” · Position"); components get
@@ -240,7 +373,13 @@ pub(crate) fn value_editor(
     value: &Value,
     dims: usize,
     name: &str,
+    expression: bool,
 ) -> Edit {
+    let tint = if expression {
+        EXPRESSION_VALUE
+    } else {
+        color::ACCENT
+    };
     let axis = |i: usize| bae_ui::a11y::context(&[name, ["X", "Y", "Z"][i.min(2)]]);
     let mut out = Edit::None;
     let mut apply = |n: Num, f: &dyn Fn(f64) -> Value| match n {
@@ -261,6 +400,7 @@ pub(crate) fn value_editor(
                 "points",
                 "x+",
                 &bae_ui::a11y::context(&[name, tr("Revolutions")]),
+                tint,
             );
             apply(n, &|r| Value::Float(r.trunc() * 360.0 + deg));
             let n = number(
@@ -270,15 +410,16 @@ pub(crate) fn value_editor(
                 attr,
                 "°",
                 &bae_ui::a11y::context(&[name, tr("Degrees")]),
+                tint,
             );
             apply(n, &|d| Value::Float(revs * 360.0 + d));
         }
         Value::Float(v) => {
-            let n = number(ui, id, *v, attr, suffix(attr), name);
+            let n = number(ui, id, *v, attr, suffix(attr), name, tint);
             apply(n, &|x| Value::Float(x));
         }
         Value::Int(v) => {
-            let n = number(ui, id, *v as f64, "points", "", name);
+            let n = number(ui, id, *v as f64, "points", "", name, tint);
             apply(n, &|x| Value::Int(x.round() as i64));
         }
         Value::Vec2(v) | Value::Vec3([v @ .., _])
@@ -298,6 +439,7 @@ pub(crate) fn value_editor(
                     attr,
                     if i == 1 { suffix(attr) } else { "" },
                     &axis(i),
+                    tint,
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -335,6 +477,7 @@ pub(crate) fn value_editor(
                     attr,
                     if i == 2 { suffix(attr) } else { "" },
                     &axis(i),
+                    tint,
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -400,7 +543,7 @@ pub(crate) fn value_editor(
                 ui.data_mut(|d| d.remove::<String>(key));
                 if text != doc.text {
                     let mut d = (**doc).clone();
-                    d.text = text;
+                    d.set_text(&text);
                     out = Edit::Commit(Value::TextDocument(Box::new(d)));
                 }
             }
@@ -426,21 +569,233 @@ pub(crate) fn apply_edit(
     match edit {
         Edit::None => {}
         Edit::Live(value) => {
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value,
+                peers,
+                time: t,
+                committed: None,
             });
         }
         Edit::Commit(value) => {
-            session.lock().scrub = None;
-            let key_time = query::to_key_time(cx.stage, path, t);
-            let value = serde_json::to_value(&value).unwrap_or_default();
-            cx.invoke_with(
-                "attr.set_at",
-                json!({"path": path, "attr": attr, "time": key_time, "value": value}),
+            // A drag moves the others by as much; a typed value sets them all.
+            let dragged = session
+                .lock()
+                .scrub
+                .as_ref()
+                .is_some_and(|s| s.path == *path && s.attr == attr && s.committed.is_none());
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
+            // Shown as committed until the command has run.
+            let auto_key = session.lock().auto_key;
+            session.lock().scrub = Some(Scrub {
+                auto_key,
+                path: path.clone(),
+                attr: attr.to_owned(),
+                value: value.clone(),
+                peers: peers.clone(),
+                time: t,
+                committed: Some((cx.stage.revision(), std::time::Instant::now())),
+            });
+            let edits: Vec<serde_json::Value> = std::iter::once((path.clone(), value))
+                .chain(peers)
+                .map(|(p, v)| {
+                    let time = query::to_key_time(cx.stage, &p, t);
+                    json!({"path": p, "attr": attr, "time": time, "value": v})
+                })
+                .collect();
+            if let [one] = &edits[..] {
+                cx.invoke_with("attr.set_at", one.clone());
+            } else {
+                // One undo step for all of them.
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
+        }
+    }
+}
+
+/// The same property as `attr` of `path` elsewhere in the selection, which an
+/// edit of it changes too (AE): on the other selected layers when `path`'s
+/// layer is one of several selected, and the same property selected on other
+/// layers or effects. Locked layers are left alone.
+pub(crate) fn edit_peers(
+    stage: &Stage,
+    session: &SharedSession,
+    path: &PrimPath,
+    attr: &str,
+) -> Vec<PrimPath> {
+    let Some(layer) = query::owning_layer(stage, path) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PrimPath> = Vec::new();
+    {
+        let s = session.lock();
+        if s.selected_layers.len() > 1 && s.selected_layers.contains(&layer) {
+            out.extend(
+                s.selected_layers
+                    .iter()
+                    .filter(|l| **l != layer)
+                    .filter_map(|l| counterpart(stage, &layer, path, l)),
             );
         }
+        if s.selected_props.iter().any(|(p, a)| p == path && a == attr) {
+            out.extend(
+                s.selected_props
+                    .iter()
+                    .filter(|(p, a)| a == attr && same_owner(stage, path, p))
+                    .map(|(p, _)| p.clone()),
+            );
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    // Text properties only on text layers.
+    let text = |p: &PrimPath| query::layer_kind(stage, p).as_deref() == Some("text");
+    out.retain(|p| {
+        p != path
+            && query::locked_layer_of(stage, p).is_none()
+            && (!attr.starts_with("text:") || text(p))
+            && seen.insert(p.clone())
+    });
+    out
+}
+
+fn match_name(stage: &Stage, path: &PrimPath) -> Option<String> {
+    let view = stage.prim(path)?;
+    query::static_value(&view, "match_name").and_then(|v| v.as_str().map(str::to_owned))
+}
+
+/// Whether `a` and `b` hold the same properties: the same prim type and the
+/// same effect.
+fn same_owner(stage: &Stage, a: &PrimPath, b: &PrimPath) -> bool {
+    let ty = |p: &PrimPath| stage.prim(p).and_then(|v| v.prim_type().cloned());
+    ty(a).is_some() && ty(a) == ty(b) && match_name(stage, a) == match_name(stage, b)
+}
+
+/// `path` (of `layer`) on `other`: the same prim below it, else (effects) the
+/// same instance of the same effect (the second Gaussian Blur → the second).
+fn counterpart(
+    stage: &Stage,
+    layer: &PrimPath,
+    path: &PrimPath,
+    other: &PrimPath,
+) -> Option<PrimPath> {
+    let rel = path.as_str().strip_prefix(layer.as_str())?;
+    if let Ok(p) = PrimPath::new(&format!("{other}{rel}"))
+        && stage.has_prim(&p)
+        && same_owner(stage, path, &p)
+    {
+        return Some(p);
+    }
+    let m = match_name(stage, path)?;
+    let same = |l: &PrimPath| {
+        bae_motion::effect::effects_of(stage, l)
+            .into_iter()
+            .filter(|e| match_name(stage, e).as_deref() == Some(m.as_str()))
+            .collect::<Vec<_>>()
+    };
+    let nth = same(layer).iter().position(|e| e == path)?;
+    same(other).into_iter().nth(nth)
+}
+
+/// The peers' new values for `value` of `path`: offset by the same amount
+/// (`relative`, a drag) or the same value; peers whose value has another type
+/// are left out.
+fn peer_values(
+    stage: &Stage,
+    path: &PrimPath,
+    attr: &str,
+    t: Time,
+    value: &Value,
+    peers: &[PrimPath],
+    relative: bool,
+) -> Vec<(PrimPath, Value)> {
+    let at = |p: &PrimPath| query::sample_attr(stage, p, attr, query::to_key_time(stage, p, t));
+    let from = at(path);
+    peers
+        .iter()
+        .filter_map(|p| {
+            let base = at(p)?;
+            if std::mem::discriminant(&base) != std::mem::discriminant(value) {
+                return None;
+            }
+            let v = match (relative, &from) {
+                (true, Some(from)) => offset(&base, from, value),
+                _ => value.clone(),
+            };
+            Some((p.clone(), v))
+        })
+        .collect()
+}
+
+/// `base` moved by `to - from` (numbers and vectors; other values become `to`).
+fn offset(base: &Value, from: &Value, to: &Value) -> Value {
+    match (base, from, to) {
+        (Value::Float(b), Value::Float(f), Value::Float(t)) => Value::Float(b + (t - f)),
+        (Value::Int(b), Value::Int(f), Value::Int(t)) => Value::Int(b + (t - f)),
+        (Value::Vec2(b), Value::Vec2(f), Value::Vec2(t)) => {
+            Value::Vec2(std::array::from_fn(|i| b[i] + (t[i] - f[i])))
+        }
+        (Value::Vec3(b), Value::Vec3(f), Value::Vec3(t)) => {
+            Value::Vec3(std::array::from_fn(|i| b[i] + (t[i] - f[i])))
+        }
+        _ => to.clone(),
+    }
+}
+
+/// The mask a text layer's characters follow (Path Options > Path), if it
+/// still exists.
+pub(crate) fn text_path_mask(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let view = stage.prim(layer)?;
+    let mask = view.value("text:path")?.as_prim_ref()?.clone();
+    stage.has_prim(&mask).then_some(mask)
+}
+
+/// The Path popup of Path Options: None or one of the layer's masks.
+pub(crate) fn text_path_picker(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    layer: &PrimPath,
+    id: egui::Id,
+) {
+    let stage = cx.stage;
+    let current = text_path_mask(stage, layer);
+    let masks: Vec<PrimPath> = layer
+        .child("masks")
+        .ok()
+        .map(|m| {
+            stage
+                .children(&m)
+                .into_iter()
+                .filter(|m| stage.prim(m).is_some_and(|v| v.is_a(&PrimType::MASK)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let name = |m: &PrimPath| query::display_name_of(stage, m);
+    let shown = current.as_ref().map_or_else(|| tr("None").to_owned(), name);
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .width(140.0)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), tr("None")).clicked() {
+                chosen = Some(None);
+            }
+            for m in &masks {
+                if ui
+                    .selectable_label(current.as_ref() == Some(m), name(m))
+                    .clicked()
+                {
+                    chosen = Some(Some(m.clone()));
+                }
+            }
+        });
+    if let Some(mask) = chosen.filter(|m| *m != current) {
+        cx.invoke_with("text.set_path", json!({"layer": layer, "mask": mask}));
     }
 }
 
@@ -536,12 +891,19 @@ pub(crate) fn new_layer(
         return;
     };
     let mut params = json!({"comp": comp, "kind": kind, "name": name, "index": index});
-    // Preferences: the kind's default label; new layers start at the comp's
-    // start, or at the current time when that option is off.
-    let prefs = crate::prefs::current(cx.resources);
-    params["label"] = json!(crate::prefs::layer_label(&prefs, kind));
-    if !crate::prefs::layers_at_comp_start(&prefs) {
-        params["start"] = json!(session.lock().time(&comp));
+    if let Some(info) = query::comp_info(stage, &comp) {
+        crate::prefs::apply_layer_defaults(cx.resources, session, &info, kind, &mut params);
+    }
+    if matches!(kind, LayerKind::Solid | LayerKind::Adjustment) {
+        let prefs = crate::prefs::current(cx.resources);
+        let name = prefs.str("project.new_project_solids_folder");
+        let name = if name == "Solids" || name.trim().is_empty() {
+            bae_ui::tr("Solids")
+        } else {
+            name
+        };
+        params["solids_folder_name"] = json!(name);
+        params["solids_folder_label"] = json!(prefs.int("labels.label_default_folder"));
     }
     if let (Some(p), serde_json::Value::Object(m)) = (params.as_object_mut(), extra) {
         p.extend(m);
@@ -556,6 +918,25 @@ pub(crate) fn new_layer(
 pub(crate) fn active_comp(stage: &Stage, session: &SharedSession) -> Option<CompInfo> {
     let comp = session.lock().active_comp.clone()?;
     query::comp_info(stage, &comp)
+}
+
+/// A viewer tab uses the same swatch as its project item or layer.
+pub(crate) fn related_tab(
+    cx: &PanelContext<'_>,
+    panel: &str,
+    path: &PrimPath,
+    name: &str,
+) -> bae_ui::TabInfo {
+    let tab = bae_ui::TabInfo::new(format!("{} {name}", tr(panel)));
+    if !crate::prefs::current(cx.resources).bool("appearance.use_label_color_for_related_tabs") {
+        return tab;
+    }
+    let label = crate::actions::label_of(cx.stage, path);
+    if (1..=16).contains(&label) {
+        tab.label(theme::label_color(label as usize))
+    } else {
+        tab
+    }
 }
 
 /// Whether a layer is 3D (`three_d` switch; cameras and lights always are).
@@ -662,4 +1043,35 @@ pub(crate) fn popup_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
 /// `widgets::menu_button(ui, title, add)` (a submenu inside a menu).
 pub(crate) fn submenu(ui: &mut Ui, title: &str, add: &mut dyn FnMut(&mut Ui)) {
     widgets::menu_button(ui, title, |ui| add(ui));
+}
+
+/// Values displayed by the three text panels over the viewer selection.
+pub(crate) struct SelectedStyles<'a> {
+    pub doc: &'a bae_model::TextDocument,
+    pub range: std::ops::Range<usize>,
+}
+
+impl SelectedStyles<'_> {
+    pub fn character<T: PartialEq>(&self, get: impl Fn(&bae_model::TextStyle) -> T) -> Option<T> {
+        let first = get(self.doc.style_at(self.range.start));
+        self.doc
+            .runs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
+
+    pub fn paragraph<T: PartialEq>(
+        &self,
+        get: impl Fn(&bae_model::ParagraphStyle) -> T,
+    ) -> Option<T> {
+        let first = get(self.doc.paragraph_at(self.range.start));
+        self.doc
+            .paragraphs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
 }

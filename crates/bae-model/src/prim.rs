@@ -49,6 +49,8 @@ prim_types! {
     /// the operator is the `operator` attribute.
     SHAPE_OPERATOR = "ShapeOperator";
     MASK = "Mask";
+    MOTION_TRACKER = "MotionTracker";
+    TRACK_POINT = "TrackPoint";
     /// Comp or layer marker (`time` attribute; layer markers use layer time).
     MARKER = "Marker";
     /// Text animator group under a text layer.
@@ -57,6 +59,8 @@ prim_types! {
     TEXT_SELECTOR = "TextSelector";
     /// Effect instance; `match_name` attribute names the effect.
     EFFECT = "Effect";
+    /// One brush, clone or eraser stroke under a Paint effect (`ADBE Paint`).
+    PAINT_STROKE = "PaintStroke";
     ARTBOARD = "Artboard";
     BOARD = "Board";
     PANEL = "Panel";

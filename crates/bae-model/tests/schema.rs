@@ -223,9 +223,11 @@ fn text_documents_animate_and_round_trip() {
     )
     .unwrap();
     let mut doc = TextDocument::new("你好 BAE", "PingFangSC-Regular", 96.0);
-    doc.justification = "center".into();
+    doc.paragraph.justification = "center".into();
+    doc.edit_styles(1..3, |s| s.tracking = 75.0);
     let mut later = doc.clone();
-    later.text = "Hello".into();
+    later.set_text("Hello");
+    later.edit_styles(2..4, |s| s.faux_bold = true);
     for (t, d) in [(0i64, &doc), (705_600_000, &later)] {
         exec(
             &reg,
@@ -259,4 +261,37 @@ fn text_documents_animate_and_round_trip() {
         prim.value("in_point").and_then(Value::as_time),
         Some(Time(352_800_000))
     );
+}
+
+#[test]
+fn creating_a_text_animator_is_one_undoable_command() {
+    let reg = CommandRegistry::with_builtins();
+    let mut s = base(&reg);
+    let layer = "/comps/main/layers/title";
+    let params = json!({"layer": layer, "name": "rise"});
+    assert!(exec(&reg, &mut s, "text.create_animator", params.clone()).is_err());
+    exec(
+        &reg,
+        &mut s,
+        "attr.set",
+        json!({"path": layer, "attr":"kind", "value":Value::Enum("text".into())}),
+    )
+    .unwrap();
+    exec(&reg, &mut s, "text.create_animator", params.clone()).unwrap();
+    let folder = p(layer).child("animators").unwrap();
+    let group = folder.child("rise").unwrap();
+    let selector = group.child("range").unwrap();
+    assert!(
+        s.require_prim(&selector)
+            .unwrap()
+            .is_a(&bae_model::PrimType::TEXT_SELECTOR)
+    );
+    assert!(exec(&reg, &mut s, "text.create_animator", params).is_err());
+    let author = AuthorId::new("agent:test").unwrap();
+    s.undo(&author).unwrap();
+    assert!(!s.has_prim(&folder));
+    s.redo(&author).unwrap();
+    assert!(s.has_prim(&selector));
+    let bad = json!({"path": group,"attr": "animator:position","value":Value::Float(10.0)});
+    assert!(exec(&reg, &mut s, "attr.set", bad).is_err());
 }

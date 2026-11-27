@@ -1,21 +1,34 @@
-# BAE continuous integration (workstream 01, ARCHITECTURE §11).
+# BAE continuous integration, full tier (workstream 01, ARCHITECTURE §11, docs/spec/ci.md).
 #
-# Every push to main/dev and every pull request runs, on macOS arm64 and Windows x64:
-# fmt (once), clippy, tests, the one-wgpu dependency check, the release size budget
-# (`cargo xtask size`), a headless smoke run and packaging (`cargo xtask dist`).
-# CI uses the default ./target directory (no CARGO_TARGET_DIR).
+# Runs on macOS arm64 and Windows x64: fmt (once), clippy, workspace tests (plus the D3D12
+# debug-layer pass on Windows and the UI crates one by one), the one-wgpu and one-font-stack
+# checks, the release size budget (`cargo xtask size`), a headless smoke run, packaging
+# (`cargo xtask dist`) and the macOS bundle signature.
+#
+# When: every push to main/dev, version tags and manual runs. Pull requests only run the
+# fast tier (ci-fast.yml); the merge train merges once that is green. This full run is the
+# backstop: if it goes red on dev, the merge train pauses until it is fixed (2026-11-24,
+# simplified so a PR waits ~10 min instead of queueing for scarce macOS runners). CI uses
+# the default ./target directory (no CARGO_TARGET_DIR).
 
-name: CI
+name: CI full
 
 on:
   push:
     branches: [main, dev]
-  pull_request:
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      packages_only:
+        description: Build and verify release packages only
+        type: boolean
+        default: false
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main/dev runs are not cancelled: each finishes and saves the build cache the fast
+  # tier restores.
+  group: full-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -26,8 +39,8 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  build:
-    name: ${{ matrix.name }}
+  full:
+    name: ${{ inputs.packages_only && 'package' || 'full' }} / ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -64,37 +77,46 @@ jobs:
           echo "host: $host"
           test "$host" = "${{ matrix.target }}"
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
-          key: ${{ matrix.target }}
+          # Shared with the fast tier (ci-fast.yml), which only restores it. `<target>-build`
+          # keeps the key of the earlier single-job CI (key <target>, job `build`), so the
+          # existing dev/main caches stay usable.
+          shared-key: ${{ matrix.target }}-build
           # Only main/dev populate the cache; pull requests restore from their base branch.
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
       - name: Format
-        if: runner.os == 'macOS'
+        if: (!inputs.packages_only && runner.os == 'macOS')
         run: cargo fmt --all --check
 
       - name: Clippy
+        if: ${{ !inputs.packages_only }}
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
+        if: ${{ !inputs.packages_only }}
         # GPU tests skip themselves when no adapter is available (Windows runners have WARP).
         # Windows runners have the D3D12 debug layer installed; debug builds would turn it
         # on (GpuContextDescriptor::validation), so this pass runs without it, like user
         # machines, and the next step runs with it.
         env:
           BAE_GPU_VALIDATION: ${{ runner.os == 'Windows' && '0' || '' }}
+          # The AE shortcut sweep (apps/bae acceptance::shortcut_sweep) writes its
+          # coverage report here; uploaded with the package.
+          BAE_SHORTCUT_REPORT: ${{ github.workspace }}/shortcut-sweep.md
         run: cargo test --workspace --locked
 
       - name: Test with the D3D12 debug layer
         # Same test binaries (no rebuild) with D3D12 validation on, so debug-layer errors
         # still fail CI. GPU tests share one context per test process (bae_gpu::testing).
-        if: runner.os == 'Windows'
+        if: (!inputs.packages_only && runner.os == 'Windows')
         env:
           BAE_GPU_VALIDATION: "1"
         run: cargo test --workspace --locked
 
       - name: Test the UI crates one by one
+        if: ${{ !inputs.packages_only }}
         # `--workspace` unifies features across all crates, so a test that only passes
         # with a feature some other crate enables (e.g. egui's bundled fonts, through a
         # dev-dependency) still passes there and fails when the crate is tested alone.
@@ -105,11 +127,13 @@ jobs:
           done
 
       - name: One wgpu in the dependency graph
+        if: ${{ !inputs.packages_only }}
         # Errors ("specification `wgpu` is ambiguous") when two wgpu versions are resolved:
         # renderer, UI and plugins must share one wgpu::Device (docs/spec/dependencies.md).
         run: cargo tree --locked -p bae-dep-probe -i wgpu --edges normal
 
       - name: One font stack in the app
+        if: ${{ !inputs.packages_only }}
         # egui (vendored epaint, vendor/epaint/BAE-PATCH.md), vello and parley must share one
         # skrifa / read-fonts / harfrust; a second set adds ~0.9 MiB to bae.
         run: |
@@ -120,11 +144,18 @@ jobs:
             exit 1
           fi
 
+      - name: Match release tag to the application version
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "bae").version')"
+          test "$GITHUB_REF_NAME" = "v$version"
+
       - name: Release size budget
         # Release build of bae + check against tools/size-budget/budget.toml; fails when over.
         run: cargo xtask size --json size-report.json
 
       - name: Headless smoke run
+        if: ${{ !inputs.packages_only }}
         # Allowed to fail: hosted runners have no reliable GPU (paravirtualized Metal, WARP).
         # The binary path comes from the size report, so it follows the real target dir.
         continue-on-error: true
@@ -135,21 +166,55 @@ jobs:
           "$bin" --headless --smoke-test 30
 
       - name: Package
-        run: cargo xtask dist --no-build
-
-      - name: macOS bundle signature
-        # Checks the zip as a user gets it: unpacked like Archive Utility does, with the
-        # quarantine flag a browser download sets. A broken signature makes Gatekeeper call
-        # the app "damaged" with no way to open it (#105). BAE.app is ad-hoc signed and not
-        # notarized, so spctl rejecting it is expected; any other spctl verdict is a
-        # signature error and fails the job.
-        if: runner.os == 'macOS'
+        id: package
         run: |
-          check="$RUNNER_TEMP/bundle-check"
-          rm -rf "$check" && mkdir -p "$check"
-          zips=(target/dist/BAE-*-macos.zip)
-          ditto -x -k "${zips[0]}" "$check"
-          app="$check/BAE.app"
+          cargo xtask dist --no-build
+          version="$(jq -er .version size-report.json)"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            archive="target/dist/BAE-$version-aarch64-macos.dmg"
+          else
+            archive="target/dist/BAE-$version-x86_64-windows.zip"
+          fi
+          test -s "$archive"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Windows executable version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object name -eq 'bae').version
+          $expected = ($version -replace '[-+].*$') + '.0'
+          $archive = Join-Path $metadata.target_directory "dist/BAE-$version-x86_64-windows.zip"
+          $check = Join-Path $env:RUNNER_TEMP 'version-check'
+          Expand-Archive -LiteralPath $archive -DestinationPath $check -Force
+          $info = (Get-Item -LiteralPath (Join-Path $check 'bae.exe')).VersionInfo
+          $file = [version]::new($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+          $product = [version]::new($info.ProductMajorPart, $info.ProductMinorPart, $info.ProductBuildPart, $info.ProductPrivatePart)
+          if ($info.FileVersion -cne $expected -or $info.ProductVersion -cne $expected -or
+              "$file" -ne $expected -or "$product" -ne $expected -or
+              $info.ProductName -cne 'BAE' -or $info.FileDescription -cne 'BAE') {
+            $info | Format-List *
+            throw "Expected BAE file and product versions $expected"
+          }
+
+      - name: macOS bundle version and signature
+        # Verify the copy a user installs from the disk image (#105).
+        if: runner.os == 'macOS'
+        env:
+          DMG: ${{ steps.package.outputs.archive }}
+        run: |
+          mount="$(mktemp -d "$RUNNER_TEMP/bae-volume.XXXXXX")"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$DMG"
+          trap 'hdiutil detach "$mount"' EXIT
+          app="$RUNNER_TEMP/bundle-check/BAE.app"
+          mkdir -p "$(dirname "$app")"
+          ditto "$mount/BAE.app" "$app"
+          test -x "$app/Contents/MacOS/bae"
+          version="$(jq -er .version size-report.json)"
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            test "$(plutil -extract "$key" raw "$app/Contents/Info.plist")" = "${version%%[-+]*}"
+          done
           xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");CI;" "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign --display --verbose=2 "$app"
@@ -162,13 +227,14 @@ jobs:
           fi
 
       - name: Upload package and size report
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (github.ref_type != 'tag' || success()) }}
         uses: actions/upload-artifact@v4
         with:
           name: bae-${{ matrix.target }}
           path: |
-            target/dist/*.zip
+            ${{ steps.package.outputs.archive }}
             size-report.json
+            shortcut-sweep.md
           # Earlier failures already fail the job; still upload whatever exists.
           if-no-files-found: warn
           retention-days: 14

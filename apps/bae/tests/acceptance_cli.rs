@@ -1598,8 +1598,7 @@ fn single_frame_renders_number_the_output_name() {
     let dir = tricky(tmp.path());
     let project = dir.join("单帧 工程.bae");
     make_project(&project);
-    // The comp's prim path (`--comp` does not take the display name: #214).
-    let comp = bae_motion::query::comps(&Project::open(&project).unwrap().stage)[0].to_string();
+    let comp = "主 合成";
     for ext in ["png", "tif", "exr"] {
         for (pattern, want) in [
             (format!("帧 a_####.{ext}"), ["帧 a_0005", "帧 a_0006"]),
@@ -1609,7 +1608,7 @@ fn single_frame_renders_number_the_output_name() {
                 let out = bae()
                     .args(["render"])
                     .arg(&project)
-                    .args(["--comp", &comp, "--frames", frames, "-o"])
+                    .args(["--comp", comp, "--frames", frames, "-o"])
                     .arg(dir.join(&pattern))
                     .output_within_limit()
                     .unwrap();
@@ -1637,4 +1636,88 @@ fn single_frame_renders_number_the_output_name() {
             );
         }
     }
+}
+
+/// #214 retest: `bae render --comp` takes the comp's display name (spaces,
+/// Chinese), still takes the prim path, refuses a name two comps share
+/// (listing them) and names the comps when nothing matches.
+#[test]
+fn render_comp_by_display_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let project = dir.join("合成 名字.bae");
+    let mut builder = bae_app::AppBuilder::new();
+    builder.add_module(bae_motion::MotionModule);
+    let app = builder.build();
+    let mut reg = bae_model::CommandRegistry::with_builtins();
+    if let Some(r) = app.get_registry::<dyn bae_model::DynCommand>() {
+        for e in r.snapshot().iter() {
+            let _ = reg.register_dyn(e.item().clone());
+        }
+    }
+    let mut p = Project::new();
+    let author = bae_model::AuthorId::new("user:acceptance").unwrap();
+    let mut paths = Vec::new();
+    for name in ["主 合成", "Comp A", "重复", "重复"] {
+        let out = reg
+            .execute(
+                &mut p.stage,
+                &author,
+                "comp.create",
+                json!({"name": name, "fps": 30, "duration": SEC, "width": 64, "height": 36}),
+            )
+            .unwrap()
+            .output;
+        let comp = out["path"].as_str().unwrap().to_owned();
+        reg.execute(
+            &mut p.stage,
+            &author,
+            "layer.create",
+            json!({"comp": comp, "kind": "solid", "color": [1.0, 0.0, 0.0, 1.0]}),
+        )
+        .unwrap();
+        paths.push(comp);
+    }
+    p.save_as(&project).unwrap();
+    let render = |comp: &str, out: &str| {
+        bae()
+            .arg("render")
+            .arg(&project)
+            .args(["--comp", comp, "--frames", "0-1", "-o"])
+            .arg(dir.join(out))
+            .output_within_limit()
+            .unwrap()
+    };
+    for (comp, out) in [
+        ("主 合成", "显示名_####.png"),
+        ("Comp A", "comp a_####.png"),
+        (paths[0].as_str(), "路径_####.png"),
+    ] {
+        let o = render(comp, out);
+        assert!(
+            o.status.success(),
+            "{comp}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        let first = dir.join(out.replace("####", "0000"));
+        assert!(first.is_file(), "{comp}: {} missing", first.display());
+    }
+    // Two comps named 重复: refused, both listed.
+    let o = render("重复", "重复_####.png");
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    println!("duplicate: {err}");
+    assert!(!o.status.success(), "a name two comps share rendered");
+    assert!(
+        err.contains(&paths[2]) && err.contains(&paths[3]),
+        "the candidates are not listed: {err}"
+    );
+    // No such comp: the project's comps are named.
+    let o = render("不存在 的 合成", "无_####.png");
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    println!("missing: {err}");
+    assert!(!o.status.success());
+    assert!(
+        err.contains("主 合成") && err.contains("Comp A"),
+        "the comps are not listed: {err}"
+    );
 }

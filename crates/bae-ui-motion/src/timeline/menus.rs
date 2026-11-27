@@ -15,6 +15,215 @@ pub(crate) fn keyframe_assistant_menu(
     }
 }
 
+/// A property name's right-click menu (AE 26: Anchor Point and Position show
+/// the same 15 entries): title (`None`: a separator) and whether it is enabled
+/// for `attr` of `path` at keyframe time `key_now`.
+pub(crate) fn property_menu_entries(
+    stage: &Stage,
+    path: &PrimPath,
+    attr: &str,
+    key_now: Time,
+) -> Vec<(Option<&'static str>, bool)> {
+    let spec = query::attr_spec(stage, path, attr);
+    let keys: Vec<Time> = spec
+        .map(|s| s.keyframes.keys().copied().collect())
+        .unwrap_or_default();
+    let on_layer = query::is_layer(stage, path);
+    let animatable = stage
+        .prim(path)
+        .is_some_and(|v| bae_model::schema::is_animatable(v.prim_type(), attr));
+    let edit_value = on_layer && crate::dialogs::TransformKind::of_attr(attr).is_some();
+    let separable = on_layer
+        && matches!(
+            attr,
+            "transform:position"
+                | "transform:position_x"
+                | "transform:position_y"
+                | "transform:position_z"
+                | "transform:anchor_point"
+        );
+    let effect = crate::effects::layer_of(path).is_some();
+    vec![
+        (Some("Edit Value..."), edit_value),
+        // Essential Graphics properties (not built): greyed, as AE greys it here.
+        (Some("Edit Property..."), false),
+        (Some("Separate Dimensions"), separable),
+        (None, true),
+        (Some("Add Keyframe"), animatable),
+        (Some("Remove All Keyframes"), !keys.is_empty()),
+        (Some("Previous Keyframe"), keys.iter().any(|t| *t < key_now)),
+        (Some("Next Keyframe"), keys.iter().any(|t| *t > key_now)),
+        (None, true),
+        (Some("Reset"), animatable),
+        (Some("Edit Expression"), animatable),
+        (Some("Copy Expression Only"), true),
+        (Some("Reveal in Effect Controls"), effect),
+        (Some("Keyframe Assistant"), true),
+        // The Essential Graphics panel is not built yet.
+        (Some("Add Property to Essential Graphics"), false),
+    ]
+}
+
+/// The Parent & Link column's right-click menu (AE 26): the parent list itself,
+/// `items[0]` None and then the comp's layers, the current parent (`current`)
+/// checked and the layer itself (`own`) greyed. Returns the picked index.
+pub(crate) fn parent_menu(
+    ui: &mut Ui,
+    items: &[&str],
+    current: usize,
+    own: usize,
+) -> Option<usize> {
+    let mut picked = None;
+    for (i, item) in items.iter().enumerate() {
+        if i == 1 {
+            ui.separator();
+        }
+        let mut on = i == current;
+        let resp = ui
+            .add_enabled_ui(i != own, |ui| widgets::checkbox(ui, &mut on, item))
+            .inner;
+        if resp.clicked() {
+            picked = Some(i);
+            ui.close();
+        }
+    }
+    picked
+}
+
+/// A property name's right-click menu ([`property_menu_entries`]) for `attr` of
+/// `path` at comp time `now`; a right-click on its value shows it too.
+pub(crate) fn property_menu(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    path: &PrimPath,
+    attr: &str,
+    now: Time,
+) {
+    let stage = cx.stage;
+    let key_now = query::to_key_time(stage, path, now);
+    for (title, enabled) in property_menu_entries(stage, path, attr, key_now) {
+        let Some(title) = title else {
+            ui.separator();
+            continue;
+        };
+        if title == "Keyframe Assistant" {
+            common::submenu(ui, tr(title), &mut |ui| {
+                keyframe_assistant_menu(ui, cx, session);
+            });
+            continue;
+        }
+        if !ui
+            .add_enabled(enabled, egui::Button::new(tr(title)))
+            .clicked()
+        {
+            continue;
+        }
+        ui.close();
+        let spec = query::attr_spec(stage, path, attr)
+            .cloned()
+            .unwrap_or_default();
+        match title {
+            "Edit Value..." => {
+                if let (Some(kind), Some(info)) = (
+                    crate::dialogs::TransformKind::of_attr(attr),
+                    common::active_comp(stage, session),
+                ) {
+                    let layers = [path.clone()];
+                    crate::dialogs::transform_value(cx, &info.path, &layers, now, kind, Some(attr));
+                }
+            }
+            "Separate Dimensions" => {
+                let separated = bae_motion::dimensions::is_separated(stage, path);
+                cx.invoke_with(
+                    "transform.separate_dimensions",
+                    json!({"layers": [path], "separated": !separated}),
+                );
+            }
+            "Add Keyframe" => {
+                if spec.is_animated() {
+                    let value = common::current_value(
+                        &mut bae_anim::Evaluator::new(),
+                        stage,
+                        path,
+                        attr,
+                        now,
+                    );
+                    if let Some(value) = value {
+                        cx.invoke_with(
+                            "attr.set_at",
+                            json!({"path": path, "attr": attr, "time": key_now, "value": value}),
+                        );
+                    }
+                } else {
+                    cx.invoke_with(
+                        "attr.set_animated",
+                        json!({"path": path, "attr": attr, "animated": true, "time": key_now}),
+                    );
+                }
+            }
+            "Remove All Keyframes" => {
+                cx.invoke_with(
+                    "attr.set_animated",
+                    json!({"path": path, "attr": attr, "animated": false, "time": key_now}),
+                );
+            }
+            "Previous Keyframe" | "Next Keyframe" => {
+                let target = if title == "Previous Keyframe" {
+                    spec.keyframes
+                        .keys()
+                        .copied()
+                        .filter(|t| *t < key_now)
+                        .max()
+                } else {
+                    spec.keyframes.keys().copied().find(|t| *t > key_now)
+                };
+                if let (Some(t), Some(info)) = (target, common::active_comp(stage, session)) {
+                    session
+                        .lock()
+                        .set_time(&info, query::to_comp_time(stage, path, t));
+                }
+            }
+            "Reset" => {
+                let default = stage
+                    .prim(path)
+                    .and_then(|v| v.prim_type().cloned())
+                    .and_then(|t| bae_model::schema::attr_def(&t, attr))
+                    .and_then(|d| d.default.to_value());
+                if let Some(value) = default {
+                    cx.invoke_with(
+                        "attr.set_at",
+                        json!({"path": path, "attr": attr, "time": key_now, "value": value}),
+                    );
+                }
+            }
+            "Edit Expression" => {
+                session.lock().focus_expression =
+                    Some((path.clone(), attr.to_owned(), std::time::Instant::now()));
+                if spec.expression.is_none() {
+                    cx.invoke_with(
+                        "attr.set_expression",
+                        json!({"path": path, "attr": attr,
+                               "source": crate::expr::default_expression(stage, path, attr)}),
+                    );
+                }
+            }
+            "Copy Expression Only" => {
+                session.lock().expression_clipboard = spec.expression.map(|e| e.source);
+            }
+            "Reveal in Effect Controls" => {
+                if let Some(layer) = crate::effects::layer_of(path) {
+                    let mut s = session.lock();
+                    s.selected_layers = vec![layer];
+                    s.selected_effects = vec![path.clone()];
+                }
+                cx.open_panel("effect_controls");
+            }
+            _ => {}
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Menus from the command catalog (`crate::catalog`): the same entries, action ids
 // and greying as the menu bar.
@@ -71,7 +280,11 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
             ui.separator();
         }
         Node::Submenu(s) if s.platform.current() => {
-            if s.children.is_empty() {
+            if s.title == "Layer Styles" {
+                common::submenu(ui, tr(s.title), &mut |ui| {
+                    crate::layer_styles::context_menu(ui, cx)
+                });
+            } else if s.children.is_empty() {
                 ui.add_enabled(false, egui::Button::new(tr(s.title)));
             } else {
                 common::submenu(ui, tr(s.title), &mut |ui| catalog_nodes(ui, cx, s.children));
@@ -88,10 +301,11 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
 }
 
 fn catalog_item(ui: &mut Ui, cx: &mut PanelContext<'_>, it: &'static catalog::Item) {
-    if !it.platform.current() {
+    // Run-time lists (recent files …) are filled elsewhere.
+    if !it.platform.current() || it.status == catalog::Status::Dynamic {
         return;
     }
-    let enabled = it.status.works();
+    let enabled = crate::context_menu::runs(cx, it);
     if ui
         .add_enabled(enabled, egui::Button::new(tr(menu_title(it.title))))
         .clicked()
@@ -106,113 +320,32 @@ fn catalog_item(ui: &mut Ui, cx: &mut PanelContext<'_>, it: &'static catalog::It
     }
 }
 
-/// AE 26's layer context menu (R1, a solid layer), as catalog entries `(top-level
-/// menu, title)`; `("", "")` is a separator and `("", name)` a group this function
-/// builds itself (Track & Stabilize ▸, Open ▸, the context-only items).
-pub(crate) const LAYER_MENU: &[(&str, &str)] = &[
-    ("Layer", "Mask"),
-    ("", ""),
-    ("Layer", "Quality"),
-    ("Layer", "Switches"),
-    ("Layer", "Transform"),
-    ("Layer", "Time"),
-    ("Layer", "Frame Blending"),
-    ("Layer", "3D Layer"),
-    ("Layer", "Guide Layer"),
-    ("Layer", "Environment Layer"),
-    ("Layer", "Markers"),
-    ("", ""),
-    ("", "Track & Stabilize"),
-    ("", ""),
-    ("", "Open"),
-    ("Layer", "Reveal"),
-    ("", ""),
-    ("Layer", "Pre-compose..."),
-    ("", ""),
-    ("", "selection"),
-    ("", "Add to Essential Graphics"),
-    ("Composition", "Crop Comp to Selected Layer(s) Bounds"),
-    ("Layer", "Scene Edit Detection..."),
-];
-
-/// Track & Stabilize ▸: these Animation menu items.
-const TRACK_ITEMS: [&str; 4] = [
-    "Track Camera",
-    "Warp Stabilizer VFX",
-    "Track Motion",
-    "Track Mask",
-];
-/// Open ▸: these Layer menu items.
-const OPEN_ITEMS: [&str; 2] = ["Open Layer", "Open Layer Source"];
-
 /// What the layer menu asks the Timeline to do itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum LayerMenuOut {
     Rename,
 }
 
-/// Right-click on a layer (its name or bar): AE's layer context menu.
+/// Right-click on a layer (its name or bar): AE's layer context menu, the same
+/// table as the Composition panel's (`context_menu::VIEWER_LAYER`).
 pub(crate) fn layer_menu(
     ui: &mut Ui,
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
     layer: &PrimPath,
 ) -> Option<LayerMenuOut> {
-    let stage = cx.stage;
-    let mut out = None;
-    for (top, title) in LAYER_MENU {
-        match (*top, *title) {
-            ("", "") => {
-                ui.separator();
-            }
-            ("", "Track & Stabilize") => {
-                common::submenu(ui, tr("Track & Stabilize"), &mut |ui| {
-                    for t in TRACK_ITEMS {
-                        if let Some(n) = catalog_entry("Animation", t) {
-                            catalog_node(ui, cx, n);
-                        }
-                    }
-                });
-            }
-            ("", "Open") => {
-                common::submenu(ui, tr("Open"), &mut |ui| {
-                    for t in OPEN_ITEMS {
-                        if let Some(n) = catalog_entry("Layer", t) {
-                            catalog_node(ui, cx, n);
-                        }
-                    }
-                });
-            }
-            ("", "selection") => {
-                if ui.button(tr("Invert Selection")).clicked() {
-                    invert_layer_selection(stage, session, layer);
-                    ui.close();
-                }
-                if ui.button(tr("Select Children")).clicked() {
-                    select_children(stage, session);
-                    ui.close();
-                }
-                let locked = query::is_locked(stage, layer);
-                if ui
-                    .add_enabled(!locked, egui::Button::new(tr("Rename")))
-                    .clicked()
-                {
-                    out = Some(LayerMenuOut::Rename);
-                    ui.close();
-                }
-            }
-            // Not built yet (needs the Essential Graphics panel).
-            ("", name) => {
-                ui.add_enabled(false, egui::Button::new(tr(name)));
-            }
-            (top, title) => {
-                if let Some(n) = catalog_entry(top, title) {
-                    catalog_node(ui, cx, n);
-                }
-            }
-        }
+    let locked: &[&str] = if query::is_locked(cx.stage, layer) {
+        &["Rename"]
+    } else {
+        &[]
+    };
+    match crate::context_menu::show_with(ui, cx, crate::context_menu::VIEWER_LAYER, locked) {
+        Some("Rename") => return Some(LayerMenuOut::Rename),
+        Some("Invert Selection") => invert_layer_selection(cx.stage, session, layer),
+        Some("Select Children") => select_children(cx.stage, session),
+        _ => {}
     }
-    out
+    None
 }
 
 /// Invert Selection: the comp's other unlocked layers become the selection.
@@ -260,15 +393,6 @@ pub(crate) fn select_children(stage: &Stage, session: &SharedSession) {
             break;
         }
         s.selected_layers.extend(more);
-    }
-}
-
-/// The layer menu's keyframe items: Keyframe Assistant ▸ and Toggle Hold Keyframe.
-pub(crate) fn keyframe_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
-    keyframe_assistant_menu(ui, cx, session);
-    if ui.button(tr("Toggle Hold Keyframe")).clicked() {
-        actions::handle(&Invocation::new(ids::TOGGLE_HOLD), cx, session);
-        ui.close();
     }
 }
 
@@ -358,8 +482,21 @@ pub(crate) fn key_menu(
         })
         .unwrap_or_default();
     ui.add_enabled(false, egui::Button::new(value));
-    // Edit Value… (AE-ANI-073): the value dialog is not built yet.
-    ui.add_enabled(false, egui::Button::new(tr("Edit Value...")));
+    // Edit Value… (AE-ANI-073): the property's value dialog, for this
+    // keyframe (transform properties; the others' dialog is not built yet).
+    let kind = crate::dialogs::TransformKind::of_attr(&clicked.attr)
+        .filter(|_| query::is_layer(stage, &clicked.path));
+    if ui
+        .add_enabled(kind.is_some(), egui::Button::new(tr("Edit Value...")))
+        .clicked()
+    {
+        if let (Some(kind), Some(info)) = (kind, common::active_comp(stage, session)) {
+            let t = query::to_comp_time(stage, &clicked.path, clicked.time);
+            let layers = [clicked.path.clone()];
+            crate::dialogs::transform_value(cx, &info.path, &layers, t, kind, Some(&clicked.attr));
+        }
+        ui.close();
+    }
     if ui.button(tr("Go To Keyframe Time")).clicked() {
         if let Some(info) = common::active_comp(stage, session) {
             let t = query::to_comp_time(stage, &clicked.path, clicked.time);
@@ -482,4 +619,47 @@ pub(crate) fn keys_with_labels(stage: &Stage, layers: &[PrimPath], labels: &[u8]
         stack.extend(stage.children(&p));
     }
     out
+}
+
+/// An animator's Add menu (AE): Property ▸ (the Animate Text properties; those
+/// not rendered yet are greyed), Selector ▸ Range (Wiggly and Expression greyed).
+pub(crate) fn animator_add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, animator: &PrimPath) {
+    let add = |ui: &mut Ui, cx: &mut PanelContext<'_>, title: &str, property: &str, on: bool| {
+        if ui.add_enabled(on, egui::Button::new(tr(title))).clicked() {
+            cx.invoke_with(
+                "text.animate",
+                json!({"animator": animator, "property": property}),
+            );
+            ui.close();
+        }
+    };
+    common::submenu(ui, tr("Property"), &mut |ui| {
+        for (title, property, on) in [
+            ("Anchor Point", "anchor_point", false),
+            ("Position", "position", true),
+            ("Scale", "scale", true),
+            ("Skew", "skew", false),
+            ("Rotation", "rotation", true),
+            ("Opacity", "opacity", true),
+        ] {
+            add(ui, cx, title, property, on);
+        }
+        ui.separator();
+        add(ui, cx, "Fill Color", "fill_rgb", true);
+        add(ui, cx, "Stroke Color", "stroke_rgb", false);
+        add(ui, cx, "Stroke Width", "stroke_width", false);
+        ui.separator();
+        add(ui, cx, "Tracking", "tracking", true);
+        add(ui, cx, "Line Spacing", "line_spacing", false);
+        ui.separator();
+        add(ui, cx, "Blur", "blur", false);
+    });
+    common::submenu(ui, tr("Selector"), &mut |ui| {
+        if ui.button(tr("Range")).clicked() {
+            cx.invoke_with("text.add_selector", json!({ "animator": animator }));
+            ui.close();
+        }
+        ui.add_enabled(false, egui::Button::new(tr("Wiggly")));
+        ui.add_enabled(false, egui::Button::new(tr("Expression")));
+    });
 }

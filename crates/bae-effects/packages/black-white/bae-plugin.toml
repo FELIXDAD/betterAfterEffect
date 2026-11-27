@@ -1,0 +1,94 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "black-white"
+name = "Black & White"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Black&White"]
+flags = ["pixel-independent"]
+shader = "shaders/black_white.wgsl"
+includes = ["shaders/channel_math.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "reds"
+type = "float"
+name = "Reds"
+default = 40
+range = [-200, 300]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 2
+key = "yellows"
+type = "float"
+name = "Yellows"
+default = 60
+range = [-200, 300]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 3
+key = "greens"
+type = "float"
+name = "Greens"
+default = 40
+range = [-200, 300]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 4
+key = "cyans"
+type = "float"
+name = "Cyans"
+default = 60
+range = [-200, 300]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 5
+key = "blues"
+type = "float"
+name = "Blues"
+default = 20
+range = [-200, 300]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 6
+key = "magentas"
+type = "float"
+name = "Magentas"
+default = 80
+range = [-200, 300]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 7
+key = "tint"
+type = "checkbox"
+name = "Tint:"
+default = false
+
+[[effect.param]]
+id = 8
+key = "tint_color"
+type = "color"
+name = "Tint Color"
+default = [0.882353, 0.827451, 0.701961, 1]

@@ -24,6 +24,7 @@ use crate::value::Value;
 pub fn register_builtins(r: &mut CommandRegistry) {
     let results = [
         r.register(CreatePrim),
+        r.register(CreateTextAnimator),
         r.register(DeletePrim),
         r.register(MovePrim),
         r.register(RenamePrim),
@@ -139,6 +140,60 @@ impl Command for CreatePrim {
             index: p.index,
         })?;
         Ok(PathOutput { path: p.path })
+    }
+}
+
+pub struct CreateTextAnimator;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CreateTextAnimatorParams {
+    /// Existing text layer.
+    pub layer: PrimPath,
+    /// Unique prim name under the layer's animators folder.
+    pub name: String,
+}
+
+impl Command for CreateTextAnimator {
+    type Params = CreateTextAnimatorParams;
+    type Output = PathOutput;
+    const ID: &'static str = "text.create_animator";
+    const TITLE: &'static str = "Create Text Animator";
+    const DESCRIPTION: &'static str = "Create an animator with a full range selector named range. Add animator properties with attr.set and additional TextSelector children with prim.create.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<PathOutput, CommandError> {
+        let layer = tx.stage().require_prim(&p.layer)?;
+        if !layer.is_a(&PrimType::LAYER)
+            || layer.value("kind").and_then(Value::as_str) != Some("text")
+        {
+            return Err(CommandError::Failed(format!(
+                "{} must be a text layer",
+                p.layer
+            )));
+        }
+        let folder = p.layer.child("animators").map_err(ModelError::from)?;
+        let path = folder.child(&p.name).map_err(ModelError::from)?;
+        let selector = path.child("range").map_err(ModelError::from)?;
+        let has_folder = match tx.stage().prim(&folder) {
+            Some(v) if v.is_a(&PrimType::FOLDER) => true,
+            Some(_) => return Err(CommandError::Failed(format!("{folder} must be a folder"))),
+            None => false,
+        };
+        let mut create = |path, prim_type| {
+            CreatePrim.run(
+                tx,
+                CreatePrimParams {
+                    path,
+                    prim_type,
+                    index: None,
+                },
+            )
+        };
+        if !has_folder {
+            create(folder, PrimType::FOLDER)?;
+        }
+        create(path.clone(), PrimType::TEXT_ANIMATOR)?;
+        create(selector, PrimType::TEXT_SELECTOR)?;
+        Ok(PathOutput { path })
     }
 }
 
@@ -735,6 +790,7 @@ impl Command for SetAssetFile {
     type Params = SetAssetFileParams;
     type Output = ();
     const ID: &'static str = "asset.set_file";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Relink Asset";
     const DESCRIPTION: &'static str = "Set or relink the file an Asset prim points to.";
 

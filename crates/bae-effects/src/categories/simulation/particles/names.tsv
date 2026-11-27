@@ -1,0 +1,200 @@
+位置	Position
+方向	Direction
+颜色	Color
+重力	Gravity
+行数和列数	Rows & Columns
+行数	Rows
+列数	Columns
+背面图层	Back Layer
+渐变图层 1	Gradient Layer 1
+渐变图层 2	Gradient Layer 2
+旋转顺序	Rotation Order
+变换顺序	Transform Order
+X 位置	X Position
+源	Source
+乘数	Multiplier
+偏移	Offset
+Y 位置	Y Position
+Z 位置	Z Position
+X 轴旋转	X Rotation
+Y 轴旋转	Y Rotation
+Z 轴旋转	Z Rotation
+X 轴缩放	X Scale
+Y 轴缩放	Y Scale
+摄像机系统	Camera System
+摄像机位置	Camera Position
+X、Y 位置	X,Y Position
+焦距	Focal Length
+边角定位	Corner Pins
+左上角	Upper Left
+右上角	Upper Right
+左下角	Lower Left
+右下角	Lower Right
+自动焦距	Auto Focal Length
+灯光	Lighting
+灯光类型	Light Type
+灯光强度	Light Intensity
+灯光颜色	Light Color
+灯光位置	Light Position
+灯光深度	Light Depth
+周围光	Ambient Light
+材质	Material
+漫反射	Diffuse Reflection
+镜面反射	Specular Reflection
+高光锐度	Highlight Sharpness
+强度	Intensity
+视图	View
+物理学	Physics
+粘度	Viscosity
+渲染	Render
+形状	Shape
+图案	Pattern
+自定义碎片图	Custom Shatter Map
+白色拼贴已修复	White Tiles Fixed
+重复	Repetitions
+源点	Origin
+凸出深度	Extrusion Depth
+作用力 1	Force 1
+深度	Depth
+半径	Radius
+作用力 2	Force 2
+渐变	Gradient
+碎片阈值	Shatter Threshold
+渐变图层	Gradient Layer
+反转渐变	Invert Gradient
+旋转速度	Rotation Speed
+倾覆轴	Tumble Axis
+随机性	Randomness
+大规模方差	Mass Variance
+重力方向	Gravity Direction
+重力倾向	Gravity Inclination
+纹理	Textures
+不透明度	Opacity
+正面模式	Front Mode
+正面图层	Front Layer
+侧面模式	Side Mode
+侧面图层	Side Layer
+背面模式	Back Mode
+发射	Cannon
+圆筒半径	Barrel Radius
+每秒粒子数	Particles Per Second
+随机扩散方向	Direction Random Spread
+速率	Velocity
+随机扩散速率	Velocity Random Spread
+粒子半径	Particle Radius
+网格	Grid
+宽度	Width
+高度	Height
+粒子交叉	Particles Across
+粒子下降	Particles Down
+图层爆炸	Layer Exploder
+引爆图层	Explode Layer
+新粒子的半径	Radius of New Particles
+分散速度	Velocity Dispersion
+粒子爆炸	Particle Exploder
+影响	Affect
+粒子来源	Particles From
+选区映射	Selection Map
+字符	Character
+更老/更年轻，相比:	Older/Younger Than:
+年限羽化	Age Feather
+图层映射	Layer Map
+使用图层	Use Layer
+时间偏移类型	Time Offset Type
+时间偏移	Time Offset
+力	Force
+随机扩散力	Force Random Spread
+排斥	Repel
+力半径	Force Radius
+排斥物	Repeller
+墙	Wall
+边界	Boundary
+永久属性映射器	Persistent Property Mapper
+使用图层作为映射	Use Layer As Map
+将红色映射为	Map Red To
+最小值	Min
+最大值	Max
+将绿色映射为	Map Green To
+将蓝色映射为	Map Blue To
+短暂属性映射器	Ephemeral Property Mapper
+运算符	Operator
+底部	Bottom
+缩放	Zoom
+重复模式	Repeat Mode
+如果图层大小不同	If Layer Sizes Differ
+模糊	Blur
+水	Water
+水面	Water Surface
+波形高度	Wave Height
+平滑	Smoothing
+水深度	Water Depth
+折射率	Refractive Index
+表面颜色	Surface Color
+表面不透明度	Surface Opacity
+焦散强度	Caustics Strength
+天空	Sky
+融合	Convergence
+灯光高度	Light Height
+制作者	Producer
+产生点	Producer Point
+产生 X 大小	Producer X Size
+产生 Y 大小	Producer Y Size
+产生方向	Producer Orientation
+缩放产生点	Zoom Producer Point
+产生速率	Production Rate
+气泡	Bubbles
+大小	Size
+大小差异	Size Variance
+寿命	Lifespan
+气泡增长速度	Bubble Growth Speed
+初始速度	Initial Speed
+初始方向	Initial Direction
+风速	Wind Speed
+风向	Wind Direction
+湍流	Turbulence
+摇摆量	Wobble Amount
+排斥力	Repulsion
+弹跳速度	Pop Velocity
+粘性	Stickiness
+综合大小	Universe Size
+正在渲染	Rendering
+混合模式	Blend Mode
+气泡纹理	Bubble Texture
+气泡纹理分层	Bubble Texture Layer
+气泡方向	Bubble Orientation
+环境映射	Environment Map
+反射强度	Reflection Strength
+反射融合	Reflection Convergence
+流动映射	Flow Map
+流动映射黑白对比	Flow Map Steepness
+流动映射匹配	Flow Map Fits
+模拟品质	Simulation Quality
+随机植入	Random Seed
+线框控制	Wireframe Controls
+水平旋转	Horizontal Rotation
+垂直旋转	Vertical Rotation
+垂直缩放	Vertical Scale
+高度映射控制	Height Map Controls
+亮度	Brightness
+对比度	Contrast
+灰度系数调整	Gamma Adjustment
+渲染采光井作为	Render Dry Areas As
+透明度	Transparency
+模拟	Simulation
+网格分辨率	Grid Resolution
+网格分辨率降低采样	Downsample Grid Resolution
+波形速度	Wave Speed
+阻尼	Damping
+反射边缘	Reflect Edges
+预滚动（秒）	Pre-roll (seconds)
+地面	Ground
+陡度	Steepness
+波形强度	Wave Strength
+创建程序 1	Producer 1
+类型	Type
+高度/长度	Height/Length
+角度	Angle
+振幅	Amplitude
+频率	Frequency
+相位	Phase
+创建程序 2	Producer 2

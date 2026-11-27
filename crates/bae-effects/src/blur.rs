@@ -1,7 +1,7 @@
 //! The blur engine shared by the blur, glow, shadow and feather effects.
 //!
 //! **Gaussian** ([`plan_gaussian`], [`encode_gaussian`]): separable, with the
-//! kernel cut at 3σ like AE. Small σ (< 6 render px) runs two direct passes
+//! kernel cut at 3σ like AE (taps with |x| ≤ 3σ). Small σ (< 6 render px) runs two direct passes
 //! whose source lines are cached in workgroup memory. Larger σ blurs a
 //! block-averaged copy at 1/2ⁿ resolution (σ at the level stays in 3..6
 //! texels) and upsamples it bilinearly: the cost no longer depends on the
@@ -40,12 +40,13 @@ const MAX_TAPS: i32 = 24;
 /// Index of offset 0 in the symmetric weight table (`WPAD` in blur.wgsl).
 const WPAD: usize = 28;
 
-/// Kernel radius (taps per side) for σ, as AE: ceil(3σ).
+/// Kernel radius (taps per side) for σ, as AE: taps with |x| ≤ 3σ (AE 26
+/// impulse responses end there; σ < 1/3 leaves the image unchanged).
 pub fn radius(sigma: f64) -> i32 {
     if sigma <= 0.0 {
         0
     } else {
-        (3.0 * sigma).ceil() as i32
+        (3.0 * sigma + 1e-9).floor() as i32
     }
 }
 
@@ -94,6 +95,7 @@ pub(crate) fn format_name(format: wgpu::TextureFormat) -> Result<&'static str, R
     match format {
         wgpu::TextureFormat::Rgba16Float => Ok("rgba16float"),
         wgpu::TextureFormat::Rgba32Float => Ok("rgba32float"),
+        wgpu::TextureFormat::R32Float => Ok("r32float"),
         other => Err(RenderError::Other(format!(
             "bae-effects: unsupported working format {other:?}"
         ))),
@@ -118,6 +120,10 @@ struct Step {
     sigma: f32,
     frac: f32,
     seg: i32,
+    /// Power applied to the straight colour of what the step reads / writes
+    /// (1 = none; linear-light blurs).
+    load_gamma: f32,
+    store_gamma: f32,
     /// `conv_line` weights by |offset|, normalised (index 0..=radius).
     weights: Vec<f32>,
 }
@@ -144,6 +150,8 @@ impl Step {
             sigma: 1.0,
             frac: 0.0,
             seg: 1,
+            load_gamma: 1.0,
+            store_gamma: 1.0,
             weights: Vec::new(),
         }
     }
@@ -192,8 +200,8 @@ fn box_weights(r: f64) -> (i32, Vec<f32>) {
 /// the dispatches. `read` is the region of the input it reads.
 #[derive(Clone, Debug)]
 pub struct Plan {
-    /// Intermediate images: rect and pixel-scale multiplier.
-    images: Vec<(IRect, f64)>,
+    /// Intermediate rectangles in each level's texels.
+    images: Vec<IRect>,
     steps: Vec<Step>,
     /// Output rect.
     pub output: IRect,
@@ -235,7 +243,7 @@ pub fn level_sigma(sigma: f64, factor: i32) -> f64 {
 /// output region `output`.
 pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -> Plan {
     let clamp = edge == Edge::Repeat;
-    let factor = [level_factor(sigma[0]), level_factor(sigma[1])];
+    let factor = sigma.map(level_factor);
     if factor == [1, 1] {
         return plan_direct(input, sigma, clamp, output);
     }
@@ -264,7 +272,6 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
         base[0] + level_down.x1 * fx,
         base[1] + level_down.y1 * fy,
     );
-    let fscale = f64::from(fx.max(fy));
     let mut images = Vec::new();
     let mut steps = Vec::new();
 
@@ -285,10 +292,8 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
         let n = regions[k + 1];
         regions[k] = IRect::new(n.x0 * sx, n.y0 * sy, n.x1 * sx, n.y1 * sy);
     }
-    let mut cum = [1, 1];
     for (k, &[sx, sy]) in stages.iter().enumerate() {
-        cum = [cum[0] * sx, cum[1] * sy];
-        images.push((regions[k], f64::from(cum[0].max(cum[1]))));
+        images.push(regions[k]);
         let dst = images.len() - 1;
         let mut s = if k == 0 {
             let mut s = Step::new("downsample", 0, Some(dst), input, regions[0]);
@@ -306,14 +311,14 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
     let mut cur_src = down;
     let mut cur_rect = level_down;
     if r[0] > 0 {
-        images.push((level_tmp, fscale));
+        images.push(level_tmp);
         let dst = Some(images.len() - 1);
         steps.push(Step::gauss(cur_src, dst, cur_rect, level_tmp, 0, lsigma[0]));
         cur_src = images.len();
         cur_rect = level_tmp;
     }
     if r[1] > 0 {
-        images.push((level_out, fscale));
+        images.push(level_out);
         let dst = Some(images.len() - 1);
         steps.push(Step::gauss(cur_src, dst, cur_rect, level_out, 1, lsigma[1]));
         cur_src = images.len();
@@ -331,6 +336,36 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
     }
 }
 
+/// Box-average aligned source texels into the next Gaussian pyramid level.
+pub(crate) fn reduce_level(
+    target: &mut dyn EffectTarget,
+    input: &GpuImage,
+    factor: [i32; 2],
+    repeat: bool,
+) -> Result<GpuImage, RenderError> {
+    let r = input.rect;
+    let [x, y] = factor;
+    let output = IRect::new(
+        r.x0.div_euclid(x),
+        r.y0.div_euclid(y),
+        (r.x1 + x - 1).div_euclid(x),
+        (r.y1 + y - 1).div_euclid(y),
+    );
+    // Retain a fully extended edge texel beyond each partial box, so subsequent
+    // pyramid levels and convolutions repeat the true source edge.
+    let output = if repeat { output.inflate(1) } else { output };
+    let mut step = Step::new("downsample", 0, None, r, output);
+    step.factor = factor;
+    step.clamp = repeat;
+    Plan {
+        images: Vec::new(),
+        steps: vec![step],
+        output,
+        read: r,
+    }
+    .encode_steps(target, input)
+}
+
 fn plan_direct(input: IRect, sigma: [f64; 2], clamp: bool, output: IRect) -> Plan {
     let r = [radius(sigma[0]), radius(sigma[1])];
     let mut images = Vec::new();
@@ -342,7 +377,7 @@ fn plan_direct(input: IRect, sigma: [f64; 2], clamp: bool, output: IRect) -> Pla
             if clamp {
                 tmp = IRect::new(tmp.x0, tmp.y0.max(input.y0), tmp.x1, tmp.y1.min(input.y1));
             }
-            images.push((tmp, 1.0));
+            images.push(tmp);
             let mut h = Step::gauss(0, Some(0), input, tmp, 0, sigma[0]);
             h.clamp = clamp;
             let mut v = Step::gauss(1, None, tmp, output, 1, sigma[1]);
@@ -420,7 +455,7 @@ pub fn plan_box(input: IRect, r: [f64; 2], iterations: u32, edge: Edge, output: 
         let dst = if k == last {
             None
         } else {
-            images.push((regions[k], 1.0));
+            images.push(regions[k]);
             Some(images.len() - 1)
         };
         let (taps, weights) = box_weights(ra);
@@ -451,6 +486,38 @@ pub fn plan_box(input: IRect, r: [f64; 2], iterations: u32, edge: Edge, output: 
 }
 
 impl Plan {
+    /// Uses a tent in place of the Gaussian weights on the already-planned
+    /// direct passes. The Gaussian footprint must contain the tent.
+    pub(crate) fn with_tent(mut self, half_width: f64) -> Self {
+        for step in &mut self.steps {
+            if step.entry == "conv_line" {
+                for (offset, weight) in step.weights.iter_mut().enumerate() {
+                    *weight = (1. - offset as f64 / half_width).max(0.) as f32;
+                }
+                let sum = step.weights[0] + 2. * step.weights[1..].iter().sum::<f32>();
+                for weight in &mut step.weights {
+                    *weight /= sum;
+                }
+            }
+        }
+        self
+    }
+
+    /// Filters in linear light: what the plan reads from the input is raised
+    /// to `gamma` (straight colour), its output to `1 / gamma`. No extra passes.
+    #[must_use]
+    pub fn in_linear_light(mut self, gamma: f64) -> Self {
+        for s in &mut self.steps {
+            if s.src == 0 {
+                s.load_gamma = gamma as f32;
+            }
+            if s.dst.is_none() {
+                s.store_gamma = (1.0 / gamma) as f32;
+            }
+        }
+        self
+    }
+
     /// Records the plan: reads `input`, allocates the intermediates and the
     /// output (a working image covering `self.output`).
     pub fn encode(
@@ -458,12 +525,52 @@ impl Plan {
         target: &mut dyn EffectTarget,
         input: &GpuImage,
     ) -> Result<GpuImage, RenderError> {
+        self.encode_steps(target, input)
+    }
+
+    /// Encodes in the input texel grid and leaves the final bilinear upsample
+    /// to the caller. The returned rect and pixel scale describe that level in
+    /// the input grid, so a following pass can sample it directly.
+    pub(crate) fn encode_level(
+        mut self,
+        target: &mut dyn EffectTarget,
+        input: &GpuImage,
+    ) -> Result<GpuImage, RenderError> {
+        let last = self.steps.last().unwrap();
+        if last.entry != "upsample" || last.factor[0] != last.factor[1] {
+            return self.encode_steps(target, input);
+        }
+        let step = self.steps.pop().unwrap();
+        self.images.pop();
+        self.output = step.src_rect;
+        self.steps.last_mut().unwrap().dst = None;
+        let mut image = self.encode_steps(target, input)?;
+        let [x, y] = step.base;
+        let factor = step.factor[0];
+        image.rect = IRect::new(
+            x + image.rect.x0 * factor,
+            y + image.rect.y0 * factor,
+            x + image.rect.x1 * factor,
+            y + image.rect.y1 * factor,
+        );
+        image.pixel_scale *= f64::from(factor);
+        Ok(image)
+    }
+
+    fn encode_steps(
+        &self,
+        target: &mut dyn EffectTarget,
+        input: &GpuImage,
+    ) -> Result<GpuImage, RenderError> {
         let rt = gpu::runtime(target.gpu());
         let format = target.format();
         let scale = input.pixel_scale;
+        // Intermediate rects are already in level texels: one texel each
+        // (a pixel scale of `k` would allocate 1/k of the texels and leave the
+        // rest of the level unwritten).
         let mut images = Vec::with_capacity(self.images.len());
-        for (rect, k) in &self.images {
-            images.push(target.allocate(*rect, scale * k)?);
+        for rect in &self.images {
+            images.push(target.allocate(*rect, 1.0)?);
         }
         let output = target.allocate(self.output, scale)?;
         let mut prepared = Vec::with_capacity(self.steps.len());
@@ -490,7 +597,9 @@ impl Plan {
                 .i32(72, s.radius)
                 .f32(76, s.sigma.max(1e-6))
                 .f32(80, s.frac)
-                .i32(84, s.seg);
+                .i32(84, s.seg)
+                .f32(88, s.load_gamma)
+                .f32(92, s.store_gamma);
             // Symmetric, zero-padded layout (see `wsym` in blur.wgsl).
             for (d, x) in s.weights.iter().enumerate().take(WPAD + 1) {
                 w.f32(96 + 4 * (WPAD + d), *x);
@@ -594,7 +703,7 @@ mod tests {
         // Every step's destination lies inside its image.
         for s in &p.steps {
             let rect = match s.dst {
-                Some(d) => p.images[d].0,
+                Some(d) => p.images[d],
                 None => p.output,
             };
             assert!(rect.contains(&s.dst_rect), "{s:?}");

@@ -19,9 +19,11 @@ pub mod console;
 pub mod crash;
 pub mod dirs;
 pub mod logging;
+pub mod memory;
 pub mod settings;
 pub mod single_instance;
 mod time;
+pub use time::utc_label;
 
 pub use cli::{CliSubcommand, GlobalOptions, Invocation};
 pub use dirs::{AppDirs, PluginDir, PluginScope};
@@ -37,8 +39,48 @@ pub const APP_ID: &str = "io.github.felixdad.bae";
 /// Application version (workspace version).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Opens `path` in the application the system uses for it (Edit ▸ Edit
+/// Original).
+pub fn open(path: &std::path::Path) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(path).spawn()
+    } else if cfg!(windows) {
+        // `start` is a cmd built-in; the empty title keeps a quoted path a path.
+        std::process::Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(path)
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(path).spawn()
+    };
+    if let Err(error) = result {
+        tracing::warn!("could not open {}: {error}", path.display());
+    }
+}
+
 /// One-line version string for logs and crash reports, e.g.
 /// `BAE 0.1.0 (aarch64-macos, release)`.
+/// Shows `path` selected in Finder / Explorer (other systems: its folder).
+pub fn reveal(path: &std::path::Path) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+    } else if cfg!(windows) {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open")
+            .arg(path.parent().unwrap_or(path))
+            .spawn()
+    };
+    if let Err(error) = result {
+        tracing::warn!("could not reveal {}: {error}", path.display());
+    }
+}
+
 pub fn version_line() -> String {
     format!("{APP_NAME} {}", version_details())
 }

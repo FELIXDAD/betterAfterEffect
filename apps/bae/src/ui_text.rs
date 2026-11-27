@@ -109,12 +109,22 @@ fn names(a: &Assembled) -> BTreeMap<String, String> {
 pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     "BAE",
     "After Effects",
+    "Photoshop",
     "Agent",
     "3D",
     "CPU",
     // AE's Chinese UI keeps these: RotoBezier, Roto 笔刷工具.
     "RotoBezier",
     "Roto",
+    // AE's 3D view shortcuts: 切换到三维视图 A / B / C.
+    "视图 A",
+    "视图 B",
+    "视图 C",
+    // AE: 显示/隐藏 Alpha 通道, RGB 直接.
+    "Alpha",
+    "RGB",
+    // AE: 3D 位置 Gizmo, 三维旋转 Gizmo …
+    "Gizmo",
 ];
 
 #[test]
@@ -130,7 +140,8 @@ fn every_command_panel_and_action_has_a_chinese_name() {
             Some(zh)
                 if zh == en
                     && !SAME_IN_CHINESE.contains(&en.as_str())
-                    && !bae_ui_motion::catalog::SAME_IN_CHINESE.contains(&en.as_str()) =>
+                    && !bae_ui_motion::catalog::SAME_IN_CHINESE.contains(&en.as_str())
+                    && !bae_ui_motion::effects::same_in_chinese(en) =>
             {
                 untranslated.push(format!("{source}: {en:?}"));
             }

@@ -1,7 +1,7 @@
 //! Keyframes in the layer-bar time graph: glyphs, selection, Cmd/Ctrl-click
 //! interpolation toggles and drags. A drag moves the selected keyframes by whole
-//! frames; Shift snaps the grabbed one to the CTI, other keyframes, In / Out points,
-//! the work area and the comp's ends (AE-ANI-070); Alt-dragging the first or last
+//! frames; Shift snaps the grabbed one to the CTI, other keyframes, markers, In /
+//! Out points, the work area and the comp's ends (AE-ANI-070); Alt-dragging the first or last
 //! selected keyframe scales the selection's timing about the other end (AE-ANI-071).
 
 use std::collections::HashSet;
@@ -24,6 +24,11 @@ pub(super) fn paint_key(p: &egui::Painter, c: Pos2, k: &Keyframe, selected: bool
         color::KEYFRAME
     };
     let stroke = Stroke::new(1.0, Color32::from_gray(20));
+    // Roving keyframes: a small dot (AE).
+    if k.flags.roving {
+        p.circle(c, 2.5, fill, stroke);
+        return;
+    }
     let r = 5.0;
     let half = |left: bool, interp: Interpolation, auto: bool| -> Vec<Pos2> {
         let s = if left { -1.0 } else { 1.0 };
@@ -131,6 +136,46 @@ impl KeyPlan {
         let ct = query::to_comp_time(stage, &k.path, k.time);
         query::to_key_time(stage, &k.path, self.map(ct))
     }
+
+    /// The dragged properties as the release will leave them, for the live
+    /// preview (#593).
+    pub(super) fn preview(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        let mut out: Vec<bae_anim::AttrOverride> = Vec::new();
+        let mut groups: Vec<(&PrimPath, &str)> = Vec::new();
+        for k in &self.keys {
+            if !groups.iter().any(|(p, a)| *p == &k.path && *a == k.attr) {
+                groups.push((&k.path, &k.attr));
+            }
+        }
+        for (path, attr) in groups {
+            let Some(spec) = query::attr_spec(stage, path, attr) else {
+                continue;
+            };
+            let edits: Vec<KeyEdit> = self
+                .keys
+                .iter()
+                .filter(|k| k.path == *path && k.attr == attr)
+                .filter_map(|k| {
+                    let nt = self.key_time(stage, k);
+                    (nt != k.time).then(|| {
+                        let mut e = KeyEdit::new(k.clone());
+                        e.time = Some(nt);
+                        e
+                    })
+                })
+                .collect();
+            if edits.is_empty() {
+                continue;
+            }
+            let mine: Vec<&KeyEdit> = edits.iter().collect();
+            out.push(bae_anim::AttrOverride {
+                prim: path.clone(),
+                attr: attr.to_owned(),
+                spec: bae_motion::apply_key_edits(attr, spec, &mine).0,
+            });
+        }
+        out
+    }
 }
 
 impl TimelinePanel {
@@ -157,7 +202,7 @@ impl TimelinePanel {
         let selected_keys = session.lock().selected_keys.clone();
         // Keyframes of a locked layer cannot be selected or moved (AE).
         let locked = query::locked_layer_of(stage, path).is_some();
-        for (t, k) in &spec.keyframes {
+        for (index, (t, k)) in spec.keyframes.iter().enumerate() {
             let kr = KeyRef::new(path.clone(), attr, *t);
             let selected = selected_keys.contains(&kr);
             let mut ct = query::to_comp_time(stage, path, *t);
@@ -168,7 +213,21 @@ impl TimelinePanel {
             if !graph.expand(6.0).contains(c) {
                 continue;
             }
-            paint_key(&p, c, k, selected);
+            if self.display.indices {
+                p.text(
+                    c,
+                    Align2::CENTER_CENTER,
+                    (index + 1).to_string(),
+                    theme::small(),
+                    if selected {
+                        color::ACCENT
+                    } else {
+                        color::KEYFRAME
+                    },
+                );
+            } else {
+                paint_key(&p, c, k, selected);
+            }
             #[cfg(test)]
             self.last_keys.push((kr.clone(), c));
             let hit = Rect::from_center_size(c, vec2(11.0, 13.0));
@@ -251,6 +310,7 @@ impl TimelinePanel {
         info: &CompInfo,
         axis: &TimeAxis,
         rows: &[Row],
+        paths: &[PrimPath],
         now: Time,
         pointer_x: Option<f32>,
         shift: bool,
@@ -279,13 +339,21 @@ impl TimelinePanel {
                 info.work_area.start,
                 info.work_area.end,
             ];
-            let mut layers: Vec<&PrimPath> = Vec::new();
+            // Comp markers and the shown layers' markers.
+            let marker_times = |owner: &PrimPath| {
+                bae_motion::markers::markers_of(stage, owner)
+                    .into_iter()
+                    .map(|(m, t)| query::to_comp_time(stage, &m, t))
+                    .collect::<Vec<_>>()
+            };
+            targets.extend(marker_times(&info.path));
             for row in rows {
-                if !layers.contains(&&row.layer) {
-                    layers.push(&row.layer);
-                    let t = query::layer_timing(stage, &row.layer);
+                if matches!(row.kind, RowKind::Layer) {
+                    let layer = &paths[row.layer_index];
+                    let t = query::layer_timing(stage, layer);
                     targets.push(t.in_point);
                     targets.push(t.out_point);
+                    targets.extend(marker_times(layer));
                 }
                 if let RowKind::Prop { path, attr, .. } = &row.kind
                     && let Some(spec) = query::attr_spec(stage, path, attr)
@@ -380,6 +448,11 @@ impl TimelinePanel {
                 .map(|k| KeyRef::new(k.path.clone(), k.attr.clone(), k.time + kd))
                 .collect()
         };
-        session.lock().selected_keys = moved;
+        let mut s = session.lock();
+        if let Some(k) = s.key_preview.as_mut().filter(|k| k.owner == "bars") {
+            k.committed = Some((stage.revision(), std::time::Instant::now()));
+        }
+        s.expect(crate::session::Pending::Keys(moved.clone()));
+        s.selected_keys = moved;
     }
 }

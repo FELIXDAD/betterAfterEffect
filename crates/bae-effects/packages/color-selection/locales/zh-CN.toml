@@ -1,0 +1,118 @@
+[effect.broadcast-colors]
+name = "广播颜色"
+keywords = ["电视信号"]
+
+[effect.broadcast-colors.params]
+broadcast_locale = "广播区域设置"
+how_to_make_color_safe = "确保颜色安全的方式"
+maximum_signal_amplitude_ire = "最大信号振幅 (IRE)"
+
+[effect.broadcast-colors.choices]
+broadcast_locale = ["NTSC", "PAL"]
+how_to_make_color_safe = ["降低明亮度", "降低饱和度", "(-", "抠出不安全区域", "抠出安全区域"]
+
+[effect.gamma-pedestal-gain]
+name = "灰度系数/基值/增益"
+keywords = ["伽马"]
+
+[effect.gamma-pedestal-gain.params]
+black_stretch = "黑色伸缩"
+red_gamma = "红色灰度系数"
+red_pedestal = "红色基值"
+red_gain = "红色增益"
+green_gamma = "绿色灰度系数"
+green_pedestal = "绿色基值"
+green_gain = "绿色增益"
+blue_gamma = "蓝色灰度系数"
+blue_pedestal = "蓝色基值"
+blue_gain = "蓝色增益"
+
+[effect.leave-color]
+name = "保留颜色"
+keywords = ["脱色"]
+
+[effect.leave-color.params]
+amount_to_decolor = "脱色量"
+color_to_leave = "要保留的颜色"
+tolerance = "容差"
+edge_softness = "边缘柔和度"
+match_colors = "匹配颜色"
+
+[effect.leave-color.choices]
+match_colors = ["使用 RGB", "使用色相"]
+
+[effect.selective-color]
+name = "可选颜色"
+keywords = ["颜色分量"]
+
+[effect.selective-color.params]
+method = "方法:"
+colors = "颜色:"
+cyan = "青色"
+magenta = "洋红色"
+yellow = "黄色"
+black = "黑色"
+details = "细节"
+reds = "红色"
+reds_cyan = "青色"
+reds_magenta = "洋红色"
+reds_yellow = "黄色"
+reds_black = "黑色"
+yellows = "黄色"
+yellows_cyan = "青色"
+yellows_magenta = "洋红色"
+yellows_yellow = "黄色"
+yellows_black = "黑色"
+greens = "绿色"
+greens_cyan = "青色"
+greens_magenta = "洋红色"
+greens_yellow = "黄色"
+greens_black = "黑色"
+cyans = "青色"
+cyans_cyan = "青色"
+cyans_magenta = "洋红色"
+cyans_yellow = "黄色"
+cyans_black = "黑色"
+blues = "蓝色"
+blues_cyan = "青色"
+blues_magenta = "洋红色"
+blues_yellow = "黄色"
+blues_black = "黑色"
+magentas = "洋红"
+magentas_cyan = "青色"
+magentas_magenta = "洋红色"
+magentas_yellow = "黄色"
+magentas_black = "黑色"
+whites = "白色"
+whites_cyan = "青色"
+whites_magenta = "洋红色"
+whites_yellow = "黄色"
+whites_black = "黑色"
+neutrals = "中性色"
+neutrals_cyan = "青色"
+neutrals_magenta = "洋红色"
+neutrals_yellow = "黄色"
+neutrals_black = "黑色"
+blacks = "黑色"
+blacks_cyan = "青色"
+blacks_magenta = "洋红色"
+blacks_yellow = "黄色"
+blacks_black = "黑色"
+
+[effect.selective-color.choices]
+method = ["相对", "绝对"]
+colors = ["红色", "黄色", "绿色", "青色", "蓝色", "品红色", "白色", "无色", "黑色"]
+
+[effect.video-limiter]
+name = "视频限幅器"
+keywords = ["视频限幅"]
+
+[effect.video-limiter.params]
+clip_level = "剪辑层级"
+compression_before_clipping = "剪切前压缩"
+gamut_warning = "色域警告"
+gamut_warning_color = "色域警告颜色"
+
+[effect.video-limiter.choices]
+clip_level = ["100 IRE（SMPTE 范围）", "103 IRE", "105 IRE（EBU R103 首选）", "109 IRE（SDI 限制）"]
+compression_before_clipping = ["无", "3%", "5%", "10%", "20%"]

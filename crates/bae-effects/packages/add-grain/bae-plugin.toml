@@ -1,0 +1,545 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "add-grain"
+name = "Add Grain"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["VISINF Grain Implant"]
+keywords = ["film", "grain", "stock"]
+flags = ["non-param-vary"]
+shader = "shaders/add_grain.wgsl"
+includes = ["shaders/field.wgsl"]
+
+[effect.roi]
+read = "params.blur_matte + 1"
+
+[[effect.param]]
+id = 21
+key = "viewing_mode"
+name = "Viewing Mode"
+choices = ["Preview", "Blending Matte", "Final Output"]
+type = "popup"
+default = 1
+
+[[effect.param]]
+id = 27
+key = "preset"
+name = "Preset"
+choices = ["[None]", "(-", "Eastman Color Neg II 100T (5247)", "Eastman EXR 100T (5248)", "Eastman Color Neg 100T (5254)", "Kodak Vision 200T (5274)", "Kodak Vision 250D (5246)", "Kodak Vision 320T (5277)", "Eastman Color High Speed Neg 400T (5294)", "Kodak Vision 500T (5279)", "Kodak Expression 500T (5284)", "Eastman EXR 500T (5296)", "Eastman EXR 50D (5245)", "Kodak Vision 800T (5289)", "Kodak SFX 200T"]
+type = "popup"
+default = 1
+
+[[effect.param]]
+id = 102
+key = "preview_region"
+name = "Preview Region"
+end_id = 103
+type = "group"
+
+[[effect.param]]
+id = 22
+key = "center"
+name = "Center"
+group = "preview_region"
+type = "point"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 23
+key = "width"
+name = "Width"
+group = "preview_region"
+range = [50, 1024]
+type = "float"
+default = 200
+
+[[effect.param]]
+id = 24
+key = "height"
+name = "Height"
+group = "preview_region"
+range = [50, 1024]
+type = "float"
+default = 200
+
+[[effect.param]]
+id = 28
+key = "show_box"
+name = "Show Box"
+group = "preview_region"
+type = "checkbox"
+default = true
+
+[[effect.param]]
+id = 29
+key = "box_color"
+name = "Box Color"
+group = "preview_region"
+type = "color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 110
+key = "tweaking"
+name = "Tweaking"
+end_id = 111
+type = "group"
+
+[[effect.param]]
+id = 8
+key = "intensity"
+name = "Intensity"
+group = "tweaking"
+range = [0, 100]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 7
+key = "size"
+name = "Size"
+group = "tweaking"
+range = [0, 10]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 130
+key = "softness"
+name = "Softness"
+group = "tweaking"
+range = [0, 10]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 30
+key = "aspect_ratio"
+name = "Aspect Ratio"
+group = "tweaking"
+range = [0, 10]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 100
+key = "channel_intensities"
+name = "Channel Intensities"
+group = "tweaking"
+end_id = 101
+type = "group"
+
+[[effect.param]]
+id = 2
+key = "red_intensity"
+name = "Red Intensity"
+group = "channel_intensities"
+range = [0, 10]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 3
+key = "green_intensity"
+name = "Green Intensity"
+group = "channel_intensities"
+range = [0, 10]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 4
+key = "blue_intensity"
+name = "Blue Intensity"
+group = "channel_intensities"
+range = [0, 10]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 114
+key = "channel_size"
+name = "Channel Size"
+group = "tweaking"
+end_id = 115
+type = "group"
+
+[[effect.param]]
+id = 32
+key = "red_size"
+name = "Red Size"
+group = "channel_size"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 33
+key = "green_size"
+name = "Green Size"
+group = "channel_size"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 34
+key = "blue_size"
+name = "Blue Size"
+group = "channel_size"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 122
+key = "color"
+name = "Color"
+end_id = 123
+type = "group"
+
+[[effect.param]]
+id = 5
+key = "monochromatic"
+name = "Monochromatic"
+group = "color"
+type = "checkbox"
+default = false
+
+[[effect.param]]
+id = 6
+key = "saturation"
+name = "Saturation"
+group = "color"
+range = [0, 2]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 11
+key = "tint_amount"
+name = "Tint Amount"
+group = "color"
+range = [0, 100]
+type = "float"
+default = 100
+
+[[effect.param]]
+id = 10
+key = "tint_color"
+name = "Tint Color"
+group = "color"
+type = "color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 108
+key = "application"
+name = "Application"
+end_id = 109
+type = "group"
+
+[[effect.param]]
+id = 14
+key = "blending_mode"
+name = "Blending Mode"
+group = "application"
+choices = ["Film", "Multiply", "Add", "Screen", "Overlay"]
+type = "popup"
+default = 1
+
+[[effect.param]]
+id = 40
+key = "shadows"
+name = "Shadows"
+group = "application"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 41
+key = "midtones"
+name = "Midtones"
+group = "application"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 42
+key = "highlights"
+name = "Highlights"
+group = "application"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 43
+key = "midpoint"
+name = "Midpoint"
+group = "application"
+range = [0, 1]
+type = "float"
+default = 0.5
+
+[[effect.param]]
+id = 106
+key = "channel_balance"
+name = "Channel Balance"
+group = "application"
+end_id = 107
+type = "group"
+
+[[effect.param]]
+id = 44
+key = "red_shadows"
+name = "Red Shadows"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 45
+key = "red_midtones"
+name = "Red Midtones"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 46
+key = "red_highlights"
+name = "Red Highlights"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 47
+key = "green_shadows"
+name = "Green Shadows"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 48
+key = "green_midtones"
+name = "Green Midtones"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 49
+key = "green_highlights"
+name = "Green Highlights"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 50
+key = "blue_shadows"
+name = "Blue Shadows"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 51
+key = "blue_midtones"
+name = "Blue Midtones"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 52
+key = "blue_highlights"
+name = "Blue Highlights"
+group = "channel_balance"
+range = [0, 5]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 120
+key = "animation"
+name = "Animation"
+end_id = 121
+type = "group"
+
+[[effect.param]]
+id = 39
+key = "animation_speed"
+name = "Animation Speed"
+group = "animation"
+range = [0, 1]
+type = "float"
+default = 1
+
+[[effect.param]]
+id = 38
+key = "animate_smoothly"
+name = "Animate Smoothly"
+group = "animation"
+type = "checkbox"
+default = false
+
+[[effect.param]]
+id = 13
+key = "random_seed"
+name = "Random Seed"
+group = "animation"
+range = [0, 10000]
+type = "int"
+default = 0
+
+[[effect.param]]
+id = 112
+key = "blend_with_original"
+name = "Blend with Original"
+end_id = 113
+type = "group"
+
+[[effect.param]]
+id = 53
+key = "amount"
+name = "Amount"
+group = "blend_with_original"
+range = [0, 100]
+type = "float"
+default = 0
+
+[[effect.param]]
+id = 63
+key = "combine_match_and_mask_using"
+disabled = true
+name = "Combine Match and Mask Using"
+group = "blend_with_original"
+choices = ["Multiply", "Screen"]
+type = "popup"
+default = 1
+
+[[effect.param]]
+id = 59
+key = "blur_matte"
+name = "Blur Matte"
+group = "blend_with_original"
+range = [0, 100]
+type = "float"
+default = 0
+
+[[effect.param]]
+id = 124
+key = "color_matching"
+name = "Color Matching"
+group = "blend_with_original"
+end_id = 125
+type = "group"
+
+[[effect.param]]
+id = 57
+key = "match_color_using"
+name = "Match Color Using"
+group = "color_matching"
+choices = ["Off", "(-", "RGB", "Hue", "Chroma", "Brightness", "Red Channel", "Green Channel", "Blue Channel"]
+type = "popup"
+default = 3
+
+[[effect.param]]
+id = 54
+key = "matching_color"
+name = "Matching Color"
+group = "color_matching"
+type = "color"
+default = [0.498039, 0.498039, 0.498039, 0.498039]
+
+[[effect.param]]
+id = 55
+key = "matching_tolerance"
+name = "Matching Tolerance"
+group = "color_matching"
+range = [0, 1]
+type = "float"
+default = 0.099991
+
+[[effect.param]]
+id = 56
+key = "matching_softness"
+name = "Matching Softness"
+group = "color_matching"
+range = [0, 1]
+type = "float"
+default = 0.099991
+
+[[effect.param]]
+id = 58
+key = "invert_match"
+name = "Invert Match"
+group = "color_matching"
+type = "checkbox"
+default = false
+
+[[effect.param]]
+id = 126
+key = "masking_layer"
+name = "Masking Layer"
+group = "blend_with_original"
+end_id = 127
+type = "group"
+
+[[effect.param]]
+id = 60
+key = "mask_layer"
+disabled = true
+name = "Mask Layer"
+group = "masking_layer"
+type = "layer"
+default = "none"
+
+[[effect.param]]
+id = 62
+key = "masking_mode"
+disabled = true
+name = "Masking Mode"
+group = "masking_layer"
+choices = ["Intensity", "Alpha", "Inverted Intensity", "Inverted Alpha"]
+type = "popup"
+default = 1
+
+[[effect.param]]
+id = 61
+key = "if_layer_sizes_differ"
+disabled = true
+name = "If Layer Sizes Differ"
+group = "masking_layer"
+choices = ["Center", "Stretch to Fit"]
+type = "popup"
+default = 1
+
+[[effect.pass]]
+entry = "add_grain"
+reads = ["input"]
+writes = "output"

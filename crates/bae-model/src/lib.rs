@@ -19,13 +19,16 @@ pub mod effect;
 mod error;
 mod event;
 mod ids;
+pub mod layer_styles;
 mod op;
 mod path;
 mod prim;
 pub mod project;
+pub mod psd;
 pub mod schema;
 mod stage;
 mod sublayer;
+mod text;
 mod time;
 mod value;
 
@@ -46,10 +49,14 @@ pub use project::{
     BaezAsset, OpenOptions, Project, ProjectError, ProjectManifest, export_flattened_json,
     export_prim_json, export_sublayer_json, extract_baez,
 };
-pub use stage::{DEFAULT_UNDO_LIMIT, Stage, SubscriptionId, Transaction};
+pub use stage::{DEFAULT_UNDO_LIMIT, Stage, SubscriptionId, Transaction, editable_on_locked_layer};
 pub use sublayer::Sublayer;
+pub use text::{
+    BaselineDirection, BaselineOption, LineOrientation, ParagraphStyle, StyleRun, TextDocument,
+    TextStyle,
+};
 pub use time::{FrameRate, Time, TimeRange};
-pub use value::{BezierPath, FeatherPoint, TextDocument, Value, ValueType};
+pub use value::{BezierPath, FeatherPoint, Value, ValueType};
 
 /// Re-exported for `bae-sync` (version vectors, export modes).
 pub use loro;

@@ -15,7 +15,7 @@
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
-use bae_model::PrimPath;
+use bae_model::{BezierPath, PrimPath};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::PanelContext;
 use bae_ui::theme;
@@ -23,6 +23,8 @@ use egui::{CursorIcon, Painter, PointerButton, Pos2, Rect, Response, Ui};
 use serde_json::json;
 
 use super::free_transform::FreeTransform;
+use super::gizmo3d::{self, Gizmo, Style};
+use super::group_edit;
 use super::overlay::{self, EditablePath};
 use super::path_edit::{self, PathDrag, VertexSelection};
 use super::transform::{self, Kind, TransformDrag};
@@ -37,6 +39,11 @@ enum Press {
     Free,
     Path(path_edit::Hit),
     Handle(PrimPath, transform::Handle),
+    /// Inside the selected shape group's box, or on one of its handles.
+    Group,
+    GroupHandle(usize),
+    /// A 3D layer's axis arrow or rotation ring (0 X, 1 Y, 2 Z).
+    Axis(PrimPath, usize),
     Anchor(PrimPath),
     Layer(PrimPath),
     Empty,
@@ -58,15 +65,31 @@ pub(crate) struct SelectState {
     path_drag: Option<PathDrag>,
     /// Free Transform Points box.
     pub(crate) free: Option<FreeTransform>,
+    /// The shape group selected by a double-click, and its drag.
+    pub(crate) group: Option<PrimPath>,
+    pub(super) group_drag: Option<group_edit::GroupDrag>,
 }
 
 impl SelectState {
+    /// The mask or shape path a vertex drag or free transform is changing,
+    /// and its previewed value.
+    pub(super) fn path_preview(&self) -> Option<(PrimPath, BezierPath)> {
+        if let Some(d) = &self.path_drag {
+            return Some((d.prim().clone(), d.preview().path));
+        }
+        self.free
+            .as_ref()
+            .filter(|f| f.dragging())
+            .map(|f| (f.prim.clone(), f.preview().clone()))
+    }
+
     /// A drag is in progress.
     pub(crate) fn busy(&self) -> bool {
         self.drag.is_some()
             || self.marquee.is_some()
             || self.path_drag.is_some()
             || self.free.as_ref().is_some_and(|f| f.dragging())
+            || self.group_drag.is_some()
     }
 }
 
@@ -77,15 +100,81 @@ pub(super) fn hit_layer(
     view: &View,
     pos: Pos2,
 ) -> Option<PrimPath> {
+    layers_at(stage, comp, view, pos).next()
+}
+
+/// The edges of the layers not in `moving`, extended across the comp: the
+/// left and right of their bounds as vertical lines, top and bottom as
+/// horizontal ones (comp space).
+fn extended_edges(comp: &EvaluatedComp, moving: &[PrimPath]) -> Vec<(bool, f64)> {
+    let mut out = Vec::new();
+    for l in comp.layers.iter().filter(|l| {
+        l.visible
+            && !moving.contains(&l.path)
+            && !matches!(
+                l.kind,
+                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+            )
+    }) {
+        let Some((a, b)) = render::layer_bounds(l) else {
+            continue;
+        };
+        let m = Affine::new(l.world_matrix);
+        let corners = [a, DVec2::new(b.x, a.y), b, DVec2::new(a.x, b.y)].map(|p| m.apply(p));
+        let (lo, hi) = corners.iter().fold(
+            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+            |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+        );
+        out.extend([(true, lo.x), (true, hi.x), (false, lo.y), (false, hi.y)]);
+    }
+    out
+}
+
+/// The unlocked layers under `pos`, topmost first.
+pub(super) fn layers_at<'a>(
+    stage: &'a bae_model::Stage,
+    comp: &'a EvaluatedComp,
+    view: &'a View,
+    pos: Pos2,
+) -> impl Iterator<Item = PrimPath> + 'a {
     let outer = Affine::new(DMat4::IDENTITY);
     comp.layers
         .iter()
-        .filter(|l| l.visible && !l.switches.guide || l.kind == bae_model::LayerKind::Null)
+        .filter(|l| {
+            l.visible && !l.switches.guide || l.kind == bae_model::LayerKind::Null || eye_layer(l)
+        })
         .filter(|l| !query::is_locked(stage, &l.path))
-        .find(|l| {
+        .filter(move |l| {
             render::bounds_quad(l, view, &outer).is_some_and(|q| render::quad_contains(&q, pos))
+                || eye_near(l, view, pos)
         })
         .map(|l| l.path.clone())
+}
+
+/// Cameras and lights: picked by their position.
+fn eye_layer(l: &bae_anim::EvaluatedLayer) -> bool {
+    matches!(
+        l.kind,
+        bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+    )
+}
+
+/// A camera or light whose position is near `pos` in a 3D view (not the
+/// camera the view looks through).
+fn eye_near(l: &bae_anim::EvaluatedLayer, view: &View, pos: Pos2) -> bool {
+    if !eye_layer(l) {
+        return false;
+    }
+    let m = l.camera.as_ref().map_or(l.world_matrix, |c| c.world_matrix);
+    let eye = m.w_axis.truncate();
+    if view
+        .camera
+        .is_some_and(|(c, _)| c.position().distance(eye) < 1e-6)
+    {
+        return false;
+    }
+    view.project(eye, true)
+        .is_some_and(|p| p.distance(pos) <= transform::ANCHOR_PICK)
 }
 
 /// Whether a convex quad and a rectangle overlap (separating axes).
@@ -146,6 +235,7 @@ pub(super) fn frame(
     view: &View,
     tool: Tool,
     painter: &Painter,
+    eval: &mut crate::common::EvalCache,
 ) -> Option<CursorIcon> {
     if !matches!(tool, Tool::Selection | Tool::Rotation | Tool::PanBehind) {
         state.press = None;
@@ -164,11 +254,26 @@ pub(super) fn frame(
         )
     });
     let selected = session.lock().selected_layers.clone();
-    let paths: Vec<EditablePath> = if tool == Tool::Selection {
-        overlay::editable_paths(stage, comp, &selected, None)
-    } else {
-        Vec::new()
-    };
+    // The bar's Toggle Mask and Shape Path Visibility off: no paths to edit.
+    let mut paths: Vec<EditablePath> =
+        if tool == Tool::Selection && session.lock().view_options.paths {
+            overlay::editable_paths(stage, comp, &selected, None)
+        } else {
+            Vec::new()
+        };
+    // A shape layer's path in Free Transform (double-clicked) stays editable.
+    let prefs = super::prefs::ViewerPrefs::current(cx.resources);
+    if state
+        .free
+        .as_ref()
+        .is_some_and(|f| !paths.iter().any(|p| p.prim == f.prim))
+    {
+        for p in overlay::editable_paths(stage, comp, &selected, Some(prefs)) {
+            if !paths.iter().any(|q| q.prim == p.prim) {
+                paths.push(p);
+            }
+        }
+    }
     if state
         .vertices
         .prim
@@ -190,10 +295,19 @@ pub(super) fn frame(
     }
     let request = std::mem::take(&mut tools.lock().free_transform_request);
     if request && tool == Tool::Selection {
+        // The path with selected vertices, else the one selected in the
+        // Timeline, else the first.
+        let in_timeline = session
+            .lock()
+            .selected_props
+            .iter()
+            .find(|(p, attr)| attr == "path" && paths.iter().any(|e| &e.prim == p))
+            .map(|(p, _)| p.clone());
         let prim = state
             .vertices
             .prim
             .clone()
+            .or(in_timeline)
             .or_else(|| paths.first().map(|p| p.prim.clone()));
         if let Some(p) = prim.and_then(|prim| paths.iter().find(|p| p.prim == prim)) {
             let sel = if state.vertices.prim.as_ref() == Some(&p.prim) {
@@ -224,16 +338,144 @@ pub(super) fn frame(
         };
         state.free = FreeTransform::new(&paths[pi], &sel);
         state.path_drag = None;
+    } else if tool == Tool::Selection
+        && resp.double_clicked()
+        && let Some(pos) = hover
+    {
+        // AE: double-clicking a text layer edits its text (Type tool); a shape
+        // layer, its path under the pointer (or its first) in Free Transform;
+        // a pre-comp opens its composition; any other layer opens in the
+        // Layer panel.
+        let under: Vec<PrimPath> = layers_at(stage, comp, view, pos).collect();
+        if let Some(layer) = under
+            .iter()
+            .find(|l| selected.contains(l))
+            .or(under.first())
+        {
+            match comp.layer(layer).map(|l| l.kind) {
+                Some(bae_model::LayerKind::Text) => {
+                    tools.lock().edit_text_request = Some(layer.clone());
+                }
+                Some(bae_model::LayerKind::Shape)
+                    if comp
+                        .layer(layer)
+                        .and_then(|l| group_edit::group_at(l, view, pos))
+                        .is_some_and(|g| {
+                            !overlay::editable_paths(
+                                stage,
+                                comp,
+                                std::slice::from_ref(layer),
+                                Some(prefs),
+                            )
+                            .iter()
+                            .any(|p| p.prim.as_str().starts_with(g.as_str()))
+                        }) =>
+                {
+                    // A parametric shape (rectangle, ellipse, polystar): AE
+                    // selects its group and shows the group's box.
+                    state.group = comp
+                        .layer(layer)
+                        .and_then(|l| group_edit::group_at(l, view, pos));
+                    let mut s = session.lock();
+                    s.selected_layers = vec![layer.clone()];
+                    // The Timeline selects its row too.
+                    if let Some(g) = &state.group {
+                        s.selected_groups = vec![format!("{layer}#{g}")];
+                    }
+                }
+                Some(bae_model::LayerKind::Shape) => {
+                    let own = overlay::editable_paths(
+                        stage,
+                        comp,
+                        std::slice::from_ref(layer),
+                        Some(prefs),
+                    );
+                    let inside = own.iter().find(|p| {
+                        let pts: Vec<Pos2> = (0..p.path.vertices.len())
+                            .map(|i| p.screen(view, i))
+                            .collect();
+                        Rect::from_points(&pts).contains(pos)
+                    });
+                    if let Some(p) = inside.or(own.first()) {
+                        session.lock().selected_layers = vec![layer.clone()];
+                        state.free = FreeTransform::new(p, &[]);
+                        state.path_drag = None;
+                    }
+                }
+                Some(_) => {
+                    crate::layer_panel::open_clicked(
+                        cx,
+                        session,
+                        layer,
+                        ui.input(|i| i.modifiers.alt),
+                        tool,
+                        eval,
+                    );
+                }
+                None => {}
+            }
+        }
     }
 
+    // The shape group selected in the Timeline shows its box (AE: a shape
+    // tool's new group, a group row clicked); the viewer selects groups there.
+    state.group = session
+        .lock()
+        .selected_groups
+        .iter()
+        .rev()
+        .filter_map(|id| crate::session::group_prim(id))
+        .find(|g| {
+            stage
+                .prim(g)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::SHAPE_GROUP))
+        });
+    // Only while its layer stays selected.
+    if state
+        .group
+        .as_ref()
+        .is_some_and(|g| !selected.iter().any(|l| g.as_str().starts_with(l.as_str())))
+    {
+        state.group = None;
+    }
+    let group_quad = |state: &SelectState| -> Option<(PrimPath, [Pos2; 4])> {
+        let g = state.group.as_ref()?;
+        let l = comp
+            .layers
+            .iter()
+            .find(|l| g.as_str().starts_with(l.path.as_str()))?;
+        let f = group_edit::group(l, g)?;
+        Some((l.path.clone(), group_edit::quad(l, &f, view)?))
+    };
     // What is under the pointer.
+    let style = gizmo_style(tool, options.gizmo);
     let target = |pos: Pos2, state: &SelectState| -> Press {
+        if matches!(tool, Tool::Selection | Tool::Rotation)
+            && let Some((_, q)) = group_quad(state)
+        {
+            if tool == Tool::Selection
+                && let Some(h) = group_edit::handles(&q)
+                    .iter()
+                    .position(|p| p.distance(pos) <= transform::HANDLE_PICK)
+            {
+                return Press::GroupHandle(h);
+            }
+            if render::quad_contains(&q, pos) {
+                return Press::Group;
+            }
+        }
         if tool == Tool::Selection
             && let Some(h) = path_edit::hit(&paths, &state.vertices, view, pos)
         {
             return Press::Path(h);
         }
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+            if let Some(style) = style
+                && let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode))
+                && let Some(i) = g.hit(view, pos, style)
+            {
+                return Press::Axis(l.path.clone(), i);
+            }
             if tool == Tool::PanBehind
                 && transform::anchor_screen(l, view).distance(pos) <= transform::ANCHOR_PICK
             {
@@ -248,8 +490,19 @@ pub(super) fn frame(
                 return Press::Handle(l.path.clone(), h);
             }
         }
-        match hit_layer(stage, comp, view, pos) {
-            Some(l) => Press::Layer(l),
+        // AE: a selected layer under the pointer is the one edited, even below
+        // others; Shift-click adds the topmost one.
+        let under: Vec<PrimPath> = layers_at(stage, comp, view, pos).collect();
+        let pick = if shift {
+            under.first()
+        } else {
+            under
+                .iter()
+                .find(|l| selected.contains(l))
+                .or(under.first())
+        };
+        match pick {
+            Some(l) => Press::Layer(l.clone()),
             None => Press::Empty,
         }
     };
@@ -278,6 +531,14 @@ pub(super) fn frame(
             Press::Path(_) => {}
             _ if !shift => state.vertices.clear(),
             _ => {}
+        }
+        if !matches!(t, Press::Group | Press::GroupHandle(_))
+            && let Some(g) = state.group.take()
+        {
+            session
+                .lock()
+                .selected_groups
+                .retain(|id| crate::session::group_prim(id).as_ref() != Some(&g));
         }
         state.press = Some((t, pos));
     }
@@ -314,6 +575,22 @@ pub(super) fn frame(
         let at = view.to_comp(origin);
         session.lock().stop();
         match press {
+            Press::Group | Press::GroupHandle(_) => {
+                let kind = match press {
+                    Press::GroupHandle(h) => group_edit::Kind::Scale(h),
+                    _ if tool == Tool::Rotation => group_edit::Kind::Rotate,
+                    _ => group_edit::Kind::Move,
+                };
+                if let Some(g) = state.group.clone()
+                    && let Some(l) = comp
+                        .layers
+                        .iter()
+                        .find(|l| g.as_str().starts_with(l.path.as_str()))
+                    && let Some(f) = group_edit::group(l, &g)
+                {
+                    state.group_drag = group_edit::GroupDrag::new(l, &f, kind, at);
+                }
+            }
             Press::Free => {}
             Press::Path(h) => {
                 let pi = match h {
@@ -329,6 +606,59 @@ pub(super) fn frame(
                     layers.extend(selected.iter().filter(|l| **l != layer).cloned());
                     state.drag = Some(primary_first(
                         TransformDrag::new(stage, comp, &layers, Kind::Scale { handle, bounds }),
+                        &layer,
+                    ));
+                }
+            }
+            Press::Axis(layer, axis) => {
+                if let Some(style) = style
+                    && let Some(l) = comp.layer(&layer)
+                    && let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode))
+                    && let Some((camera, size)) = view.camera
+                {
+                    let kind = if style == Style::Rings {
+                        let center = view.project(g.origin, true).map_or(at, |c| view.to_comp(c));
+                        Kind::Spin {
+                            axis,
+                            center,
+                            start: at,
+                            last: 0.0,
+                            sign: gizmo3d::spin_sign(&camera, g.origin, g.axes[axis]),
+                            orientation: options.rotation_sets_orientation,
+                        }
+                    } else {
+                        let dir = g.axes[axis];
+                        let start = gizmo3d::along(&camera, size, at, g.origin, dir).unwrap_or(0.0);
+                        let camera = Box::new(camera);
+                        if style == Style::Scale {
+                            Kind::AxisScale {
+                                axis,
+                                origin: g.origin,
+                                dir,
+                                camera,
+                                size,
+                                start,
+                            }
+                        } else {
+                            Kind::Axis {
+                                axis,
+                                origin: g.origin,
+                                dir,
+                                camera,
+                                size,
+                                start,
+                            }
+                        }
+                    };
+                    let mut layers = vec![layer.clone()];
+                    layers.extend(
+                        selected
+                            .iter()
+                            .filter(|p| **p != layer && comp.layer(p).is_some_and(render::is_3d))
+                            .cloned(),
+                    );
+                    state.drag = Some(primary_first(
+                        TransformDrag::new(stage, comp, &layers, kind),
                         &layer,
                     ));
                 }
@@ -350,7 +680,7 @@ pub(super) fn frame(
                         compensate: true,
                     },
                 );
-                state.drag = Some(drag.with_snapping(comp, &layer, anchor));
+                state.drag = Some(drag.with_snapping(comp, &layer, anchor, options.snap_features));
             }
             Press::Layer(layer) => {
                 let layers = {
@@ -364,14 +694,11 @@ pub(super) fn frame(
                     }
                     s.selected_layers.clone()
                 };
+                let grabbed = comp.layer(&layer);
                 let kind = match tool {
                     Tool::Rotation => {
-                        let center = comp
-                            .layer(&layer)
-                            .map(|l| {
-                                let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-                                DVec2::new(a.x, a.y)
-                            })
+                        let center = grabbed
+                            .map(|l| view.to_comp(transform::anchor_screen(l, view)))
                             .unwrap_or(at);
                         Kind::Rotate {
                             center,
@@ -386,8 +713,45 @@ pub(super) fn frame(
                     },
                     _ => Kind::Move { start: at },
                 };
-                let drag = TransformDrag::new(stage, comp, &layers, kind);
-                state.drag = Some(primary_first(drag.with_snapping(comp, &layer, at), &layer));
+                // A 3D layer moves parallel to the view, at its depth.
+                let plane = grabbed
+                    .filter(|l| {
+                        render::is_3d(l)
+                            || matches!(
+                                l.kind,
+                                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+                            )
+                    })
+                    .and_then(|l| {
+                        let (camera, size) = view.camera?;
+                        let a = match &l.camera {
+                            // A camera moves at its own depth (its anchor is the point of interest).
+                            Some(c) => c.world_matrix.w_axis.truncate(),
+                            None => l.world_matrix.transform_point3(l.transform.anchor_point),
+                        };
+                        Some(transform::ViewPlane {
+                            camera,
+                            size,
+                            depth: camera.view().transform_point3(a).z,
+                        })
+                    });
+                let drag = TransformDrag::new(stage, comp, &layers, kind).with_plane(plane);
+                let mut lines = super::guides::snap_lines(
+                    stage,
+                    info,
+                    &session.lock().view_options,
+                    &bae_ui::settings::GridGuides::current(cx.resources),
+                );
+                // Snap to edges extended beyond layer bounds: the other
+                // layers' edges as lines across the comp.
+                if options.snap_edges {
+                    lines.extend(extended_edges(comp, &layers));
+                }
+                let reach = f64::from(transform::SNAP_DISTANCE / view.scale.max(1e-6));
+                let drag = drag
+                    .with_snapping(comp, &layer, at, options.snap_features)
+                    .with_lines(lines, reach);
+                state.drag = Some(primary_first(drag, &layer));
             }
             Press::Empty if tool == Tool::Selection => {
                 state.marquee = Some(Marquee {
@@ -406,6 +770,19 @@ pub(super) fn frame(
         && let Some(pos) = pointer
     {
         d.update(view.to_comp(pos), shift, snap);
+        // AE's Info panel: the moved layer's position and how far it moved.
+        if matches!(d.kind, Kind::Move { .. })
+            && let Some(e) = d.edits.first()
+        {
+            let (p, p0) = (e.now.position, e.start.position);
+            session.lock().info.moved =
+                Some((e.path.clone(), [p.x, p.y], [p.x - p0.x, p.y - p0.y]));
+        }
+    }
+    if let Some(d) = state.group_drag.as_mut()
+        && let Some(pos) = pointer
+    {
+        d.update(view.to_comp(pos), shift);
     }
     if let Some(d) = state.path_drag.as_mut()
         && let Some(pos) = pointer
@@ -459,6 +836,11 @@ pub(super) fn frame(
         {
             d.commit(cx, session, info);
         }
+        if let Some(d) = state.group_drag.take()
+            && d.changed()
+        {
+            cx.invoke_with("attr.set_many", json!({ "edits": d.commit(stage, time) }));
+        }
         if let Some(f) = state.free.as_mut() {
             f.release(cx, session, info);
         }
@@ -488,8 +870,34 @@ pub(super) fn frame(
         ));
     }
     path_edit::paint(painter, view, &shown, &state.vertices);
+    if let Some((layer, q)) = group_quad(state) {
+        group_edit::paint(painter, &q, view, label_color(stage, &layer));
+    }
     if let Some(d) = &state.drag {
         d.paint_guides(painter, view, info);
+    }
+    // The axis gizmo of the selected 3D layers (rings for the Rotation tool).
+    if let Some(style) = style {
+        let active = match (&state.drag, hover) {
+            (Some(d), _) => d
+                .axis()
+                .zip(d.edits.first())
+                .map(|(a, e)| (e.path.clone(), a)),
+            (None, Some(pos)) => match target(pos, state) {
+                Press::Axis(l, a) => Some((l, a)),
+                _ => None,
+            },
+            _ => None,
+        };
+        for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+            if let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode)) {
+                let on = active
+                    .as_ref()
+                    .filter(|(p, _)| *p == l.path)
+                    .map(|(_, a)| *a);
+                g.paint(painter, view, style, on);
+            }
+        }
     }
     let mut cursor = None;
     if let Some(f) = &state.free
@@ -512,6 +920,26 @@ pub(super) fn frame(
         }
     }
     cursor
+}
+
+/// The 3D gizmo of `tool` (the Selection tool's follows the 3D Gizmo mode).
+fn gizmo_style(tool: Tool, mode: crate::tools::GizmoMode) -> Option<Style> {
+    use crate::tools::GizmoMode;
+    match (tool, mode) {
+        (Tool::Rotation, _) | (Tool::Selection, GizmoMode::Rotation) => Some(Style::Rings),
+        (Tool::Selection, GizmoMode::Scale) => Some(Style::Scale),
+        (Tool::Selection, GizmoMode::Position) => Some(Style::Arrows),
+        _ => None,
+    }
+}
+
+/// Scaling is along the layer's own axes whatever the axis mode.
+fn gizmo_axes(style: Style, mode: crate::tools::AxisMode) -> crate::tools::AxisMode {
+    if style == Style::Scale {
+        crate::tools::AxisMode::Local
+    } else {
+        mode
+    }
 }
 
 /// Put the edit of `primary` first (scale and rotate measure on it).

@@ -11,6 +11,8 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
+pub(crate) mod audio;
+
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::props::{self, Node};
@@ -34,7 +36,7 @@ fn prop_line(
         .cloned()
         .unwrap_or_default();
     let key_now = query::to_key_time(stage, path, now);
-    ui.horizontal(|ui| {
+    let row = ui.horizontal(|ui| {
         ui.set_min_height(20.0);
         let mut on = spec.is_animated();
         let animatable = stage
@@ -57,15 +59,20 @@ fn prop_line(
             .lock()
             .scrub
             .as_ref()
-            .filter(|s| s.path == *path && s.attr == attr)
-            .map(|s| s.value.clone())
-            .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
+            .and_then(|s| s.value_for(path, attr))
+            .cloned()
+            .or_else(|| common::current_value(eval.get(cx.stage), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
-            let edit = common::value_editor(ui, id, attr, &v, dims, tr(label));
+            let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
+            let edit = common::value_editor(ui, id, attr, &v, dims, tr(label), expression);
             common::apply_edit(cx, session, path, attr, now, edit);
         }
     });
+    // An expression pick whip dragged from the Timeline.
+    if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
+        crate::expr::link(cx, eval.get(cx.stage), &whip, path, Some(attr), now);
+    }
 }
 
 fn section(ui: &mut Ui, title: &str) {
@@ -93,20 +100,65 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
         .filter(|l| stage.has_prim(l))
 }
 
+impl EffectControlsPanel {
+    fn layer(&self, stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
+        self.locked
+            .as_ref()
+            .filter(|p| stage.has_prim(p))
+            .cloned()
+            .or_else(|| selected_layer(stage, session))
+    }
+    /// AE's line under the tab: the lock, the layer's label color and
+    /// "<comp> • <layer>".
+    fn layer_header(&mut self, ui: &mut Ui, stage: &Stage, layer: &PrimPath) {
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            let locked = self.locked.is_some();
+            let lock = icons::button(ui, Icon::Lock, 14.0, locked).labeled_toggle(
+                egui::WidgetType::Checkbox,
+                tr("Lock"),
+                locked,
+            );
+            if lock.clicked() {
+                self.locked = if locked { None } else { Some(layer.clone()) };
+            }
+            let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            icons::swatch(
+                ui.painter(),
+                r.center(),
+                9.0,
+                theme::label_color(actions::label_of(stage, layer).max(0) as usize),
+            );
+            let comp = query::owning_comp(stage, layer)
+                .map(|c| query::display_name_of(stage, &c))
+                .unwrap_or_default();
+            ui.label(
+                egui::RichText::new(format!("{comp} • {}", query::display_name_of(stage, layer)))
+                    .color(color::TEXT_DIM),
+            );
+        });
+        ui.separator();
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
 pub struct PropertiesPanel {
     eval: EvalCache,
-    title: String,
 }
 
 impl Panel for PropertiesPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        if self.title.is_empty() {
-            TabInfo::new(tr("Properties"))
-        } else {
-            TabInfo::new(format!("{}: {}", tr("Properties"), self.title))
+    /// "Properties: <layer>" for the layer selected now, even while the panel
+    /// is not drawn (a collapsed or background tab, #465).
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        match selected_layer(cx.stage, &common::session(cx.resources)) {
+            Some(layer) => TabInfo::new(format!(
+                "{}: {}",
+                tr("Properties"),
+                query::display_name_of(cx.stage, &layer)
+            )),
+            None => TabInfo::new(tr("Properties")),
         }
     }
 
@@ -120,7 +172,6 @@ impl Panel for PropertiesPanel {
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let Some(layer) = selected_layer(stage, &session) else {
-            self.title.clear();
             common::empty_hint(
                 ui,
                 tr("No layer selected"),
@@ -128,7 +179,6 @@ impl Panel for PropertiesPanel {
             );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
         let now = session.lock().active_time();
         let dims = if common::is_3d(stage, &layer) { 3 } else { 2 };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -149,7 +199,7 @@ impl Panel for PropertiesPanel {
             // Text.
             if query::layer_kind(stage, &layer).as_deref() == Some("text") {
                 section(ui, tr("Text"));
-                let doc = common::current_value(self.eval.get(cx.resources), stage, &layer, "text:source", now);
+                let doc = common::current_value(self.eval.get(cx.stage), stage, &layer, "text:source", now);
                 if let Some(Value::TextDocument(doc)) = doc {
                     let key = ui.id().with(("text_src", layer.as_str()));
                     let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| doc.text.clone());
@@ -160,39 +210,50 @@ impl Panel for PropertiesPanel {
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(key, text.clone()));
                     }
-                    let mut d2 = (*doc).clone();
-                    let mut commit = false;
+                    let range=session.lock().text_range(Some(&layer));
+                    let selected=common::SelectedStyles{doc:&doc,range:range.clone().unwrap_or(0..usize::MAX)};
+                    let mut change=json!({});
                     if r.lost_focus() {
                         ui.data_mut(|d| d.remove::<String>(key));
                         if text != doc.text {
-                            d2.text = text;
-                            commit = true;
+                            cx.invoke_with("text.set_text",json!({"layer":layer,"text":text,"time":query::to_key_time(stage,&layer,now)}));
                         }
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        let mut size = d2.font_size;
-                        let px = format!(" {}", tr("px")); // 像素 in Chinese (#197)
-                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(&px).range(1.0..=2000.0).label(tr("Font Size")));
-                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                            d2.font_size = size;
-                            commit = true;
+                        if let Some(v)=crate::ae_panels::character::number(ui,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size")) {
+                            change["font_size"]=json!(v);
                         }
                     });
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Fill Color")).color(color::TEXT));
-                        let mut c = d2.fill_color.map(|v| v as f32);
-                        if ui.color_edit_button_rgba_unmultiplied(&mut c).changed() {
-                            d2.fill_color = c.map(f64::from);
-                            commit = true;
+                        let fill=selected.character(|s|s.fill_color);
+                        let mut c=fill.unwrap_or([0.;4]);
+                        let edit=ui.scope(|ui|bae_ui::color_picker::color_button(ui,key.with("fill"),&mut c,egui::vec2(30.,16.),tr("Fill Color"),tr("Fill Color")));
+                        if fill.is_none() {
+                            ui.painter().rect_filled(edit.response.rect.shrink(1.),0.,color::PANEL);
+                        }
+                        if let bae_ui::color_picker::ColorEdit::Commit(c)=edit.inner { change["fill_color"]=json!(c); }
+                    });
+                    // Paragraph alignment.
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(tr("Paragraph")).color(color::TEXT));
+                        for (icon, value, name) in [
+                            (Icon::TextAlignLeft, "left", "Left Align Text"),
+                            (Icon::TextAlignCenter, "center", "Center Text"),
+                            (Icon::TextAlignRight, "right", "Right Align Text"),
+                        ] {
+                            let on = selected.paragraph(|p|p.justification.clone()).as_deref()==Some(value);
+                            let r = icons::button(ui, icon, 20.0, on)
+                                .labeled_toggle(egui::WidgetType::Button, tr(name), on)
+                                .on_hover_text(tr(name));
+                            if r.clicked() && !on {
+                                change["justification"]=json!(value);
+                            }
                         }
                     });
-                    if commit {
-                        let key_now = query::to_key_time(stage, &layer, now);
-                        cx.invoke_with(
-                            "attr.set_at",
-                            json!({"path": layer, "attr": "text:source", "time": key_now, "value": Value::TextDocument(Box::new(d2))}),
-                        );
+                    if change.as_object().is_some_and(|o|!o.is_empty()) {
+                        cx.invoke_with("text.set_style",json!({"layers":[layer],"time":now,"range":range,"style":change}));
                     }
                 }
             }
@@ -205,6 +266,22 @@ impl Panel for PropertiesPanel {
                 for (path, attr, label) in flat.into_iter().filter(|(_, a, _)| a == "color" || a == "size" || a == "width") {
                     let owner = query::display_name_of(stage, &path);
                     prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &format!("{owner} · {label}"), now, 2);
+                }
+            }
+            // Effects: each effect's controls, in stacking order (AE).
+            let effects = props::effect_nodes(stage, &layer);
+            if !effects.is_empty() {
+                section(ui, tr("Effects"));
+                for effect in &effects {
+                    let Node::Group { label, children, .. } = effect else {
+                        continue;
+                    };
+                    ui.label(egui::RichText::new(label).color(color::TEXT_STRONG));
+                    let mut flat = Vec::new();
+                    collect_props(children, &mut flat);
+                    for (path, attr, label) in flat {
+                        prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &label, now, dims);
+                    }
                 }
             }
         });
@@ -235,41 +312,100 @@ fn collect_props(nodes: &[Node], out: &mut Vec<(PrimPath, String, String)>) {
 #[derive(Default)]
 pub struct EffectControlsPanel {
     eval: EvalCache,
-    title: String,
+    controls: crate::effects::controls::ControlsState,
+    /// The layer the panel is locked to (its lock button, AE): it stays on it
+    /// whatever is selected.
+    locked: Option<PrimPath>,
 }
 
 impl Panel for EffectControlsPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        if self.title.is_empty() {
-            TabInfo::new(tr("Effect Controls"))
-        } else {
-            TabInfo::new(format!("{} {}", tr("Effect Controls"), self.title))
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        match self.layer(cx.stage, &common::session(cx.resources)) {
+            Some(layer) => common::related_tab(
+                cx,
+                "Effect Controls",
+                &layer,
+                &query::display_name_of(cx.stage, &layer),
+            ),
+            None => TabInfo::new(tr("Effect Controls")),
         }
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
+        if action.id == ids::DUPLICATE
+            && let Some(layer) = self.layer(cx.stage, &session)
+        {
+            let before = bae_motion::effect::effects_of(cx.stage, &layer);
+            let mut s = session.lock();
+            let selected: Vec<_> = before
+                .iter()
+                .filter(|p| s.selected_effects.contains(p))
+                .collect();
+            if !selected.is_empty() {
+                cx.invoke_with("effect.duplicate", json!({"effects":selected}));
+                s.expect(crate::session::Pending::NewEffects {
+                    layers: vec![layer],
+                    before,
+                });
+                return true;
+            }
+        }
         actions::handle(action, cx, &session)
+    }
+
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        ui.checkbox(
+            &mut self.controls.show_presets,
+            tr("Show Animation Presets"),
+        );
+        ui.separator();
+        if ui.button(tr("Manage Effects...")).clicked() {
+            crate::effects::manager::open(cx);
+            ui.close();
+        }
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({"show_presets":self.controls.show_presets}))
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
-        let Some(layer) = selected_layer(stage, &session) else {
-            self.title.clear();
+        if self.locked.as_ref().is_some_and(|l| !stage.has_prim(l)) {
+            self.locked = None;
+        }
+        let Some(layer) = self.layer(stage, &session) else {
             common::empty_hint(
                 ui,
                 tr("No layer selected"),
-                tr("Select a layer to see its properties."),
+                tr("Select a layer to see its effects."),
             );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
+        self.layer_header(ui, stage, &layer);
         let now = session.lock().active_time();
         let effects = props::effect_nodes(stage, &layer);
         if effects.is_empty() {
-            common::empty_hint(ui, &self.title.clone(), tr("No effects applied"));
+            return;
+        }
+        // Controls from the effect definitions (07's built-ins, plugins).
+        if crate::effects::registries(cx.resources).is_some() {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    crate::effects::controls::show(
+                        ui,
+                        cx,
+                        &session,
+                        &mut self.eval,
+                        &mut self.controls,
+                        &layer,
+                        now,
+                    );
+                });
             return;
         }
         egui::ScrollArea::vertical()
@@ -310,8 +446,23 @@ pub struct PreviewPanel;
 /// Content size the Preview panel needs (transport row with Loop, timecode).
 const PREVIEW_MIN_W: f32 = 210.0;
 const PREVIEW_MIN_H: f32 = 56.0;
+/// Height the Preview options need under the transport row.
+const PREVIEW_OPTIONS_H: f32 = 240.0;
 
 impl Panel for PreviewPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let session = common::session(cx.resources);
+        if ui
+            .checkbox(
+                &mut session.lock().preview.favor_active_camera,
+                tr("Previews Favor Active Camera"),
+            )
+            .clicked()
+        {
+            ui.close();
+        }
+    }
+
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         // The transport row and the timecode line below it, never cut off.
         TabInfo::new(tr("Preview")).min_size(egui::vec2(PREVIEW_MIN_W, PREVIEW_MIN_H))
@@ -326,10 +477,9 @@ impl Panel for PreviewPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let info = common::active_comp(cx.stage, &session);
-        if let Some(info) = &info
-            && session.lock().tick(info)
-        {
-            ui.ctx().request_repaint();
+        // The shell ticks the clock; this keeps the audio mix current.
+        if let Some(info) = &info {
+            session.lock().update_preview(cx, info);
         }
         let playing = session.lock().is_playing();
         ui.add_space(4.0);
@@ -373,22 +523,296 @@ impl Panel for PreviewPanel {
                 session.lock().loop_playback = l;
             }
         });
-        if let Some(info) = info {
-            let now = session.lock().time(&info.path);
-            ui.horizontal(|ui| {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(common::timecode(&info, now)).color(color::ACCENT));
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} {:.2}",
-                        tr("Frame Rate (Auto)"),
-                        info.frame_rate.as_f64()
-                    ))
-                    .font(theme::small())
-                    .color(color::TEXT_DIM),
-                );
-            });
+        // The options below the transport row show when the panel has room for
+        // them (AE's Default workspace shows the transport row only).
+        if ui.available_height() >= PREVIEW_OPTIONS_H {
+            preview_options(ui, &session, info.as_ref());
         }
         let _ = Rect::NOTHING;
     }
+}
+
+/// AE's Preview panel options under the transport row: Shortcut, Include,
+/// Cache Before Playback, Range, Play From, Frame Rate, Skip, Resolution,
+/// Full Screen and what Spacebar does on stop. Range, Play From, Frame Rate,
+/// Skip, Resolution and Move Time To Preview Time drive playback; the others
+/// show AE's values, greyed.
+fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::CompInfo>) {
+    use crate::session::PreviewRange;
+    const RATES: [f64; 12] = [
+        8.0, 10.0, 12.0, 15.0, 23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0,
+    ];
+    let mut o = session.lock().preview.clone();
+    let before = o.clone();
+    let lw = 82.0;
+    ui.add_space(4.0);
+    ui.add_enabled_ui(false, |ui| {
+        bae_ui::dialog::row(ui, lw, tr("Shortcut"), |ui| {
+            let mut i = 0;
+            widgets::dropdown(ui, "preview-shortcut", &mut i, &[tr("Spacebar")], 120.0);
+        });
+        bae_ui::dialog::row(ui, lw, tr("Include:"), |ui| {
+            for (icon, tip) in [
+                (Icon::Eye, "Include Video"),
+                (Icon::Speaker, "Include Audio"),
+            ] {
+                icons::button(ui, icon, 18.0, true).on_hover_text(tr(tip));
+            }
+        });
+        let mut cache = false;
+        widgets::checkbox(ui, &mut cache, tr("Cache Before Playback"));
+    });
+    bae_ui::dialog::row(ui, lw, tr("Range"), |ui| {
+        let names = [
+            tr("Work Area"),
+            tr("Work Area Extended By Current Time"),
+            tr("Entire Duration"),
+        ];
+        let ranges = [
+            PreviewRange::WorkArea,
+            PreviewRange::WorkAreaExtended,
+            PreviewRange::EntireDuration,
+        ];
+        let mut i = ranges.iter().position(|r| *r == o.range).unwrap_or(1);
+        if widgets::dropdown(ui, "preview-range", &mut i, &names, 180.0).changed() {
+            o.range = ranges[i];
+        }
+    });
+    bae_ui::dialog::row(ui, lw, tr("Play From"), |ui| {
+        let names = [tr("Start of Range"), tr("Current Time")];
+        let mut i = usize::from(o.from_current);
+        if widgets::dropdown(ui, "preview-from", &mut i, &names, 180.0).changed() {
+            o.from_current = i == 1;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.vertical(|ui| {
+            ui.label(tr("Frame Rate"));
+            let auto = info.map_or(30.0, |i| i.frame_rate.as_f64());
+            let mut names = vec![format!("({auto:.2})")];
+            names.extend(RATES.iter().map(|r| format!("{r}")));
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let mut i = o
+                .fps
+                .and_then(|f| RATES.iter().position(|r| (r - f).abs() < 1e-3))
+                .map_or(0, |p| p + 1);
+            if widgets::dropdown(ui, "preview-fps", &mut i, &refs, 70.0).changed() {
+                o.fps = (i > 0).then(|| RATES[i - 1]);
+            }
+        });
+        ui.vertical(|ui| {
+            ui.label(tr("Skip"));
+            let mut skip = f64::from(o.skip);
+            if ui
+                .add(
+                    widgets::HotNumber::new(&mut skip)
+                        .label(tr("Skip"))
+                        .range(0.0..=99.0)
+                        .decimals(0),
+                )
+                .changed()
+            {
+                o.skip = skip as u32;
+            }
+        });
+        ui.vertical(|ui| {
+            ui.label(tr("Resolution"));
+            let names = [
+                tr("Auto"),
+                tr("Full"),
+                tr("Half"),
+                tr("Third"),
+                tr("Quarter"),
+            ];
+            let mut i = o.resolution.map_or(0, |r| r as usize);
+            if widgets::dropdown(ui, "preview-res", &mut i, &names, 90.0).changed() {
+                o.resolution = (i > 0).then_some(i as u32);
+            }
+        });
+    });
+    ui.add_enabled_ui(false, |ui| {
+        let mut full = false;
+        widgets::checkbox(ui, &mut full, tr("Full Screen"));
+    });
+    ui.add_space(2.0);
+    ui.label(tr("On (Spacebar) Stop:"));
+    ui.indent("preview-stop", |ui| {
+        ui.add_enabled_ui(false, |ui| {
+            let mut cached = true;
+            widgets::checkbox(ui, &mut cached, tr("If caching, play cached frames"));
+        });
+        widgets::checkbox(ui, &mut o.move_time, tr("Move time to preview time"));
+    });
+    if o != before {
+        session.lock().preview = o;
+    }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Previews Favor Active Camera", "预览支持活动摄像机"),
+    ("Audio Options", "音频选项"),
+    ("Decibels (dB)", "分贝 (dB)"),
+    ("Slider Minimum", "滑块最小值"),
+    ("Percentage", "百分比"),
+    // Preview panel (AE 26's Time_Palette strings).
+    ("Spacebar", "空格键"),
+    ("Include:", "包含:"),
+    ("Include Video", "在预览中播放视频"),
+    ("Include Audio", "在预览中播放音频"),
+    ("Cache Before Playback", "在回放前缓存"),
+    (
+        "Work Area Extended By Current Time",
+        "工作区域按当前时间延伸",
+    ),
+    ("Entire Duration", "整个持续时间"),
+    ("Play From", "播放自"),
+    ("Start of Range", "范围开头"),
+    ("Skip", "跳过"),
+    ("Full Screen", "全屏"),
+    ("On (Spacebar) Stop:", "点击 (空格键) 停止："),
+    ("If caching, play cached frames", "如果缓存，则播放缓存的帧"),
+    ("Move time to preview time", "将时间移到预览时间"),
+    // Properties
+    ("Transform", "变换"),
+    ("Layer Transform", "图层变换"),
+    ("Layer Contents", "图层内容"),
+    ("Contents", "内容"),
+    ("Masks", "蒙版"),
+    ("Effects", "效果"),
+    ("Anchor Point", "锚点"),
+    ("Position", "位置"),
+    ("Scale", "缩放"),
+    ("Rotation", "旋转"),
+    ("X Rotation", "X 轴旋转"),
+    ("Y Rotation", "Y 轴旋转"),
+    ("Z Rotation", "Z 轴旋转"),
+    ("Orientation", "方向"),
+    ("Opacity", "不透明度"),
+    ("Point of Interest", "目标点"),
+    ("Source Text", "源文本"),
+    ("Path Options", "路径选项"),
+    ("Reverse Path", "反转路径"),
+    ("Perpendicular To Path", "垂直于路径"),
+    ("Force Alignment", "强制对齐"),
+    ("First Margin", "首字边距"),
+    ("Last Margin", "末字边距"),
+    ("Roundness", "圆度"),
+    ("Points", "点"),
+    ("Inner Radius", "内径"),
+    ("Outer Radius", "外径"),
+    ("Inner Roundness", "内圆度"),
+    ("Outer Roundness", "外圆度"),
+    ("Fill", "填充"),
+    ("Stroke", "描边"),
+    ("Color", "颜色"),
+    ("Stroke Width", "描边宽度"),
+    ("Skew", "倾斜"),
+    ("Skew Axis", "倾斜轴"),
+    ("Path", "路径"),
+    ("Mask Path", "蒙版路径"),
+    ("Mask Feather", "蒙版羽化"),
+    ("Mask Opacity", "蒙版不透明度"),
+    ("Mask Expansion", "蒙版扩展"),
+    ("Reset", "重置"),
+    ("Param", "参数"),
+    ("Expression", "表达式"),
+    ("Font Size", "字体大小"),
+    ("Fill Color", "填充颜色"),
+    ("Left Align Text", "左对齐文本"),
+    ("Center Text", "居中对齐文本"),
+    ("Right Align Text", "右对齐文本"),
+    ("Zoom", "缩放"),
+    ("Intensity", "强度"),
+    ("Camera Options", "摄像机选项"),
+    ("Light Options", "灯光选项"),
+    ("Material Options", "材质选项"),
+    ("Depth of Field", "景深"),
+    ("Iris Shape", "光圈形状"),
+    ("Iris Rotation", "光圈旋转"),
+    ("Iris Roundness", "光圈圆度"),
+    ("Iris Aspect Ratio", "光圈长宽比"),
+    ("Iris Diffraction Fringe", "光圈衍射条纹"),
+    ("Highlight Gain", "高亮增益"),
+    ("Highlight Threshold", "高光阈值"),
+    ("Highlight Saturation", "高光饱和度"),
+    ("Light Transmission", "透光率"),
+    ("Accepts Shadows", "接受阴影"),
+    ("Accepts Lights", "接受灯光"),
+    ("Diffuse", "漫射"),
+    ("Specular Intensity", "镜面强度"),
+    ("Specular Shininess", "镜面反光度"),
+    ("Metal", "金属质感"),
+    ("Only", "仅限"),
+    ("Fast Rectangle", "快矩形"),
+    ("Triangle", "三角形"),
+    ("Square", "正方形"),
+    ("Pentagon", "五边形"),
+    ("Hexagon", "六边形"),
+    ("Heptagon", "七边形"),
+    ("Octagon", "八边形"),
+    ("Nonagon", "九边形"),
+    ("Decagon", "十边形"),
+    ("No layer selected", "未选择图层"),
+    ("No effects applied", "未应用效果"),
+    (
+        "Select a layer to see its effects.",
+        "选择一个图层以查看其效果。",
+    ),
+    (
+        "Select a layer to see its properties.",
+        "选择一个图层以查看其属性。",
+    ),
+    ("Master Volume", "主音量"),
+    ("Left output level", "左输出电平"),
+    ("Right output level", "右输出电平"),
+    // Preview panel
+    ("First Frame", "第一帧"),
+    ("Previous Frame", "上一帧"),
+    ("Play/Stop", "播放/停止"),
+    ("Next Frame", "下一帧"),
+    ("Last Frame", "最后一帧"),
+    ("Loop", "循环"),
+    ("Frame Rate (Auto)", "帧速率（自动）"),
+    ("Playing", "正在播放"),
+    ("Go to Start", "转到开头"),
+    ("Go to End", "转到结尾"),
+    ("Go to Layer In Point", "转到图层入点"),
+    ("Go to Layer Out Point", "转到图层出点"),
+];
+
+/// Registers this module's Chinese strings and panels (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "audio",
+        bae_ui::PanelKind::new("Audio", |spawn| {
+            Box::new(audio::AudioPanel::from_state(spawn.state))
+        }),
+    );
+    crate::register_panel(
+        app,
+        "properties",
+        bae_ui::PanelKind::new("Properties", |_| Box::new(PropertiesPanel::default())),
+    );
+    crate::register_panel(
+        app,
+        "effect_controls",
+        bae_ui::PanelKind::new("Effect Controls", |spawn| {
+            let mut panel = EffectControlsPanel::default();
+            panel.controls.show_presets = spawn
+                .state
+                .and_then(|v| v["show_presets"].as_bool())
+                .unwrap_or(false);
+            Box::new(panel)
+        }),
+    );
+    crate::register_panel(
+        app,
+        "preview",
+        bae_ui::PanelKind::new("Preview", |_| Box::new(PreviewPanel)),
+    );
 }

@@ -19,6 +19,25 @@ fn p(s: &str) -> PrimPath {
 
 const SEC: i64 = Time::FLICKS_PER_SECOND;
 
+#[test]
+fn precomp_creation_rejects_direct_and_transitive_cycles() {
+    let mut f = Fx::new();
+    let (a, b, c) = (f.comp(), f.comp(), f.comp());
+    f.layer(&a, "pre_comp", json!({"source": b}));
+    f.layer(&b, "pre_comp", json!({"source": c}));
+    f.layer(&a, "pre_comp", json!({"source": c}));
+    for source in [&c, &a] {
+        assert!(
+            f.try_run(
+                "layer.create",
+                json!({"comp": c, "kind": "pre_comp", "source": source})
+            )
+            .is_err()
+        );
+        assert!(query::comp_layers(&f.stage, &c).is_empty());
+    }
+}
+
 impl Fx {
     fn new() -> Self {
         let mut reg = CommandRegistry::with_builtins();
@@ -78,6 +97,87 @@ impl Fx {
             .world_matrix
             .transform_point3(DVec3::ZERO)
     }
+}
+
+#[test]
+fn source_styles_convert_with_keyframes_and_remove_per_instance() {
+    use bae_model::layer_styles::{self as styles, effective_styles};
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let asset = fx
+        .value(&a, "source")
+        .unwrap()
+        .as_prim_ref()
+        .unwrap()
+        .clone();
+    let b = fx.layer(&comp, "solid", json!({"source":asset}));
+    let source = asset.child(styles::PRIM).unwrap();
+    fx.run("prim.create", json!({"path":source,"prim_type":"Effect"}));
+    let attr = bae_model::effect::param_attr(styles::group("solidFill").unwrap().enabled);
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":"match_name","value":Value::String(styles::RENDER_ID.into())}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":attr,"value":Value::Bool(true)}),
+    );
+    let opacity = "param:0703";
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":opacity,"value":Value::Float(10.)}),
+    );
+    fx.run(
+        "attr.set_animated",
+        json!({"path":source,"attr":opacity,"animated":true,"time":0}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path":source,"attr":opacity,"time":SEC,"value":Value::Float(90.)}),
+    );
+    fx.run("layer.styles", json!({"layers":[a],"operation":"convert"}));
+    let local = a.child(styles::PRIM).unwrap();
+    assert_eq!(effective_styles(&fx.stage, &a), Some(local.clone()));
+    assert_eq!(effective_styles(&fx.stage, &b), Some(source.clone()));
+    assert_eq!(fx.keys(&local, opacity), vec![0, SEC]);
+    let sample = bae_anim::evaluate_comp(&fx.stage, &comp, Time::from_flicks(SEC)).unwrap();
+    for layer in &sample.layers {
+        assert_eq!(
+            layer.layer_styles.as_ref().unwrap().param(703),
+            Some(&Value::Float(90.))
+        );
+    }
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"remove_all"}),
+    );
+    assert_eq!(effective_styles(&fx.stage, &a), None);
+    assert_eq!(effective_styles(&fx.stage, &b), Some(source));
+}
+
+#[test]
+fn showing_all_styles_preserves_values_and_leaves_new_styles_disabled() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let local = a.child(bae_model::layer_styles::PRIM).unwrap();
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"add","style":"dropShadow"}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path":local,"attr":"param:0103","value":Value::Float(27.)}),
+    );
+    fx.run("layer.styles", json!({"layers":[a],"operation":"show_all"}));
+    assert_eq!(fx.value(&local, "param:0103"), Some(Value::Float(27.)));
+    assert_eq!(fx.value(&local, "param:0900"), Some(Value::Bool(false)));
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"add","style":"frameFX"}),
+    );
+    assert_eq!(fx.value(&local, "param:0900"), Some(Value::Bool(true)));
 }
 
 fn key(path: &PrimPath, attr: &str, t: i64) -> Json {
@@ -280,6 +380,31 @@ fn parenting_keeps_the_layer_in_place() {
         json!({"layers": [child], "parent": parent, "keep_transform": false}),
     );
     assert!((fx.world_pos(&comp, &child) - before).length() > 1.0);
+    // Shift: onto the parent (its anchor point, on screen where the parent is).
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": null, "keep_transform": false}),
+    );
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": parent, "move_to_parent": true}),
+    );
+    let at = fx.world_pos(&comp, &child);
+    let p = fx.world_pos(&comp, &parent);
+    let anchor = match fx.value(&parent, "transform:anchor_point") {
+        Some(Value::Vec3(a)) => DVec3::from_array(a),
+        _ => DVec3::ZERO,
+    };
+    let e = bae_anim::evaluate_comp(&fx.stage, &comp, Time::ZERO).unwrap();
+    let parent_anchor = e
+        .layer(&parent)
+        .unwrap()
+        .world_matrix
+        .transform_point3(anchor);
+    assert!(
+        (at - parent_anchor).length() < 1e-6,
+        "{at} vs {parent_anchor} ({p})"
+    );
 }
 
 #[test]
@@ -391,6 +516,19 @@ fn stopwatch_set_at_and_keyframe_assistants() {
         json!({"path": l, "attr": "transform:rotation", "time": 2 * SEC, "keys": copied}),
     );
     assert_eq!(fx.keys(&l, "transform:rotation"), vec![2 * SEC, 3 * SEC]);
+    // Paste Reversed Keyframes: the last copied value first.
+    fx.run(
+        "key.paste",
+        json!({"path": l, "attr": "transform:rotation", "time": 5 * SEC, "keys": copied, "reversed": true}),
+    );
+    let at = |fx: &Fx, t: i64| {
+        query::attr_spec(&fx.stage, &l, "transform:rotation")
+            .and_then(|s| s.keyframes.get(&Time(t)).map(|k| k.value.clone()))
+    };
+    assert_eq!(at(&fx, 5 * SEC), Some(Value::Float(90.0)));
+    assert_eq!(at(&fx, 6 * SEC), Some(Value::Float(10.0)));
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(fx.keys(&l, "transform:rotation"), vec![2 * SEC, 3 * SEC]);
 
     // Delete all: stopwatch off with the last deleted value.
     fx.run("key.delete", json!({"keys": [key(&l, "transform:rotation", 2 * SEC), key(&l, "transform:rotation", 3 * SEC)]}));
@@ -460,7 +598,10 @@ fn module_publishes_commands() {
     let reg = app.registry::<dyn DynCommand>();
     assert!(reg.contains("comp.create"));
     assert!(reg.contains("key.ease"));
-    assert_eq!(reg.len(), bae_motion::commands().len());
+    // Plus the effect commands, which read the app's effect definitions.
+    assert!(reg.contains("effect.apply"));
+    let effects = bae_motion::effect::effect_commands(Default::default()).len();
+    assert_eq!(reg.len(), bae_motion::commands().len() + effects);
     // Every command has a JSON schema with documented parameters.
     for c in bae_motion::commands() {
         assert!(c.info().params_schema.is_object(), "{}", c.info().id);
@@ -1435,6 +1576,27 @@ fn precompose_adjusts_the_duration_to_the_layers() {
 }
 
 #[test]
+fn replace_a_shared_solid_with_one_precomp_preserves_both_layer_instances() {
+    let mut fx = Fx::new();
+    let (a, b) = (fx.comp(), fx.comp());
+    let first = fx.layer(&a, "solid", json!({"name":"Red","size":[40,30]}));
+    let source = bae_motion::solid::layer_solid(&fx.stage, &first).unwrap();
+    let second = fx.layer(&b, "solid", json!({"name":"Credit","source":source}));
+    let out = fx.run("item.replace_with_precomp", json!({"item":source}));
+    let wrapper = p(out["comp"].as_str().unwrap());
+    for l in [&first, &second] {
+        assert_eq!(query::precomp_source(&fx.stage, l).as_ref(), Some(&wrapper));
+    }
+    assert_eq!(query::display_name_of(&fx.stage, &second), "Credit");
+    let inside = query::comp_layers(&fx.stage, &wrapper);
+    assert_eq!(inside.len(), 1);
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &inside[0]),
+        Some(source)
+    );
+}
+
+#[test]
 fn precompose_leaving_the_attributes_on_the_layer() {
     let mut fx = Fx::new();
     let comp = fx.comp();
@@ -1577,6 +1739,40 @@ fn import_creates_footage_items_in_one_step() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Files dropped on the Composition or Timeline panel (AE): imported and added
+/// to the comp as layers, the first on top, in the same undo step.
+#[test]
+fn import_into_a_comp_adds_layers_in_the_same_step() {
+    let dir = std::env::temp_dir().join(format!("bae-import-comp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (clip, music) = (dir.join("clip.png"), dir.join("music.wav"));
+    std::fs::write(&clip, b"clip").unwrap();
+    std::fs::write(&music, b"music").unwrap();
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let out = fx.run(
+        "item.import",
+        json!({"comp": comp, "files": [
+            {"path": clip},
+            {"path": music, "attrs": {
+                "has_video": {"type": "bool", "value": false},
+                "has_audio": {"type": "bool", "value": true}}},
+        ]}),
+    );
+    let layers = query::comp_layers(&fx.stage, &comp);
+    assert_eq!(out["layers"], json!(layers));
+    let kinds: Vec<_> = layers
+        .iter()
+        .map(|l| query::layer_kind(&fx.stage, l).unwrap())
+        .collect();
+    assert_eq!(kinds, ["footage", "audio"]);
+    assert_eq!(query::display_name_of(&fx.stage, &layers[0]), "clip.png");
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(query::comp_layers(&fx.stage, &comp).is_empty());
+    assert!(!fx.stage.has_prim(&p(out["items"][0].as_str().unwrap())));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `layer.set_attr`: one undo step for several layers; only switches, quality
 /// and label.
 #[test]
@@ -1691,4 +1887,449 @@ fn paste_layers_same_and_other_comp() {
         query::layer_kind(&fx.stage, &pasted).as_deref(),
         Some("solid")
     );
+}
+
+#[test]
+fn markers_add_edit_move_delete() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    // A comp marker and a layer marker with a comment and a duration.
+    let m1 = p(
+        fx.run("marker.add", json!({"owner": comp, "time": SEC}))["path"]
+            .as_str()
+            .unwrap(),
+    );
+    let m2 = p(fx.run(
+        "marker.add",
+        json!({"owner": solid, "time": 2 * SEC, "comment": "hit", "duration": SEC}),
+    )["path"]
+        .as_str()
+        .unwrap());
+    assert_ne!(m1, m2);
+    assert_eq!(
+        bae_motion::markers::markers_of(&fx.stage, &comp),
+        vec![(m1.clone(), Time(SEC))]
+    );
+    assert_eq!(fx.value(&m2, "comment"), Some(Value::String("hit".into())));
+    assert_eq!(fx.value(&m2, "duration"), Some(Value::Time(Time(SEC))));
+    // A second comp marker gets its own name; markers_of sorts by time.
+    let m3 = p(
+        fx.run("marker.add", json!({"owner": comp, "time": 0}))["path"]
+            .as_str()
+            .unwrap(),
+    );
+    let comp_markers: Vec<PrimPath> = bae_motion::markers::markers_of(&fx.stage, &comp)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(comp_markers, vec![m3.clone(), m1.clone()]);
+    // Edit (the Marker dialog), move (drag), delete; each one undo step.
+    fx.run(
+        "marker.edit",
+        json!({"path": m1, "comment": "intro", "label": 3, "time": 3 * SEC}),
+    );
+    assert_eq!(
+        fx.value(&m1, "comment"),
+        Some(Value::String("intro".into()))
+    );
+    assert_eq!(fx.value(&m1, "label"), Some(Value::Int(3)));
+    fx.run("marker.move", json!({"markers": [m1, m3], "delta": SEC}));
+    assert_eq!(
+        bae_motion::markers::marker_time(&fx.stage, &m1),
+        Time(4 * SEC)
+    );
+    assert_eq!(bae_motion::markers::marker_time(&fx.stage, &m3), Time(SEC));
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        bae_motion::markers::marker_time(&fx.stage, &m1),
+        Time(3 * SEC)
+    );
+    fx.run("marker.delete", json!({"markers": [m2]}));
+    assert!(fx.stage.prim(&m2).is_none());
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(fx.stage.prim(&m2).is_some());
+    // Not a marker; not a comp or layer.
+    assert!(
+        fx.try_run("marker.delete", json!({"markers": [solid]}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("marker.add", json!({"owner": m1, "time": 0}))
+            .is_err()
+    );
+    // A locked layer's markers cannot be added or changed (AE).
+    fx.run(
+        "attr.set",
+        json!({"path": solid, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    assert!(
+        fx.try_run("marker.add", json!({"owner": solid, "time": 0}))
+            .unwrap_err()
+            .contains("locked")
+    );
+    assert!(
+        fx.try_run("marker.move", json!({"markers": [m2], "delta": SEC}))
+            .is_err()
+    );
+}
+
+#[test]
+fn slip_edit_moves_the_source_inside_fixed_in_and_out_points() {
+    let mut fx = Fx::new();
+    let main = fx.comp();
+    // A 10 s pre-comp in the main comp, trimmed to 2 s .. 5 s.
+    let inner = fx.comp();
+    let layer = fx.layer(&main, "pre_comp", json!({"source": inner}));
+    assert_eq!(
+        query::source_duration(&fx.stage, &layer),
+        Some(Time(10 * SEC))
+    );
+    fx.run(
+        "layer.trim",
+        json!({"layers": [layer], "in_point": 2 * SEC, "out_point": 5 * SEC}),
+    );
+    // Two keyframes: the one at layer time 3 s is selected and moves with the
+    // source, the other keeps its comp time.
+    let attr = "transform:rotation";
+    fx.run(
+        "attr.set_animated",
+        json!({"path": layer, "attr": attr, "animated": true, "time": 3 * SEC}),
+    );
+    fx.run("attr.set_at", json!({"path": layer, "attr": attr, "time": 4 * SEC, "value": {"type": "float", "value": 90.0}}));
+    fx.run(
+        "layer.slip",
+        json!({"layers": [layer], "delta": -SEC, "keys": [key(&layer, attr, 3 * SEC)]}),
+    );
+    let t = query::layer_timing(&fx.stage, &layer);
+    assert_eq!(t.start_time, Time(-SEC));
+    assert_eq!((t.in_point, t.out_point), (Time(2 * SEC), Time(5 * SEC)));
+    // Kept key: layer time 3 s (comp 2 s); the other: comp 4 s = layer time 5 s.
+    assert_eq!(fx.keys(&layer, attr), vec![3 * SEC, 5 * SEC]);
+    // Clamped: the source (comp -1 s .. 9 s) cannot start after In (2 s).
+    fx.run("layer.slip", json!({"layers": [layer], "delta": 10 * SEC}));
+    assert_eq!(
+        query::layer_timing(&fx.stage, &layer).start_time,
+        Time(2 * SEC)
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        query::layer_timing(&fx.stage, &layer).start_time,
+        Time(-SEC)
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        query::layer_timing(&fx.stage, &layer).start_time,
+        Time::ZERO
+    );
+    assert_eq!(fx.keys(&layer, attr), vec![3 * SEC, 4 * SEC]);
+    // Layers without a time-based source cannot slip.
+    let solid = fx.layer(&main, "solid", json!({}));
+    assert!(
+        fx.try_run("layer.slip", json!({"layers": [solid], "delta": SEC}))
+            .is_err()
+    );
+}
+
+#[test]
+fn set_expressions_edits_several_properties_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "solid", json!({}));
+    let expr = |fx: &Fx, l: &PrimPath, attr: &str| {
+        query::attr_spec(&fx.stage, l, attr).and_then(|s| s.expression.clone())
+    };
+    fx.run(
+        "attr.set_expressions",
+        json!({"items": [
+            {"path": a, "attr": "transform:position", "source": "transform.position"},
+            {"path": b, "attr": "transform:opacity", "source": "50", "enabled": false},
+        ]}),
+    );
+    assert_eq!(
+        expr(&fx, &a, "transform:position").map(|e| (e.source, e.enabled)),
+        Some(("transform.position".to_owned(), true))
+    );
+    assert_eq!(
+        expr(&fx, &b, "transform:opacity").map(|e| (e.source, e.enabled)),
+        Some(("50".to_owned(), false))
+    );
+    // Removing both is one step; undo brings both back.
+    fx.run(
+        "attr.set_expressions",
+        json!({"items": [
+            {"path": a, "attr": "transform:position", "source": null},
+            {"path": b, "attr": "transform:opacity", "source": null},
+        ]}),
+    );
+    assert!(expr(&fx, &a, "transform:position").is_none());
+    assert!(expr(&fx, &b, "transform:opacity").is_none());
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(expr(&fx, &a, "transform:position").is_some());
+    assert!(expr(&fx, &b, "transform:opacity").is_some());
+    // A locked layer is left alone (nothing changes).
+    fx.run(
+        "attr.set",
+        json!({"path": b, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    assert!(
+        fx.try_run(
+            "attr.set_expressions",
+            json!({"items": [{"path": b, "attr": "transform:opacity", "source": null}]}),
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn text_animators_animate_add_selector_and_remove() {
+    use bae_motion::text_animators::{animators_of, selectors_of};
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let text = fx.layer(&comp, "text", json!({"text": "Hello"}));
+    // Animate Text > Position: a new animator with a Range Selector and Position.
+    let out = fx.run(
+        "text.animate",
+        json!({"layers": [text], "property": "position"}),
+    );
+    let a1 = p(out["animators"][0].as_str().unwrap());
+    assert_eq!(animators_of(&fx.stage, &text), vec![a1.clone()]);
+    assert_eq!(selectors_of(&fx.stage, &a1).len(), 1);
+    assert!(query::attr_spec(&fx.stage, &a1, "animator:position").is_some());
+    assert!(
+        query::attr_spec(&fx.stage, &a1, "animator:scale").is_none(),
+        "only what was added"
+    );
+    // Again: a second animator. Fill Color comes in red (AE).
+    fx.run(
+        "text.animate",
+        json!({"layers": [text], "property": "fill_rgb"}),
+    );
+    let all = animators_of(&fx.stage, &text);
+    assert_eq!(all.len(), 2);
+    assert_eq!(
+        fx.value(&all[1], "animator:fill_color"),
+        Some(Value::Color([1.0, 0.0, 0.0, 1.0]))
+    );
+    // The first animator's Add menu: Scale; Add > Selector > Range.
+    fx.run("text.animate", json!({"animator": a1, "property": "scale"}));
+    assert!(query::attr_spec(&fx.stage, &a1, "animator:scale").is_some());
+    fx.run("text.add_selector", json!({"animator": a1}));
+    assert_eq!(selectors_of(&fx.stage, &a1).len(), 2);
+    assert!(
+        fx.try_run(
+            "text.add_selector",
+            json!({"animator": a1, "selector": "wiggly"})
+        )
+        .is_err()
+    );
+    // Remove All Text Animators; each command is one undo step.
+    fx.run("text.remove_animators", json!({"layers": [text]}));
+    assert!(animators_of(&fx.stage, &text).is_empty());
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(animators_of(&fx.stage, &text).len(), 2);
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(selectors_of(&fx.stage, &a1).len(), 1);
+    // Not a text layer.
+    let solid = fx.layer(&comp, "solid", json!({}));
+    assert!(
+        fx.try_run(
+            "text.animate",
+            json!({"layers": [solid], "property": "position"})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn set_track_matte_sets_type_source_and_hides_the_matte() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "solid", json!({}));
+    fx.run(
+        "layer.set_track_matte",
+        json!({"layers": [a], "matte": "luma_inverted", "source": b}),
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte_layer"),
+        Some(Value::PrimRef(b.clone()))
+    );
+    assert_eq!(fx.value(&b, "enabled"), Some(Value::Bool(false)));
+    // Type only: the source stays.
+    fx.run(
+        "layer.set_track_matte",
+        json!({"layers": [a], "matte": "alpha"}),
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte_layer"),
+        Some(Value::PrimRef(b.clone()))
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        fx.value(&a, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
+    );
+    // Not itself, not another comp, not an unknown type.
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "alpha", "source": a})
+        )
+        .is_err()
+    );
+    let other = fx.comp();
+    let c = fx.layer(&other, "solid", json!({}));
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "alpha", "source": c})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "bogus"})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn auto_key_starts_a_track_and_preserves_existing_keys() {
+    let mut f = Fx::new();
+    let comp = f.comp();
+    let layer = f.layer(&comp, "solid", json!({}));
+    for (time, value) in [(SEC, 40.0), (2 * SEC, 65.0)] {
+        f.run("attr.set_many", json!({"auto_key": true, "edits": [{
+            "path": layer, "attr": "transform:opacity", "time": time, "value": Value::Float(value)
+        }]}));
+    }
+    let spec = query::attr_spec(&f.stage, &layer, "transform:opacity").unwrap();
+    assert_eq!(spec.keyframes[&Time(SEC)].value, Value::Float(40.0));
+    assert_eq!(spec.keyframes[&Time(2 * SEC)].value, Value::Float(65.0));
+}
+
+#[test]
+fn interpret_footage_sets_alpha_rate_aspect_and_loop() {
+    let dir = std::env::temp_dir().join(format!("bae-interpret-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run(
+        "item.import",
+        json!({"files": [{"path": clip, "attrs": {
+            "frame_rate": {"type": "frame_rate", "value": [24, 1]}}}]}),
+    );
+    let item = p(out["items"][0].as_str().unwrap());
+    fx.run(
+        "footage.interpret",
+        json!({"items": [item], "alpha_mode": "premultiplied", "frame_rate": 30.0,
+               "pixel_aspect": 2.0, "loop_count": 3}),
+    );
+    assert_eq!(
+        fx.value(&item, "alpha_mode"),
+        Some(Value::Enum("premultiplied".into()))
+    );
+    assert_eq!(
+        fx.value(&item, "frame_rate"),
+        Some(Value::FrameRate(FrameRate::FPS_30))
+    );
+    assert_eq!(fx.value(&item, "pixel_aspect"), Some(Value::Float(2.0)));
+    assert_eq!(fx.value(&item, "loop"), Some(Value::Int(3)));
+    // Back to the file's rate.
+    fx.run(
+        "footage.interpret",
+        json!({"items": [item], "use_file_frame_rate": true}),
+    );
+    assert_eq!(
+        fx.value(&item, "frame_rate"),
+        Some(Value::FrameRate(FrameRate::FPS_24))
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn exponential_scale_and_sequence_layers() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let scale = "transform:scale";
+    let vec3 = |v: f64| json!({"type": "vec3", "value": [v, v, 100.0]});
+    fx.run(
+        "attr.set_animated",
+        json!({"path": a, "attr": scale, "animated": true, "time": 0}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path": a, "attr": scale, "time": 0, "value": vec3(100.0)}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path": a, "attr": scale, "time": SEC, "value": vec3(400.0)}),
+    );
+    // Exponential Scale: a key per frame, 100 → 400 doubling each half.
+    let out = fx.run(
+        "key.exponential_scale",
+        json!({"keys": [key(&a, scale, SEC), key(&a, scale, 0)]}),
+    );
+    assert_eq!(out["keys"].as_array().unwrap().len(), 31);
+    assert_eq!(fx.keys(&a, scale).len(), 31);
+    let spec = query::attr_spec(&fx.stage, &a, scale).unwrap();
+    let Value::Vec3(mid) = spec.keyframes[&Time(SEC / 2)].value else {
+        panic!("vec3 scale");
+    };
+    assert!((mid[0] - 200.0).abs() < 1e-6, "{mid:?}");
+    assert!(
+        spec.keyframes
+            .values()
+            .all(|k| k.interp_in == Interpolation::Linear || k.interp_out == Interpolation::Linear)
+    );
+    // Other properties or a single key: refused.
+    assert!(
+        fx.try_run(
+            "key.exponential_scale",
+            json!({"keys": [key(&a, scale, 0)]})
+        )
+        .is_err()
+    );
+
+    // Sequence Layers: b then c follow a, overlapping by 1 s with a cross dissolve.
+    let b = fx.layer(&comp, "solid", json!({}));
+    let c = fx.layer(&comp, "solid", json!({}));
+    for l in [&a, &b, &c] {
+        fx.run(
+            "layer.trim",
+            json!({"layers": [l], "in_point": 0, "out_point": 3 * SEC}),
+        );
+    }
+    fx.run(
+        "layer.sequence",
+        json!({"layers": [a, b, c], "overlap": SEC, "transition": "cross_dissolve"}),
+    );
+    let span = |fx: &Fx, l: &PrimPath| {
+        let t = query::layer_timing(&fx.stage, l);
+        (t.in_point.0, t.out_point.0)
+    };
+    assert_eq!(span(&fx, &a), (0, 3 * SEC));
+    assert_eq!(span(&fx, &b), (2 * SEC, 5 * SEC));
+    assert_eq!(span(&fx, &c), (4 * SEC, 7 * SEC));
+    // b fades in over 2–3 s and out over 4–5 s (its keys are in layer time).
+    let opacity = "transform:opacity";
+    assert_eq!(fx.keys(&b, opacity), vec![0, SEC, 2 * SEC, 3 * SEC]);
+    let spec = query::attr_spec(&fx.stage, &b, opacity).unwrap();
+    assert_eq!(spec.keyframes[&Time(0)].value, Value::Float(0.0));
+    assert_eq!(spec.keyframes[&Time(3 * SEC)].value, Value::Float(0.0));
+    assert_eq!(spec.keyframes[&Time(SEC)].value, Value::Float(100.0));
+    // Without a transition nothing is keyed.
+    fx.run("layer.sequence", json!({"layers": [c, a], "overlap": 0}));
+    assert_eq!(span(&fx, &a), (7 * SEC, 10 * SEC));
+    assert_eq!(fx.keys(&a, opacity), vec![2 * SEC, 3 * SEC]);
 }

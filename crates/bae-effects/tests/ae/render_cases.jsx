@@ -1,16 +1,18 @@
 // Renders every case of cases.json in After Effects (run with tools/ae/aectl on
 // a machine that has AE):
 //
-//   tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx
+//   tools/ae/aectl lock -- tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx
 //
 // Inputs come from `cargo run -p bae-effects --example ae_compare -- prepare`
 // (/private/tmp/bae-07-ae/inputs/*.png); outputs go to /private/tmp/bae-07-ae/ae/.
-// 8 bpc project, no linearized working space, no colour management, frame 0,
+// Case-specific depth (8 bpc by default), no linearized working space, no colour management, frame 0,
 // layer quality Best. Parameters are set by matchName ("<effect>-NNNN").
 // No alert(): results are returned as a string.
 
 (function () {
-    var ROOT = "/private/tmp/bae-07-ae";
+    #include "lumetri/custom.jsxinc"
+    // A wrapper script may set BAE_07_ROOT (probe runs).
+    var ROOT = (typeof BAE_07_ROOT !== "undefined") ? BAE_07_ROOT : "/private/tmp/bae-07-ae";
     var casesFile = new File(ROOT + "/cases.json");
     if (!casesFile.exists) {
         throw new Error("run `ae_compare prepare` first (copies cases.json to " + ROOT + ")");
@@ -23,6 +25,10 @@
         throw new Error("cannot create " + outDir.fsName);
     }
 
+    // newProject() asks to save an unsaved project (a modal dialog): close it first.
+    if (app.project) {
+        app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+    }
     app.newProject();
     app.project.bitsPerChannel = 8;
     app.project.linearBlending = false;
@@ -38,9 +44,12 @@
         return footage[name];
     }
 
-    function waitFor(file) {
+    // saveFrameToPng returns before the file is written; poll with a fresh File
+    // object each time (a File caches exists/length).
+    function waitFor(path) {
         for (var i = 0; i < 600; i++) {
-            if (file.exists && file.length > 0) {
+            var probe = new File(path);
+            if (probe.exists && probe.length > 0) {
                 return true;
             }
             $.sleep(50);
@@ -48,31 +57,105 @@
         return false;
     }
 
-    var done = [];
-    for (var i = 0; i < cases.length; i++) {
-        var c = cases[i];
+    function makeComp(c) {
         var src = input(c.input);
-        var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
+        var duration = c.frames ? Math.max(1, c.frames.length / 30) : 1;
+        var comp = app.project.items.addComp(c.name, src.width, src.height, 1, duration, 30);
+        if (c.frames) {
+            src = app.project.items.addComp(c.name + "_frames", src.width, src.height, 1, c.frames.length / 30, 30);
+            for (var i = 0; i < c.frames.length; i++) {
+                var frame = src.layers.add(input(c.frames[i]));
+                frame.startTime = i / 30;
+                frame.inPoint = i / 30;
+                frame.outPoint = (i + 1) / 30;
+            }
+        }
+        var refs = {};
+        if (c.layers) {
+            for (var name in c.layers) {
+                refs[name] = comp.layers.add(input(c.layers[name]));
+                refs[name].enabled = false;
+            }
+        }
         var layer = comp.layers.add(src);
-        layer.quality = LayerQuality.BEST;
+        refs.input = layer;
+        layer.quality = c.quality === "draft" ? LayerQuality.DRAFT : LayerQuality.BEST;
+        if (c.masks) {
+            for (var i = 0; i < c.masks.length; i++) {
+                var r = c.masks[i];
+                var shape = new Shape();
+                shape.vertices = [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]];
+                shape.inTangents = shape.outTangents = [[0, 0], [0, 0], [0, 0], [0, 0]];
+                shape.closed = true;
+                var mask = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom");
+                mask.property("ADBE Mask Shape").setValue(shape);
+                mask.maskMode = MaskMode.ADD;
+            }
+        }
+        if (c.paths) {
+            for (var i = 0; i < c.paths.length; i++) {
+                var path = c.paths[i];
+                var shape = new Shape();
+                shape.vertices = path.vertices;
+                var zero = [];
+                for (var j = 0; j < path.vertices.length; j++) zero.push([0, 0]);
+                shape.inTangents = path.inTangents || zero;
+                shape.outTangents = path.outTangents || zero;
+                shape.closed = path.closed !== false;
+                var mask = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom");
+                mask.property("ADBE Mask Shape").setValue(shape);
+                mask.maskMode = MaskMode.NONE;
+            }
+        }
         var fx = layer.property("ADBE Effect Parade").addProperty(c.effect);
         for (var id in c.params) {
+            if (c.effect === "ADBE Lumetri" && Number(id) >= 1000) continue;
             var pad = ("0000" + id).slice(-4);
             var prop = fx.property(c.effect + "-" + pad);
             if (prop === null) {
                 throw new Error(c.name + ": no parameter " + c.effect + "-" + pad);
             }
-            prop.setValue(c.params[id]);
+            var value = c.params[id];
+            if (value.layer !== undefined) value = refs[value.layer].index;
+            if (value.mask !== undefined) value = value.mask;
+            prop.setValue(value);
         }
+        if (c.keys) {
+            for (var id in c.keys) {
+                var prop = fx.property(c.effect + "-" + ("0000" + id).slice(-4));
+                for (var k = 0; k < c.keys[id].length; k++) {
+                    var key = c.keys[id][k];
+                    prop.setValueAtTime(key[0], key[1].length === 1 ? key[1][0] : key[1]);
+                }
+            }
+        }
+        return comp;
+    }
+
+    var done = [];
+    var lutComps = {};
+    for (var i = 0; i < cases.length; i++) {
+        var c = cases[i];
+        app.project.bitsPerChannel = c.bpc || 8;
+        // Reuse the same image and LUT across depths. AE opens its picker on addProperty.
+        var key = c.input + "/" + c.lut;
+        var comp = c.lut && lutComps[key] ? lutComps[key] : makeComp(c);
+        if (c.points || c.wheels) {
+            comp = lumetriCustomComp(comp, c, ROOT);
+            footage = {};
+            lutComps = {};
+        }
+        if (c.lut) lutComps[key] = comp;
         var out = new File(outDir.fsName + "/" + c.name + ".png");
         if (out.exists) {
             out.remove();
         }
-        comp.saveFrameToPng(0, out);
-        if (!waitFor(out)) {
+        comp.saveFrameToPng(c.time || 0, out);
+        if (!waitFor(out.fsName)) {
             throw new Error(c.name + ": saveFrameToPng timed out");
         }
         done.push(c.name);
+        comp.remove();
     }
     return "rendered " + done.length + " cases: " + done.join(", ");
 })();

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>BAE 进度看板</title>
+<style>
+:root{color-scheme:dark;--bg:#000;--panel:#0b0b0b;--raise:#141414;--line:#1f1f1f;--line2:#2c2c2c;--text:#f5f5f5;--sub:#a3a3a3;--mute:#6b6b6b;--dim:#3d3d3d;
+ --s-done:#f5f5f5;--s-ready:#a8a8a8;--s-doing:#6e6e6e;--s-todo:#262626;--r:10px;--gutter:16px}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Inter","Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+button,input{font:inherit;color:inherit}
+[hidden]{display:none!important}
+.num,code,time,.mono{font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:5;background:rgba(0,0,0,.86);-webkit-backdrop-filter:saturate(180%) blur(16px);backdrop-filter:saturate(180%) blur(16px);border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top)}
+.bar{max-width:1280px;margin:auto;padding:0 max(var(--gutter),env(safe-area-inset-left));display:flex;align-items:center;justify-content:space-between;height:52px;gap:12px}
+.brand{font-weight:650;letter-spacing:-.2px;white-space:nowrap}
+.brand b{display:inline-block;background:var(--text);color:#000;border-radius:5px;padding:0 6px;margin-right:8px;font:800 13px/22px ui-monospace,Menlo,monospace}
+.brand span{color:var(--mute);font-weight:500;margin-left:6px}
+.live{display:flex;align-items:center;gap:7px;color:var(--mute);font-size:12px;white-space:nowrap}
+.live i{width:6px;height:6px;border-radius:50%;background:var(--dim)}
+.live.on i{background:var(--text);box-shadow:0 0 0 3px rgba(255,255,255,.12)}
+.tabs{max-width:1280px;margin:auto;padding:0 var(--gutter);display:flex;gap:22px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex:none;border:0;background:none;padding:10px 0 11px;color:var(--mute);font-size:14px;border-bottom:1.5px solid transparent;cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected=true]{color:var(--text);border-color:var(--text)}
+
+main{max-width:1280px;margin:auto;padding:20px var(--gutter) calc(64px + env(safe-area-inset-bottom))}
+
+/* overview */
+.overview{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:18px 18px 16px;margin-bottom:18px}
+.ov-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ov-label{color:var(--sub);font-size:13px}
+.ov-pct{font-size:52px;line-height:1;font-weight:600;letter-spacing:-2px;margin-top:6px}
+.ov-pct small{font-size:22px;letter-spacing:0;color:var(--sub);font-weight:500;margin-left:2px}
+.ov-meta{color:var(--mute);font-size:13px;text-align:right}
+.stack{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--s-todo);margin:16px 0 14px;gap:1px}
+.stack i{display:block;min-width:0}
+.stack .done{background:var(--s-done)}.stack .ready{background:var(--s-ready)}.stack .doing{background:var(--s-doing)}.stack .todo{background:var(--s-todo)}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;background:var(--line);border-radius:var(--r);overflow:hidden}
+.stat{background:var(--panel);padding:10px 4px 2px;text-align:center;min-width:0}
+.stat .num{font-size:22px;font-weight:500;display:block;line-height:1.2}
+.stat span{font-size:12px;color:var(--sub);white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+
+/* status dot */
+.dot{flex:none;display:inline-block;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--dim)}
+.dot.done{background:var(--s-done);border-color:var(--s-done)}
+.dot.ready{border-color:var(--s-ready);background:transparent}
+.dot.doing{background:var(--text);border-color:var(--text);animation:pulse 2s ease-in-out infinite}
+.dot.todo{border-color:var(--dim)}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,.35)}50%{box-shadow:0 0 0 4px rgba(255,255,255,0)}}
+@media(prefers-reduced-motion:reduce){.dot.doing{animation:none}}
+
+/* toolbar */
+.toolbar{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.search{position:relative}
+.search input{width:100%;height:40px;border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);padding:0 12px 0 34px;outline:none;font-size:15px;-webkit-appearance:none;appearance:none}
+.search input:focus{border-color:var(--sub)}
+.search input::placeholder{color:var(--mute)}
+.search svg{position:absolute;left:11px;top:12px;width:16px;height:16px;stroke:var(--mute)}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 calc(-1*var(--gutter));padding:0 var(--gutter)}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--line2);background:transparent;color:var(--sub);font-size:13px;cursor:pointer;white-space:nowrap}
+.chip .num{color:var(--mute);font-size:12px}
+.chip[aria-pressed=true]{background:var(--text);color:#000;border-color:var(--text)}
+.chip[aria-pressed=true] .num{color:#555}
+
+/* groups */
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
+.group{border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden;min-width:0}
+.g-head{padding:14px 16px 12px;display:block;cursor:pointer;list-style:none;-webkit-user-select:none;user-select:none}
+.g-head::-webkit-details-marker{display:none}
+.g-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.g-title h3{margin:0;font-size:15px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.g-title .num{color:var(--sub);font-size:12px;white-space:nowrap}
+.g-head .stack{margin:10px 0 0;height:3px}
+.chev{display:inline-block;width:8px;height:8px;border-right:1.5px solid var(--mute);border-bottom:1.5px solid var(--mute);transform:rotate(-45deg);margin-right:10px;transition:transform .15s;position:relative;top:-1px}
+details[open]>summary .chev{transform:rotate(45deg)}
+.items{border-top:1px solid var(--line)}
+
+/* item card */
+.item{padding:12px 16px;border-top:1px solid var(--line);min-width:0}
+.item:first-child{border-top:0}
+.i-top{display:flex;align-items:center;gap:10px;min-width:0}
+.i-name{flex:1;min-width:0;font-size:14.5px;overflow-wrap:anywhere}
+.i-state{flex:none;font-size:12px;color:var(--sub);white-space:nowrap}
+.item.done .i-name,.item.done .i-state{color:var(--sub)}
+.item.todo .i-name{color:#cfcfcf}.item.todo .i-state{color:var(--mute)}
+.i-sub{margin:4px 0 0 18px;display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--mute);font-size:12px;min-width:0}
+.i-sub code{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0 18px}
+.pr{font:12px/22px ui-monospace,Menlo,monospace;padding:0 8px;border:1px solid var(--line2);border-radius:6px;text-decoration:none;color:var(--text)}
+.pr:hover{border-color:var(--sub)}
+.pr.merged{color:var(--sub)}
+.item.compact{padding:9px 16px}
+.fold{border-top:1px solid var(--line)}
+.fold>summary{padding:10px 16px;color:var(--mute);font-size:13px;cursor:pointer;list-style:none;display:flex;align-items:center}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary .chev{width:6px;height:6px}
+.fold .item:first-child{border-top:1px solid var(--line)}
+.empty{color:var(--mute);text-align:center;padding:48px 0;font-size:14px}
+.note{color:var(--mute);font-size:12.5px;margin:0 0 14px}
+
+/* feed */
+.section-title{font-size:13px;color:var(--sub);font-weight:500;margin:22px 0 10px}
+.section-title:first-child{margin-top:0}
+.feed{border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.ev{padding:12px 16px;border-top:1px solid var(--line);min-width:0}
+.ev:first-child{border-top:0}
+.ev-top{display:flex;align-items:baseline;gap:10px;min-width:0}
+.ev-who{flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev-who.wrap{white-space:normal;overflow-wrap:anywhere}
+.ev time{flex:none;color:var(--mute);font-size:12px}
+.ev p{margin:3px 0 0;color:var(--sub);font-size:13.5px;overflow-wrap:anywhere}
+.ev .pr{margin-right:6px}
+.tag{display:inline-block;font-size:11px;color:var(--sub);border:1px solid var(--line2);border-radius:4px;padding:0 5px;line-height:18px;white-space:nowrap}
+.kv{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12.5px;color:var(--sub);flex-wrap:wrap}
+.kv b{font-weight:500;color:var(--mute);min-width:52px}
+
+@media(min-width:720px){
+ :root{--gutter:28px}
+ .toolbar{flex-direction:row;align-items:center;justify-content:space-between}
+ .search{width:300px;flex:none;order:2}
+ .chips{margin:0;padding:0}
+ .overview{display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:8px 32px;align-items:center;padding:22px 24px}
+ .overview .stack{grid-column:1/-1;grid-row:2;margin:10px 0 0}
+ .ov-meta{text-align:left;margin-top:6px}
+ .stats{grid-column:2;grid-row:1}
+ .stat{padding:14px 6px 8px}.stat .num{font-size:26px}
+ .grid.cols{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(min-width:1100px){.grid.cols{grid-template-columns:repeat(3,minmax(0,1fr))}}
+</style>
+
+<div class="top">
+ <div class="bar"><div class="brand"><b>BAE</b>进度<span id="version"></span></div><div id="live" class="live" role="status"><i></i><span>连接中</span></div></div>
+ <nav class="tabs" role="tablist" aria-label="看板视图"></nav>
+</div>
+<main>
+ <section id="overview" class="overview" aria-label="总览"></section>
+ <div class="toolbar" id="toolbar">
+  <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" id="query" placeholder="搜索名称、ID、模块、负责人" aria-label="搜索" autocomplete="off"></label>
+  <div class="chips" id="chips" role="group" aria-label="状态筛选"></div>
+ </div>
+ <section id="content"></section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const REPO='https://github.com/FELIXDAD/betterAfterEffects';
+const TABS=[{id:'ms',name:'里程碑'},{id:'fx',name:'效果矩阵'},{id:'feed',name:'实时动态'},{id:'parity',name:'AE 交互对齐'}];
+const ORDER=['doing','ready','todo','done'];
+const LABEL={done:'完成',ready:'待合并',doing:'进行中',todo:'未开始'};
+const FX_LABEL={done:'已实现',ready:'待合并',doing:'进行中',todo:'未做'};
+const PARITY_LABEL={done:'已解决',ready:'待合并',doing:'进行中',todo:'待修'};
+const FILTERS=['all','doing','ready','todo','done'];
+const store={get(k,d){try{return localStorage.getItem('bae.'+k)??d}catch{return d}},set(k,v){try{localStorage.setItem('bae.'+k,v)}catch{}}};
+const fromHash=location.hash.slice(1);
+let tab=TABS.some(t=>t.id===fromHash)?fromHash:TABS.some(t=>t.id===store.get('tab'))?store.get('tab'):'ms';
+let filter=FILTERS.includes(store.get('filter'))?store.get('filter'):'all';
+let data,byId;
+const openState=new Map(); // details key -> user-chosen open state, survives live re-renders
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function pct(n,t){return Math.round(100*n/(t||1))}
+function when(s){
+ if(!s)return '—';
+ const d=new Date(s),diff=(Date.now()-d)/60000;
+ if(diff>=0&&diff<1)return '刚刚';
+ if(diff>=0&&diff<60)return Math.floor(diff)+' 分钟前';
+ if(diff>=0&&diff<24*60)return Math.floor(diff/60)+' 小时前';
+ return d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+}
+function timeTag(s){return '<time datetime="'+esc(s)+'" title="'+esc(s?new Date(s).toLocaleString('zh-CN'):'')+'">'+esc(when(s))+'</time>'}
+function prLink(n,cls){return '<a class="pr '+(cls||'')+'" href="'+REPO+'/pull/'+n+'" target="_blank" rel="noopener">#'+n+'</a>'}
+function issueLink(n){return '<a class="pr" href="'+REPO+'/issues/'+n+'" target="_blank" rel="noopener">#'+n+'</a>'}
+function stack(counts){return '<div class="stack">'+['done','ready','doing','todo'].map(s=>counts[s]?'<i class="'+s+'" style="flex:'+counts[s]+'"></i>':'').join('')+'</div>'}
+function countBy(rows){const c={done:0,ready:0,doing:0,todo:0};for(const x of rows)c[x.status]=(c[x.status]||0)+1;return c}
+function details(key,def,summary,body,cls){
+ const open=openState.has(key)?openState.get(key):def;
+ return '<details class="'+cls+'" data-key="'+esc(key)+'"'+(open?' open':'')+'><summary class="'+(cls==='group'?'g-head':'')+'">'+summary+'</summary>'+body+'</details>';
+}
+
+/* tabs */
+const nav=document.querySelector('.tabs');
+for(const t of TABS){const b=document.createElement('button');b.role='tab';b.textContent=t.name;b.dataset.tab=t.id;b.onclick=()=>{tab=t.id;store.set('tab',tab);history.replaceState(null,'','#'+tab);$('query').value='';render();scrollTo({top:0})};nav.append(b)}
+
+function overview(){
+ const miles=data.items.filter(x=>x.kind==='milestone'),c=countBy(miles);
+ $('version').textContent=data.milestone?'v'+data.milestone:'';
+ $('overview').innerHTML=
+  '<div><div class="ov-head"><div><div class="ov-label">'+esc(data.milestone?data.milestone+' 总体完成度':'总体完成度')+'</div><div class="ov-pct num">'+pct(c.done,miles.length)+'<small>%</small></div></div>'+
+  '<div class="ov-meta">'+c.done+' / '+miles.length+' 项能力完成</div></div></div>'+stack(c)+
+  '<div class="stats">'+['doing','ready','todo','done'].map(s=>'<div class="stat"><b class="num">'+c[s]+'</b><span><i class="dot '+s+'"></i>'+LABEL[s]+'</span></div>').join('')+
+  '<div class="stat"><b class="num">'+(data.merge_queue??0)+'</b><span>合并队列</span></div></div>';
+}
+
+function matches(x,q){return !q||[x.id,x.name,x.module,x.agent,x.tag,x.note].join(' ').toLowerCase().includes(q)}
+
+function itemCard(x,fx,compact){
+ const labels=fx?FX_LABEL:LABEL;
+ let h='<div class="item '+x.status+(compact?' compact':'')+'"><div class="i-top"><i class="dot '+x.status+'"></i><span class="i-name">'+esc(x.name)+'</span><span class="i-state">'+labels[x.status]+'</span></div>';
+ if(compact)return h+'</div>';
+ const sub=['<code>'+esc(x.id)+'</code>'];
+ if(fx){if(x.tag)sub.push('<span class="tag">'+esc(x.tag)+'</span>')}
+ else sub.push('<span>'+esc(x.agent||'待认领')+'</span>');
+ if(x.pr_counts){const p=x.pr_counts;sub.push('<span>已合并 '+p.done+' · 待合并 '+p.ready+' · 草稿 '+p.doing+'</span>')}
+ const a=x.last_activity;
+ if(a)sub.push('<span>'+(a.source==='commit'?'提交 ':'汇报 ')+esc(a.agent||'未知')+' · '+timeTag(a.time)+'</span>');
+ else if(x.updated&&!fx)sub.push('<span>更新 '+timeTag(x.updated)+'</span>');
+ h+='<div class="i-sub">'+sub.join('')+'</div>';
+ if(x.prs&&x.prs.length)h+='<div class="prs">'+x.prs.map(n=>prLink(n,x.status==='done'?'merged':'')).join('')+'</div>';
+ if(x.note&&fx)h+='<div class="i-sub">'+esc(x.note)+'</div>';
+ return h+'</div>';
+}
+
+function groupsView(rows,fx){
+ const q=$('query').value.trim().toLowerCase(),focused=!!q||filter!=='all';
+ const map=new Map();
+ for(const x of rows){if(!map.has(x.module))map.set(x.module,[]);map.get(x.module).push(x)}
+ const out=[];
+ for(const [name,group] of map){
+  const visible=group.filter(x=>matches(x,q)&&(filter==='all'||x.status===filter)).sort((a,b)=>ORDER.indexOf(a.status)-ORDER.indexOf(b.status));
+  if(!visible.length)continue;
+  const c=countBy(group),active=c.doing+c.ready;
+  let body='<div class="items">';
+  if(focused)body+=visible.map(x=>itemCard(x,fx,false)).join('');
+  else{
+   const done=visible.filter(x=>x.status==='done'),rest=visible.filter(x=>x.status!=='done');
+   body+=rest.map(x=>itemCard(x,fx,x.status==='todo')).join('');
+   if(done.length)body+=details((fx?'fx':'ms')+':done:'+name,false,'<i class="chev"></i>已完成 '+done.length+' 项',done.map(x=>itemCard(x,fx,false)).join(''),'fold');
+  }
+  body+='</div>';
+  const summary='<div class="g-title"><h3><i class="chev"></i>'+esc(name)+'</h3><span class="num">'+(active?active+' 活跃 · ':'')+c.done+'/'+group.length+' · '+pct(c.done,group.length)+'%</span></div>'+stack(c);
+  // Milestone groups start open; the effect matrix is large, so its groups open only when searching/filtering or when work is active.
+  const def=focused||!fx||active>0;
+  out.push({active,html:details((fx?'fx':'ms')+':'+name+(focused?':f':''),def,summary,body,'group')});
+ }
+ if(!out.length)return '<p class="empty">没有匹配项</p>';
+ if(!fx)out.sort((a,b)=>(b.active>0)-(a.active>0));
+ return '<div class="grid cols">'+out.map(o=>o.html).join('')+'</div>';
+}
+
+function feedView(){
+ let h='';
+ const agents=data.agents||[];
+ if(agents.length){
+  h+='<h2 class="section-title">Agent</h2><div class="feed">'+agents.map(a=>{
+   const active=data.items.filter(i=>i.agent===a.agent&&i.status==='doing');
+   return '<div class="ev"><div class="ev-top"><span class="ev-who">'+esc(a.agent)+'</span>'+timeTag(a.updated)+'</div><p>'+esc(active.length?'进行中 · '+active.map(i=>i.name).join('、'):'当前没有进行中的能力')+'</p>'+(a.note?'<p>'+esc(a.note)+'</p>':'')+'</div>'}).join('')+'</div>';
+ }
+ const feed=data.activity||[];
+ h+='<h2 class="section-title">最近动态</h2>';
+ h+=feed.length?'<div class="feed">'+feed.map(a=>{
+  if(a.pr)return '<div class="ev"><div class="ev-top"><span class="ev-who">'+prLink(a.pr)+'<span class="tag">'+(a.status==='MERGED'?'已合并':a.status==='CLOSED'?'已关闭':'已开启')+'</span></span>'+timeTag(a.updated)+'</div><p>'+esc(a.note)+'</p></div>';
+  const x=byId.get(a.item);
+  return '<div class="ev"><div class="ev-top"><span class="ev-who">'+esc(a.agent)+'</span>'+timeTag(a.updated)+'</div><p><i class="dot '+esc(a.status)+'"></i> '+esc(x?.name||a.item)+' · '+(LABEL[a.status]||esc(a.status))+'</p>'+(a.note?'<p>'+esc(a.note)+'</p>':'')+'</div>'}).join('')+'</div>':'<p class="empty">尚未收到汇报</p>';
+ const tools=data.items.filter(x=>x.kind==='tool');
+ if(tools.length)h+='<h2 class="section-title">看板交付</h2><div class="feed">'+tools.map(x=>itemCard(x,false,false)).join('')+'</div>';
+ return h;
+}
+
+function parityState(t){const x=byId.get(t.fix);return x&&(x.repair_status||x.status)==='done'?'done':'todo'}
+function parityView(){
+ const q=$('query').value.trim().toLowerCase();
+ const sections=new Map();
+ function line(label,id,merged){
+  const x=byId.get(id);if(!x)return '';
+  const fix=Array.isArray(merged),st=fix?(x.repair_status||x.status):x.status;
+  const text=fix?(st==='done'?'已解决':'待修'):LABEL[st]||st;
+  const prs=(fix?merged:x.prs).map(n=>prLink(n)).join(' ');
+  return '<div class="kv"><b>'+label+'</b><i class="dot '+esc(st)+'"></i><span>'+text+'</span>'+(x.agent?'<span>'+esc(x.agent)+'</span>':'')+(prs||(fix&&st==='done'?'<span>· PR 暂无</span>':''))+'</div>';
+ }
+ let open=0,total=0;
+ for(const issue of data.parity||[]){
+  for(const t of issue.tasks){
+   const fx=byId.get(t.fix);
+   if(q&&![t.name,t.detail,t.module,t.fix,issue.number,issue.title].join(' ').toLowerCase().includes(q))continue;
+   const st=parityState(t);
+   if(filter!=='all'&&(st==='done'?'done':'todo')!==filter)continue;
+   total++;if(st!=='done')open++;
+   const module=fx?.module||t.module||'其他';
+   if(!sections.has(module))sections.set(module,[]);
+   sections.get(module).push({st,html:'<div class="ev"><div class="ev-top"><span class="ev-who wrap">'+esc(t.name.replace(/^ae-parity:\s*/i,''))+'</span>'+issueLink(issue.number)+'</div><p>'+esc(t.detail)+'</p>'+line('修复',t.fix,t.merged)+line('实机验收',t.verify)+'</div>'});
+  }
+ }
+ if(!sections.size)return '<p class="empty">没有匹配项</p>';
+ const groups=[...sections].map(([m,rows])=>{
+  const c={done:rows.filter(r=>r.st==='done').length};c.todo=rows.length-c.done;
+  rows.sort((a,b)=>(a.st==='done')-(b.st==='done'));
+  return details('parity:'+m,c.todo>0||!!q,'<div class="g-title"><h3><i class="chev"></i>'+esc(m)+'</h3><span class="num">'+(c.todo?c.todo+' 待修 · ':'')+c.done+'/'+rows.length+'</span></div>'+stack(c),'<div class="items">'+rows.map(r=>r.html).join('')+'</div>','group');
+ });
+ return '<p class="note">'+open+' 项待修 · 共 '+total+' 项</p><div class="grid cols">'+groups.join('')+'</div>';
+}
+
+function chips(rows){
+ const c=countBy(rows);
+ const labels=tab==='fx'?FX_LABEL:tab==='parity'?PARITY_LABEL:LABEL;
+ $('chips').innerHTML=FILTERS.filter(f=>f==='all'||f===filter||c[f]>0).map(f=>'<button class="chip" data-f="'+f+'" aria-pressed="'+(f===filter)+'">'+(f==='all'?'全部':'<i class="dot '+f+'"></i>'+labels[f])+'<span class="num">'+(f==='all'?rows.length:c[f])+'</span></button>').join('');
+}
+
+function render(){
+ if(!data)return;
+ overview();
+ nav.querySelectorAll('button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===tab));
+ $('toolbar').hidden=tab==='feed';
+ if(tab==='ms'){const rows=data.items.filter(x=>x.kind==='milestone');chips(rows);$('content').innerHTML=groupsView(rows,false)}
+ else if(tab==='fx'){const rows=data.items.filter(x=>x.kind==='effect');chips(rows);$('content').innerHTML=groupsView(rows,true)}
+ else if(tab==='parity'){const rows=(data.parity||[]).flatMap(i=>i.tasks).map(t=>({status:parityState(t)}));chips(rows);$('content').innerHTML=parityView()}
+ else $('content').innerHTML=feedView();
+}
+
+$('chips').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;filter=b.dataset.f;store.set('filter',filter);render()});
+$('query').addEventListener('input',render);
+document.addEventListener('toggle',e=>{const k=e.target.dataset&&e.target.dataset.key;if(k)openState.set(k,e.target.open)},true);
+
+function setLive(on,text){$('live').className='live'+(on?' on':'');$('live').lastElementChild.textContent=text}
+let revision=0;
+async function refresh(){
+ const current=++revision;
+ try{const r=await fetch('/api/state');if(!r.ok)throw Error();const state=await r.json();if(current!==revision)return;
+  data=state;byId=new Map(data.items.map(x=>[x.id,x]));
+  // Keep the search field focused and the scroll position steady across live updates.
+  const y=scrollY;render();scrollTo(0,y);setLive(true,'实时')}
+ catch{if(current===revision){setLive(false,'重试中');setTimeout(refresh,3000)}}
+}
+const events=new EventSource('/api/events');
+events.onmessage=refresh;events.onerror=()=>setLive(false,'重连中');
+// Re-evaluate the two-hour "doing" window and relative times even while nothing changes.
+setInterval(()=>{if(!document.hidden)refresh()},60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+</script>
+</html>

@@ -6,12 +6,21 @@
 //! values; OK runs one `bae-motion` command (one undo step), Cancel runs none.
 
 mod camera_settings;
+mod comp_from_selection;
 mod comp_settings;
 pub(crate) mod fields;
+mod go_to_time;
+mod interpret_footage;
+mod layer_time;
 mod light_settings;
+mod mask_value;
 pub mod memory;
+pub(crate) mod photoshop;
 mod precompose;
+mod project_settings;
+mod render_output;
 mod solid_settings;
+mod transform_value;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -23,14 +32,21 @@ use bae_ui::PanelContext;
 pub use camera_settings::{CameraSettings, CameraSettingsMemory, CameraValues, FilmUnits};
 pub use comp_settings::{CompSettings, CompSettingsMemory};
 pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
+pub use mask_value::{Kind as MaskKind, MaskValue};
 pub use precompose::{PrecomposeDialog, PrecomposeMemory};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
+pub use transform_value::{Kind as TransformKind, TransformValue};
 
 use crate::session::SharedSession;
 
 /// The dialog that is open.
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    Photoshop(Box<photoshop::PhotoshopDialog>),
+    /// Analysis of the composition work area for the Keyframe Assistant.
+    AudioAnalysis(crate::audio_analysis::Analysis),
+    /// Display units and slider floor of the Audio panel.
+    AudioOptions(crate::panels::audio::AudioOptionsDialog),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
@@ -42,14 +58,51 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// File > Interpret Footage > Main (Cmd/Ctrl+Alt+G).
+    InterpretFootage(Box<interpret_footage::InterpretFootage>),
+    /// Layer > Time > Time Stretch.
+    TimeStretch(Box<layer_time::TimeStretch>),
+    /// Layer > Transform > Auto-Orient (Cmd/Ctrl+Alt+O).
+    AutoOrient(Box<layer_time::AutoOrient>),
+    /// View > Go to Time (Alt+Shift+J).
+    GoToTime(Box<go_to_time::GoToTime>),
+    /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
+    ProjectSettings(Box<project_settings::ProjectSettings>),
+    EffectManager(Box<crate::effects::manager::EffectManager>),
+    /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
+    /// keyframe's Edit Value….
+    TransformValue(Box<TransformValue>),
+    /// Layer ▸ Mask ▸ Mask Shape… / Feather… / Opacity… / Expansion….
+    MaskValue(Box<MaskValue>),
+    /// A Render Queue item's Render Settings.
+    RenderSettings(Box<render_output::RenderSettings>),
+    /// A Render Queue item's Output Module Settings.
+    OutputModule(Box<render_output::OutputModule>),
+    /// File ▸ New Comp from Selection….
+    CompFromSelection(Box<comp_from_selection::CompFromSelection>),
     /// An alert: a message and OK (import errors …).
-    Alert { title: String, message: String },
+    Alert {
+        title: String,
+        message: String,
+    },
+    /// View ▸ View Options (Cmd/Ctrl+Alt+U).
+    ViewOptions(Box<crate::viewer::view_options::LayerControls>),
+    /// View ▸ Panel Background Color ▸ Select Custom Background Color…
+    BackgroundColor([u8; 3]),
+    /// View ▸ Resolution ▸ Custom…: pixel steps (horizontal, vertical);
+    /// `nested`: also for the comps nested in the active one.
+    CustomResolution {
+        steps: [u32; 2],
+        nested: bool,
+    },
 }
 
 /// Open dialog and remembered values.
 #[derive(Debug, Default)]
 pub struct Dialogs {
     pub open: Option<Dialog>,
+    pub(crate) photoshop_queue: std::collections::VecDeque<photoshop::PhotoshopDialog>,
+    pub(crate) frame_checks: crate::import::FrameChecks,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
@@ -88,7 +141,8 @@ impl SharedDialogs {
 
     /// Whether a motion dialog is open.
     pub fn is_open(&self) -> bool {
-        self.lock().open.is_some()
+        let d = self.lock();
+        d.open.is_some() || !d.photoshop_queue.is_empty()
     }
 }
 
@@ -135,12 +189,13 @@ pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: O
 
 /// Open Composition Settings for an existing comp.
 pub(crate) fn comp_settings(cx: &PanelContext<'_>, comp: &PrimPath) {
-    let Some(settings) = CompSettings::edit(cx.stage, comp) else {
-        return;
-    };
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
-    if d.open.is_none() {
+    if d.open.is_some() {
+        return;
+    }
+    remember(cx.resources, &mut d);
+    if let Some(settings) = CompSettings::edit(cx.stage, comp, &d.comp) {
         d.open = Some(Dialog::CompSettings(Box::new(settings)));
     }
 }
@@ -179,6 +234,15 @@ pub(crate) fn layer_settings(cx: &PanelContext<'_>, session: &SharedSession, tar
     };
     if open.is_some() {
         d.open = open;
+    }
+}
+
+/// Open `dialog` unless one is open already.
+pub(crate) fn open(resources: &Resources, dialog: Dialog) {
+    let dialogs = shared(resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(dialog);
     }
 }
 
@@ -233,6 +297,97 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Interpret Footage for the footage selected in the Project panel.
+pub(crate) fn interpret_footage(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    let selected = session.lock().selected_items.clone();
+    if d.open.is_none()
+        && let Some(f) = interpret_footage::InterpretFootage::new(cx.stage, &selected)
+    {
+        d.open = Some(Dialog::InterpretFootage(Box::new(f)));
+    }
+}
+
+/// Open Time Stretch for the selected layers.
+pub(crate) fn time_stretch(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(t) = layer_time::TimeStretch::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::TimeStretch(Box::new(t)));
+    }
+}
+
+/// Open Auto-Orient for the selected layers.
+pub(crate) fn auto_orient(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(a) = layer_time::AutoOrient::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::AutoOrient(Box::new(a)));
+    }
+}
+
+/// Open Go to Time for the active comp.
+pub(crate) fn go_to_time(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(g) = go_to_time::GoToTime::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::GoToTime(Box::new(g)));
+    }
+}
+
+/// Open Project Settings.
+pub(crate) fn project_settings(cx: &PanelContext<'_>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::ProjectSettings(Box::new(
+            project_settings::ProjectSettings::new(cx.stage),
+        )));
+    }
+}
+
+pub(crate) fn audio_options(
+    cx: &PanelContext<'_>,
+    options: crate::panels::audio::AudioOptionsDialog,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::AudioOptions(options));
+    }
+}
+
+/// Open Render Settings for render queue item `item`.
+pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
+    let queue = crate::render_queue::shared(cx.resources);
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(r) = render_output::RenderSettings::new(cx.stage, &queue, item)
+    {
+        d.open = Some(Dialog::RenderSettings(Box::new(r)));
+    }
+}
+
+/// Open Output Module Settings for render queue item `item`.
+pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64, module: usize) {
+    let queue = crate::render_queue::shared(cx.resources);
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(o) = render_output::OutputModule::new(&queue, item, module)
+    {
+        d.open = Some(Dialog::OutputModule(Box::new(o)));
+    }
+}
+
 /// Open Camera Settings for a new camera in the active comp.
 pub(crate) fn new_camera(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -257,6 +412,60 @@ pub(crate) fn new_light(cx: &PanelContext<'_>, session: &SharedSession) {
     }
 }
 
+/// Open the value dialog of `kind` for `layers` at comp time `now`, or for one
+/// keyframe of `key_attr` (`layers`: its layer, `now`: its comp time).
+pub(crate) fn transform_value(
+    cx: &PanelContext<'_>,
+    comp: &PrimPath,
+    layers: &[PrimPath],
+    now: bae_model::Time,
+    kind: TransformKind,
+    key_attr: Option<&str>,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = TransformValue::new(cx.stage, comp, layers, now, kind, key_attr) {
+        d.open = Some(Dialog::TransformValue(Box::new(v)));
+    }
+}
+
+/// File ▸ New Comp from Selection… for `items` (Project panel selection).
+pub(crate) fn comp_from_selection(
+    cx: &PanelContext<'_>,
+    items: Vec<PrimPath>,
+    still: Option<bae_model::Time>,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = comp_from_selection::CompFromSelection::new(cx.stage, items, still) {
+        d.open = Some(Dialog::CompFromSelection(Box::new(v)));
+    }
+}
+
+/// Open the mask value dialog of `kind` for `masks` at comp time `now`.
+pub(crate) fn mask_value(
+    cx: &PanelContext<'_>,
+    comp: &PrimPath,
+    masks: &[PrimPath],
+    now: bae_model::Time,
+    kind: MaskKind,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = MaskValue::new(cx.stage, comp, masks, now, kind) {
+        d.open = Some(Dialog::MaskValue(Box::new(v)));
+    }
+}
+
 /// AE's initial New Solid color (tests).
 #[cfg(test)]
 pub(crate) fn solid_settings_default_color() -> [f64; 4] {
@@ -272,6 +481,14 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        interpret_footage::STRINGS,
+        layer_time::STRINGS,
+        go_to_time::STRINGS,
+        project_settings::STRINGS,
+        transform_value::STRINGS,
+        mask_value::STRINGS,
+        render_output::STRINGS,
+        comp_from_selection::STRINGS,
     ]
     .concat()
 }
@@ -283,26 +500,84 @@ pub struct MotionDialogs;
 impl bae_ui::DialogHost for MotionDialogs {
     fn is_open(&self, resources: &Resources) -> bool {
         shared(resources).is_open()
+            || crate::common::session(resources)
+                .lock()
+                .loading_lut
+                .is_some()
     }
 
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
-        let dialogs = shared(cx.resources);
-        // Draw without holding the lock (a dialog may read the memory).
-        let Some(mut open) = dialogs.lock().open.take() else {
+        if crate::effects::lut::poll(ctx, cx) {
             return;
+        }
+        let dialogs = shared(cx.resources);
+        // Comps New Comp from Selection made, for the Render Queue.
+        let queue = std::mem::take(&mut crate::common::session(cx.resources).lock().queue_comps);
+        if !queue.is_empty() {
+            let rq = crate::render_queue::shared(cx.resources);
+            for comp in &queue {
+                if let Some(info) = query::comp_info(cx.stage, comp) {
+                    rq.lock()
+                        .add(&info, &crate::render_queue::default_output_dir());
+                }
+            }
+            cx.open_panel("render_queue");
+        }
+        // Draw without holding the lock (a dialog may read the memory).
+        let open = {
+            let mut d = dialogs.lock();
+            d.open
+                .take()
+                .or_else(|| d.frame_checks.next_notice())
+                .or_else(|| {
+                    d.photoshop_queue
+                        .pop_front()
+                        .map(|job| Dialog::Photoshop(Box::new(job)))
+                })
         };
+        let Some(mut open) = open else { return };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
+            Dialog::Photoshop(d) => d.ui(ctx, cx),
+            Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
+            Dialog::AudioOptions(d) => d.ui(ctx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::InterpretFootage(d) => d.ui(ctx, cx),
+            Dialog::TimeStretch(d) => d.ui(ctx, cx),
+            Dialog::AutoOrient(d) => d.ui(ctx, cx),
+            Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
+            Dialog::ProjectSettings(d) => d.ui(ctx, cx),
+            Dialog::EffectManager(d) => d.ui(ctx, cx),
+            Dialog::TransformValue(d) => d.ui(ctx, cx),
+            Dialog::MaskValue(d) => d.ui(ctx, cx),
+            Dialog::RenderSettings(d) => d.ui(ctx, cx),
+            Dialog::OutputModule(d) => d.ui(ctx, cx),
+            Dialog::CompFromSelection(d) => d.ui(ctx, cx, &session),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
+            Dialog::ViewOptions(v) => crate::viewer::view_options::view_options_ui(ctx, cx, v),
+            Dialog::BackgroundColor(c) => {
+                crate::viewer::view_options::background_color_ui(ctx, cx, *c)
+            }
+            Dialog::CustomResolution { steps, nested } => {
+                crate::viewer::view_options::custom_resolution_ui(ctx, cx, steps, *nested)
+            }
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {
             lock.open = Some(open);
         }
     }
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(photoshop::ZH);
 }

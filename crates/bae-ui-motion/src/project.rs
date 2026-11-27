@@ -5,7 +5,8 @@
 
 use std::collections::HashSet;
 
-use bae_model::{PrimPath, PrimType, Stage, Value};
+use bae_anim::glam::DVec2;
+use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
 use bae_motion::query;
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
@@ -16,15 +17,75 @@ use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::common;
+use crate::panel_columns::{Column, Columns};
+use crate::session::SharedSession;
 
 /// Drag payload: a project item dragged into a comp.
 #[derive(Clone, Debug)]
 pub(crate) struct ItemDrag(pub PrimPath);
 
+pub(crate) enum DropPlacement {
+    Viewer(Option<DVec2>),
+    Timeline { index: usize, start: Option<Time> },
+}
+
+impl ItemDrag {
+    /// Add a project item to the active comp (drag and drop).
+    pub(crate) fn add_as_layer(
+        &self,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        placement: DropPlacement,
+    ) {
+        let item = &self.0;
+        let stage = cx.stage;
+        let Some(active) = session.lock().active_comp.clone() else {
+            return;
+        };
+        let kind = if query::comp_info(stage, item).is_some() {
+            if query::would_nest_recursively(stage, &active, item) {
+                return;
+            }
+            LayerKind::PreComp
+        } else {
+            match stage
+                .prim(item)
+                .and_then(|v| query::static_value(&v, "kind"))
+            {
+                Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+                _ if stage.prim(item).is_some_and(|v| {
+                    v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                        && v.value("has_video").and_then(Value::as_bool) == Some(false)
+                }) =>
+                {
+                    LayerKind::Audio
+                }
+                _ => LayerKind::Footage,
+            }
+        };
+        let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
+        match placement {
+            DropPlacement::Viewer(Some(p)) => extra["position"] = json!([p.x, p.y]),
+            DropPlacement::Viewer(None) => {}
+            DropPlacement::Timeline { index, start } => {
+                extra["index"] = json!(index);
+                if let Some(start) = start {
+                    extra["start"] = json!(start);
+                }
+            }
+        }
+        common::new_layer(cx, session, kind, extra);
+    }
+}
+
 #[derive(Default)]
 pub struct ProjectPanel {
     collapsed: HashSet<PrimPath>,
     search: String,
+    columns: Columns,
+    thumbnail_grid: bool,
+    /// Edit ▸ Find: focus the search field next frame.
+    focus_search: bool,
     rename: Option<(PrimPath, String)>,
 }
 
@@ -35,14 +96,26 @@ struct Row {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ItemKind {
+pub(crate) enum ItemKind {
     Folder,
     Comp,
     Footage,
     Solid,
 }
 
-fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
+impl ItemKind {
+    pub(crate) fn context_kind(self) -> u8 {
+        use crate::context_menu as m;
+        match self {
+            Self::Comp => m::COMP,
+            Self::Folder => m::FOLDER,
+            Self::Solid => m::SOLID,
+            Self::Footage => m::FOOTAGE,
+        }
+    }
+}
+
+pub(crate) fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
     let v = stage.prim(path)?;
     let t = v.prim_type()?;
     if *t == PrimType::FOLDER {
@@ -114,20 +187,30 @@ impl ProjectPanel {
             return;
         };
         let stage = cx.stage;
-        let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
-        p.rect_filled(thumb, 1.0, color::FIELD);
-        let icon = match item_kind(stage, path) {
-            Some(ItemKind::Comp) => Icon::Composition,
-            Some(ItemKind::Folder) => Icon::Folder,
-            _ => Icon::Footage,
+        let x = if crate::prefs::current(cx.resources)
+            .bool("appearance.disable_thumbnails_in_project_panel")
+        {
+            rect.left() + 8.0
+        } else {
+            let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
+            if self.thumbnail_grid {
+                crate::viewer::checkerboard(p, thumb, cx.resources);
+            } else {
+                p.rect_filled(thumb, 1.0, color::FIELD);
+            }
+            let icon = match item_kind(stage, path) {
+                Some(ItemKind::Comp) => Icon::Composition,
+                Some(ItemKind::Folder) => Icon::Folder,
+                _ => Icon::Footage,
+            };
+            icons::paint(
+                p,
+                Rect::from_center_size(thumb.center(), vec2(20.0, 20.0)),
+                icon,
+                color::ICON_DIM,
+            );
+            thumb.right() + 10.0
         };
-        icons::paint(
-            p,
-            Rect::from_center_size(thumb.center(), vec2(20.0, 20.0)),
-            icon,
-            color::ICON_DIM,
-        );
-        let x = thumb.right() + 10.0;
         let mut y = rect.top() + 12.0;
         let mut line = |text: String, c| {
             p.text(pos2(x, y), Align2::LEFT_CENTER, text, theme::small(), c);
@@ -160,16 +243,120 @@ impl ProjectPanel {
     }
 }
 
-fn columns(width: f32) -> [f32; 5] {
-    // label, name, type, size, duration (x offsets).
-    let name_w = (width - 16.0 - 90.0 - 80.0 - 90.0).max(90.0);
-    [
-        6.0,
-        22.0,
-        22.0 + name_w,
-        22.0 + name_w + 90.0,
-        22.0 + name_w + 170.0,
-    ]
+pub(crate) const COLUMNS: &[Column] = &[
+    Column::new("Name", 150.0, true, true),
+    Column::new("Label", 18.0, true, false),
+    Column::new("Type", 80.0, true, false),
+    Column::new("Size", 90.0, true, false),
+    Column::new("Frame Rate", 75.0, true, false),
+    Column::new("Media Start", 90.0, false, false),
+    Column::new("Media End", 90.0, false, false),
+    Column::new("Media Duration", 96.0, false, false),
+    Column::new("In Point", 90.0, true, false),
+    Column::new("Out Point", 90.0, true, false),
+    Column::new("Duration", 90.0, false, false),
+    Column::new("Tape Name", 90.0, true, false),
+    Column::new("Comment", 110.0, true, false),
+    Column::new("File Path", 200.0, true, false),
+    Column::new("Date", 100.0, false, false),
+    Column::new("Video Info", 130.0, true, false),
+];
+
+fn column_value(stage: &Stage, row: &Row, title: &str) -> String {
+    let Some(v) = stage.prim(&row.path) else {
+        return String::new();
+    };
+    let value = |key: &str| query::static_value(&v, key);
+    let time = |key: &str| match value(key) {
+        Some(Value::Time(t)) => Some(t),
+        _ => None,
+    };
+    let comp = query::comp_info(stage, &row.path);
+    let rate = comp
+        .as_ref()
+        .map(|c| c.frame_rate)
+        .or_else(|| match value("frame_rate") {
+            Some(Value::FrameRate(rate)) => Some(rate),
+            Some(n) => n
+                .as_f64()
+                .filter(|fps| *fps > 0.0)
+                .map(bae_model::FrameRate::from_fps),
+            None => None,
+        });
+    let duration = comp
+        .as_ref()
+        .map(|c| c.duration)
+        .or_else(|| time("duration"));
+    let start = comp
+        .as_ref()
+        .map(|c| c.display_start)
+        .or_else(|| time("media_start"))
+        .unwrap_or(Time::ZERO);
+    let end = duration
+        .zip(rate)
+        .map(|(d, r)| start + (d - r.frame_to_time(1)).max(Time::ZERO));
+    let text = |key: &str| {
+        value(key)
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default()
+    };
+    match title {
+        "Type" => describe(stage, &row.path, row.kind).0,
+        "Size" => describe(stage, &row.path, row.kind).1,
+        "Frame Rate" => rate
+            .map(|r| format!("{:.2}", r.as_f64()))
+            .unwrap_or_default(),
+        "File Path" => bae_model::asset::AssetFile::from_prim(&v)
+            .map(|f| f.original)
+            .unwrap_or_default(),
+        "Tape Name" => text("tape_name"),
+        "Comment" => text("comment"),
+        "Date" => bae_model::asset::AssetFile::from_prim(&v)
+            .and_then(|f| f.mtime_ms)
+            .and_then(|ms| {
+                let duration = std::time::Duration::from_millis(ms.unsigned_abs());
+                if ms < 0 {
+                    std::time::UNIX_EPOCH.checked_sub(duration)
+                } else {
+                    std::time::UNIX_EPOCH.checked_add(duration)
+                }
+            })
+            .map(bae_platform::utc_label)
+            .unwrap_or_default(),
+        "Video Info" => {
+            let size = describe(stage, &row.path, row.kind).1;
+            match (size.is_empty(), rate) {
+                (false, Some(r)) => format!("{size} ({:.2} fps)", r.as_f64()),
+                _ => size,
+            }
+        }
+        _ => {
+            let t = match title {
+                "Media Start" => duration.map(|_| start),
+                "In Point" => time("in_point").or(duration.map(|_| start)),
+                "Media End" => end,
+                "Out Point" => time("out_point").or(end),
+                "Duration" | "Media Duration" => duration,
+                _ => None,
+            };
+            t.zip(rate)
+                .map(|(t, r)| widgets::timecode(r.time_to_frame(t), r.as_f64()))
+                .unwrap_or_default()
+        }
+    }
+}
+
+/// The project's color depth in bits per channel (Project Settings).
+fn project_depth(stage: &bae_model::Stage) -> String {
+    PrimPath::new("/project")
+        .ok()
+        .and_then(|p| stage.prim(&p))
+        .and_then(|v| query::static_value(&v, "bit_depth"))
+        .and_then(|v| match v {
+            bae_model::Value::Enum(s) | bae_model::Value::String(s) => Some(s),
+            _ => None,
+        })
+        .unwrap_or_else(|| "8".into())
 }
 
 #[cfg(test)]
@@ -185,60 +372,67 @@ impl ProjectPanel {
 }
 
 impl Panel for ProjectPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        self.columns.menu(ui, COLUMNS);
+        if ui.button(tr("Project Settings...")).clicked() {
+            cx.invoke(crate::actions::ids::PROJECT_SETTINGS);
+            ui.close();
+        }
+        let thumbnails = !crate::prefs::current(cx.resources)
+            .bool("appearance.disable_thumbnails_in_project_panel");
+        if ui
+            .add_enabled(
+                thumbnails,
+                egui::Checkbox::new(&mut self.thumbnail_grid, tr("Thumbnail Transparency Grid")),
+            )
+            .changed()
+        {
+            ui.close();
+        }
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        Some(json!({"columns": self.columns, "thumbnail_grid": self.thumbnail_grid}))
+    }
+
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let panel_rect = ui.max_rect();
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let selected_first = session.lock().selected_items.first().cloned();
+        // Another panel asked to rename an item here (the Timeline's Rename).
+        if let Some(p) = session.lock().rename_item.take()
+            && stage.has_prim(&p)
+        {
+            self.rename = Some((p.clone(), query::display_name_of(stage, &p)));
+        }
         self.info_area(ui, cx, selected_first.as_ref());
 
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            widgets::search_field(
+            let field = widgets::search_field(
                 ui,
                 &mut self.search,
                 (ui.available_width() - 12.0).max(60.0),
             );
+            if std::mem::take(&mut self.focus_search) {
+                field.request_focus();
+            }
         });
         ui.add_space(4.0);
 
-        // Column headers.
         let width = ui.available_width();
-        let cols = columns(width);
-        let (head, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
-        {
-            let p = ui.painter();
-            p.rect_filled(head, 0.0, color::PANEL);
-            p.hline(
-                head.x_range(),
-                head.bottom() - 0.5,
-                egui::Stroke::new(1.0, color::SEPARATOR),
-            );
-            icons::paint(
-                p,
-                Rect::from_center_size(
-                    pos2(head.left() + cols[0] + 6.0, head.center().y),
-                    vec2(12.0, 12.0),
-                ),
-                Icon::Tag,
-                color::ICON_DIM,
-            );
-            for (i, title) in [(1, "Name"), (2, "Type"), (3, "Size"), (4, "Duration")] {
-                p.text(
-                    pos2(head.left() + cols[i] + 4.0, head.center().y),
-                    Align2::LEFT_CENTER,
-                    tr(title),
-                    theme::small(),
-                    color::TEXT,
-                );
-            }
-        }
-
         let rows = self.rows(stage);
         let footer_h = 28.0;
-        let list_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(20.0);
+        let list_h = (ui.available_height()
+            - footer_h
+            - 18.0
+            - ui.spacing().scroll.bar_width
+            - 3.0 * ui.spacing().item_spacing.y)
+            .max(20.0);
         let mut open_comp: Option<PrimPath> = None;
+        let mut open_footage: Option<PrimPath> = None;
         // The Enter that commits a rename must not start a new one.
         let mut rename_finished = false;
         let mut menu_new_comp = false;
@@ -246,12 +440,47 @@ impl Panel for ProjectPanel {
         let mut delete: Vec<PrimPath> = Vec::new();
         // Folder rows, for files dropped from Finder / Explorer.
         let mut folder_rows: Vec<(Rect, PrimPath)> = Vec::new();
+        let scroll = egui::ScrollArea::horizontal().id_salt("project_columns").auto_shrink([false, true]).show(ui, |ui| {
+        // The label chip precedes the name in the list, as in AE.
+        let mut x = 2.0;
+        let mut cells = Vec::new();
+        for col in [&COLUMNS[1], &COLUMNS[0]].into_iter().chain(&COLUMNS[2..]) {
+            if self.columns.visible(col) {
+                cells.push((col, x));
+                x += col.width;
+            }
+        }
+        let width = width.max(x);
+        let (head, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
+        ui.painter().hline(head.x_range(), head.bottom() - 0.5, egui::Stroke::new(1.0, color::SEPARATOR));
+        for &(col, x) in &cells {
+            let r = Rect::from_min_size(pos2(head.left()+x, head.top()), vec2(col.width, head.height()));
+            if col.title == "Label" {
+                icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(12.0,12.0)), Icon::Tag, color::ICON_DIM);
+            } else {
+                ui.painter().text(r.left_center()+vec2(4.0,0.0), Align2::LEFT_CENTER, tr(col.title), theme::small(), color::TEXT);
+            }
+            let visible = r.intersect(ui.clip_rect()).intersect(panel_rect);
+            if visible.is_positive() {
+                let name = bae_ui::a11y::context(&[tr("Project Columns"), tr(col.title)]);
+                let resp = ui.interact(visible, ui.id().with(col.title), Sense::click())
+                    .labeled(egui::WidgetType::Button, &name);
+                common::context_menu(&resp, &mut |ui| self.columns.header_menu(ui, COLUMNS, col));
+            }
+        }
+        let name_left = cells.iter().find(|(col,_)| col.title == "Name").unwrap().1;
+        let name_right = name_left + COLUMNS[0].width;
         egui::ScrollArea::vertical()
             .max_height(list_h)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (i, row) in rows.iter().enumerate() {
-                    let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click_and_drag());
+                    let (id, rect) = ui.allocate_space(vec2(width, ROW_H));
+                    let visible = rect.intersect(ui.clip_rect()).intersect(panel_rect);
+                    if !visible.is_positive() {
+                        continue;
+                    }
+                    let resp = ui.interact(visible, id, Sense::click_and_drag());
                     if row.kind == ItemKind::Folder {
                         folder_rows.push((rect, row.path.clone()));
                     }
@@ -273,9 +502,11 @@ impl Panel for ProjectPanel {
                         .and_then(|v| query::static_value(&v, "label"))
                         .and_then(|v| v.as_f64())
                         .map_or(0, |v| v as usize);
-                    icons::swatch(p, pos2(rect.left() + cols[0] + 6.0, rect.center().y), 9.0, theme::label_color(label));
+                    if self.columns.visible(&COLUMNS[1]) {
+                        icons::swatch(p, pos2(rect.left() + 10.0, rect.center().y), 9.0, theme::label_color(label));
+                    }
                     // Name with icon and twirl.
-                    let indent = cols[1] + row.depth as f32 * 14.0;
+                    let indent = name_left + row.depth as f32 * 14.0;
                     let mut x = rect.left() + indent;
                     if row.kind == ItemKind::Folder {
                         let open = !self.collapsed.contains(&row.path);
@@ -303,7 +534,7 @@ impl Panel for ProjectPanel {
                     let name = query::display_name_of(stage, &row.path);
                     let renaming = self.rename.as_ref().is_some_and(|(r, _)| r == &row.path);
                     if renaming {
-                        let field = Rect::from_min_max(pos2(x, rect.top() + 1.0), pos2(rect.left() + cols[2] - 4.0, rect.bottom() - 1.0));
+                        let field = Rect::from_min_max(pos2(x, rect.top() + 1.0), pos2(rect.left() + name_right - 4.0, rect.bottom() - 1.0));
                         let mut done = None;
                         if let Some((_, buf)) = &mut self.rename {
                             let id = ui.id().with(("rename", row.path.as_str()));
@@ -320,13 +551,14 @@ impl Panel for ProjectPanel {
                             self.rename = None;
                         }
                     } else {
-                        widgets::clipped_text(p, pos2(x, rect.center().y), &name, theme::body(), color::TEXT_STRONG, rect.left() + cols[2] - x - 4.0);
+                        widgets::clipped_text(p, pos2(x, rect.center().y), &name, theme::body(), color::TEXT_STRONG, rect.left() + name_right - x - 4.0);
                     }
-                    // Type, size, duration.
-                    let (ty, size, dur) = describe(stage, &row.path, row.kind);
-                    let p = ui.painter();
-                    for (i, text) in [(2, ty), (3, size), (4, dur)] {
-                        widgets::clipped_text(p, pos2(rect.left() + cols[i] + 4.0, rect.center().y), &text, theme::small(), color::TEXT, 86.0);
+                    for &(col, x) in &cells {
+                        if col.title == "Name" || col.title == "Label" { continue; }
+                        let r = Rect::from_min_size(pos2(rect.left()+x, rect.top()), vec2(col.width, rect.height()));
+                        if ui.is_rect_visible(r) {
+                            widgets::clipped_text(ui.painter(), r.left_center()+vec2(4.0,0.0), &column_value(stage, row, col.title), theme::small(), color::TEXT, col.width-8.0);
+                        }
                     }
 
                     // Interaction.
@@ -346,6 +578,10 @@ impl Panel for ProjectPanel {
                     if resp.double_clicked() {
                         match row.kind {
                             ItemKind::Comp => open_comp = Some(row.path.clone()),
+                            // AE: footage and solids open in the Footage panel.
+                            ItemKind::Footage | ItemKind::Solid => {
+                                open_footage = Some(row.path.clone())
+                            }
                             ItemKind::Folder if !self.collapsed.remove(&row.path) => {
                                 self.collapsed.insert(row.path.clone());
                             }
@@ -355,33 +591,19 @@ impl Panel for ProjectPanel {
                     if row.kind != ItemKind::Folder {
                         resp.dnd_set_drag_payload(ItemDrag(row.path.clone()));
                     }
-                    resp.context_menu(|ui| {
+                    // AE 26's item menu (the same for comps, footage and folders).
+                    common::context_menu(&resp, &mut |ui| {
                         {
                             let mut s = session.lock();
                             if !s.selected_items.contains(&row.path) {
                                 s.selected_items = vec![row.path.clone()];
                             }
                         }
-                        if row.kind == ItemKind::Comp && ui.button(tr("Open in Timeline")).clicked() {
-                            open_comp = Some(row.path.clone());
-                            ui.close();
-                        }
-                        if ui.button(tr("New Composition")).clicked() {
-                            menu_new_comp = true;
-                            ui.close();
-                        }
-                        if ui.button(tr("New Folder")).clicked() {
-                            menu_new_folder = true;
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button(tr("Rename")).clicked() {
+                        use crate::context_menu as m;
+                        let kind = row.kind.context_kind();
+                        let chosen = m::show_item(ui, cx, m::PROJECT_ITEM, &[], kind);
+                        if chosen == Some("Rename") {
                             self.rename = Some((row.path.clone(), name.clone()));
-                            ui.close();
-                        }
-                        if ui.button(tr("Delete")).clicked() {
-                            delete = session.lock().selected_items.clone();
-                            ui.close();
                         }
                     });
                 }
@@ -394,18 +616,18 @@ impl Panel for ProjectPanel {
                     if resp.clicked() {
                         session.lock().selected_items.clear();
                     }
-                    resp.context_menu(|ui| {
-                        if ui.button(tr("New Composition")).clicked() {
-                            menu_new_comp = true;
-                            ui.close();
-                        }
-                        if ui.button(tr("New Folder")).clicked() {
-                            menu_new_folder = true;
-                            ui.close();
-                        }
+                    common::context_menu(&resp, &mut |ui| {
+                        crate::context_menu::show(ui, cx, crate::context_menu::PROJECT_BLANK);
                     });
                 }
             });
+
+        });
+
+        // egui identifies its native scroll bars by axis (horizontal is zero).
+        if let Some(bar) = ui.ctx().read_response(scroll.id.with(0_usize)) {
+            bar.labeled(egui::WidgetType::ScrollBar, tr("Scroll Project Columns"));
+        }
 
         // Footer: item count and buttons (AE: interpret, new folder, new comp, delete).
         let (foot, _) = ui.allocate_exact_size(vec2(width, footer_h), Sense::hover());
@@ -423,22 +645,41 @@ impl Panel for ProjectPanel {
             color::TEXT_DIM,
         );
         let mut x = foot.right() - 6.0;
-        let mut button = |ui: &mut Ui, icon: Icon, tip: &str| {
-            x -= 24.0;
-            let r = Rect::from_min_size(pos2(x, foot.top() + 3.0), vec2(22.0, 22.0));
+        let button = |ui: &mut Ui, x: &mut f32, icon: Icon, tip: &str| {
+            *x -= 24.0;
+            let r = Rect::from_min_size(pos2(*x, foot.top() + 3.0), vec2(22.0, 22.0));
             let resp = ui
                 .put(r, |ui: &mut Ui| icons::button(ui, icon, 22.0, false))
                 .labeled(egui::WidgetType::Button, tr(tip));
             resp.on_hover_text(tr(tip)).clicked()
         };
-        if button(ui, Icon::Trash, "Delete") {
+        if button(ui, &mut x, Icon::Trash, "Delete") {
             delete = session.lock().selected_items.clone();
         }
-        if button(ui, Icon::Composition, "New Composition") {
+        // AE: the project's color depth; a click opens Project Settings.
+        let depth = project_depth(stage);
+        let label = format!("{depth} bpc");
+        let w = 46.0;
+        x -= w + 2.0;
+        let r = Rect::from_min_size(pos2(x, foot.top() + 4.0), vec2(w, 20.0));
+        let bpc = ui
+            .put(
+                r,
+                egui::Button::new(egui::RichText::new(&label).small()).frame(false),
+            )
+            .labeled_value(egui::WidgetType::Button, tr("Project Settings"), &label)
+            .on_hover_text(tr("Project Settings"));
+        if bpc.clicked() {
+            cx.invoke("motion.file.project_settings");
+        }
+        if button(ui, &mut x, Icon::Composition, "New Composition") {
             menu_new_comp = true;
         }
-        if button(ui, Icon::Folder, "New Folder") {
+        if button(ui, &mut x, Icon::Folder, "New Folder") {
             menu_new_folder = true;
+        }
+        if button(ui, &mut x, Icon::InterpretFootage, "Interpret Footage") {
+            cx.invoke(crate::actions::ids::INTERPRET_FOOTAGE);
         }
 
         // Apply.
@@ -451,15 +692,18 @@ impl Panel for ProjectPanel {
             cx.open_panel("composition");
         }
         if menu_new_folder {
-            let mut params = json!({"name": common::numbered(stage, &session, target_folder.as_ref().unwrap_or(&PrimPath::root()), "Untitled")});
-            if let Some(f) = &target_folder {
-                params["parent"] = json!(f);
-            }
-            cx.invoke_with("folder.create", params);
+            crate::actions::new_folder(cx, &session);
         }
         if !delete.is_empty() {
             cx.invoke_with("item.delete", json!({"paths": delete}));
             session.lock().selected_items.clear();
+        }
+        if let Some(asset) = open_footage {
+            session.lock().footage_view = Some(asset);
+            cx.invoke_with(
+                bae_ui::action::ids::OPEN_PANEL,
+                serde_json::json!({"id": "footage"}),
+            );
         }
         if let Some(c) = open_comp {
             session.lock().open_comp(&c);
@@ -512,6 +756,11 @@ impl Panel for ProjectPanel {
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
+        // Edit ▸ Find (Ctrl+F): the search field.
+        if action.id == "motion.file.find" {
+            self.focus_search = true;
+            return true;
+        }
         if action.id == crate::actions::ids::DELETE {
             let items = session.lock().selected_items.clone();
             if !items.is_empty() {
@@ -554,4 +803,69 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
             (tr(ty).to_owned(), size, String::new())
         }
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Footer: the project color depth button opens Project Settings.
+    // Project panel
+    ("Name", "名称"),
+    ("Type", "类型"),
+    ("Size", "大小"),
+    ("Duration", "持续时间"),
+    ("Frame Rate", "帧速率"),
+    ("Folder", "文件夹"),
+    ("Footage", "素材"),
+    ("Solid", "纯色"),
+    ("Placeholder", "占位符"),
+    ("New Composition", "新建合成"),
+    ("New Composition...", "新建合成..."),
+    ("Animation", "动画"),
+    ("Arrange", "排列"),
+    ("Edit", "编辑"),
+    ("New Folder", "新建文件夹"),
+    ("Open in Timeline", "在时间轴中打开"),
+    ("Rename", "重命名"),
+    ("Delete", "删除"),
+    ("Add to Composition", "添加到合成"),
+    ("items", "项"),
+    ("Comp", "合成"),
+    ("Untitled", "未命名"),
+    // Project panel menus (AE 26 zh_CN, MenuID 0238 / 0242 / 0244).
+    (
+        "New Adobe Photoshop File...",
+        "新建 Adobe Photoshop 文件...",
+    ),
+    (
+        "New Maxon Cinema 4D File...",
+        "新建 Maxon Cinema 4D 文件...",
+    ),
+    ("Reveal Project in Finder", "在 Finder 中显示项目"),
+    ("Reveal Project in Explorer", "在资源管理器中显示项目"),
+    ("New Comp from Selection", "基于所选项新建合成"),
+    ("Replace with Precomp", "替换为预合成"),
+    ("Reveal in Composition", "在合成中显示"),
+    ("Solids Folder", "纯色文件夹"),
+    ("Thumbnail Transparency Grid", "缩览图透明网格"),
+    ("Hide This", "隐藏此项"),
+    ("Rename This...", "重命名此项..."),
+    ("Columns", "列数"),
+];
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "project",
+        bae_ui::PanelKind::new("Project", |spawn| {
+            let mut panel = ProjectPanel::default();
+            if let Some(s) = spawn.state {
+                panel.columns = serde_json::from_value(s["columns"].clone()).unwrap_or_default();
+                panel.thumbnail_grid = s["thumbnail_grid"].as_bool().unwrap_or_default();
+            }
+            Box::new(panel)
+        }),
+    );
 }

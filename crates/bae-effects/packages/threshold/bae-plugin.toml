@@ -1,0 +1,152 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "threshold"
+name = "Threshold"
+category = "Stylize"
+implementation = "wgsl"
+ae_match_names = ["ADBE Threshold2"]
+keywords = ["threshold", "black and white"]
+shader = "shaders/threshold.wgsl"
+includes = ["shaders/threshold_math.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "level"
+type = "float"
+name = "Level"
+default = 0.5
+range = [-30000, 30000]
+slider = [0, 1]
+
+[[effect]]
+id = "threshold_legacy"
+name = "Threshold"
+category = "Obsolete"
+implementation = "wgsl"
+ae_match_names = ["ADBE Threshold"]
+keywords = ["threshold", "legacy"]
+shader = "shaders/threshold.wgsl"
+includes = ["shaders/threshold_math.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "level"
+type = "float"
+name = "Level"
+default = 127.5
+range = [-30000, 7650000]
+slider = [0, 255]
+
+[[effect]]
+id = "cc-threshold"
+keywords = ["阈值"]
+name = "CC Threshold"
+category = "Stylize"
+implementation = "wgsl"
+ae_match_names = ["CC Threshold"]
+shader = "shaders/cc_threshold.wgsl"
+includes = ["shaders/threshold_math.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "threshold"
+type = "float"
+name = "Threshold"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 2
+key = "channel"
+type = "popup"
+name = "Channel"
+default = 1
+choices = ["Luminance", "RGB", "Saturation", "Alpha"]
+
+[[effect.param]]
+id = 3
+key = "invert"
+type = "checkbox"
+name = "Invert"
+default = false
+
+[[effect.param]]
+id = 4
+key = "blend_w_original"
+type = "float"
+name = "Blend w. Original"
+default = 0
+range = [0, 1]
+
+[[effect]]
+id = "cc-threshold-rgb"
+keywords = ["三通道阈值"]
+name = "CC Threshold RGB"
+category = "Stylize"
+implementation = "wgsl"
+ae_match_names = ["CC Threshold RGB"]
+shader = "shaders/cc_threshold_rgb.wgsl"
+includes = ["shaders/threshold_math.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "red_threshold"
+type = "float"
+name = "Red Threshold"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 2
+key = "green_threshold"
+type = "float"
+name = "Green Threshold"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 3
+key = "blue_threshold"
+type = "float"
+name = "Blue Threshold"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 4
+key = "invert_red_channel"
+type = "checkbox"
+name = "Invert Red Channel"
+default = false
+
+[[effect.param]]
+id = 5
+key = "invert_green_channel"
+type = "checkbox"
+name = "Invert Green Channel"
+default = false
+
+[[effect.param]]
+id = 6
+key = "invert_blue_channel"
+type = "checkbox"
+name = "Invert Blue Channel"
+default = false
+
+[[effect.param]]
+id = 7
+key = "blend_w_original"
+type = "float"
+name = "Blend w. Original"
+default = 0
+range = [0, 1]

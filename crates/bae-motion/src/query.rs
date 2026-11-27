@@ -40,9 +40,20 @@ pub struct CompInfo {
 }
 
 impl CompInfo {
+    /// The nearest frame at which the playhead can rest inside this composition.
+    pub fn playhead_time(&self, time: Time) -> Time {
+        let last = (self.duration - self.frame_duration()).max(Time::ZERO);
+        self.frame_rate.snap(time.clamp(Time::ZERO, last))
+    }
+
     /// Number of frames in the comp.
     pub fn frame_count(&self) -> i64 {
         self.frame_rate.time_to_frame(self.duration).max(1)
+    }
+
+    /// Snap a playhead or insertion point to a visible frame in this composition.
+    pub fn snap_visible_time(&self, time: Time) -> Time {
+        self.playhead_time(time)
     }
 
     /// Duration of one frame.
@@ -157,6 +168,41 @@ pub fn comp_layers(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
         .collect()
 }
 
+/// The composition opened by double-clicking this pre-comp layer.
+pub fn precomp_source(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let view = stage.prim(layer)?;
+    if view.value("kind")?.as_str()? != "pre_comp" {
+        return None;
+    }
+    let source = view.value("source")?.as_prim_ref()?;
+    stage
+        .prim(source)?
+        .is_a(&PrimType::COMP)
+        .then(|| source.clone())
+}
+
+/// The composition source of each pre-comp layer, in layer order.
+pub fn child_comps<'a>(stage: &'a Stage, comp: &PrimPath) -> impl Iterator<Item = PrimPath> + 'a {
+    comp_layers(stage, comp)
+        .into_iter()
+        .filter_map(|layer| precomp_source(stage, &layer))
+}
+
+/// Whether using `source` inside `parent` would close a composition cycle.
+pub fn would_nest_recursively(stage: &Stage, parent: &PrimPath, source: &PrimPath) -> bool {
+    let mut stack = vec![source.clone()];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(comp) = stack.pop() {
+        if &comp == parent {
+            return true;
+        }
+        if visited.insert(comp.clone()) {
+            stack.extend(child_comps(stage, &comp));
+        }
+    }
+    false
+}
+
 /// Whether `path` is a `Layer` prim.
 pub fn is_layer(stage: &Stage, path: &PrimPath) -> bool {
     stage.prim(path).is_some_and(|v| v.is_a(&PrimType::LAYER))
@@ -212,6 +258,29 @@ pub fn layer_timing(stage: &Stage, layer: &PrimPath) -> LayerTiming {
         in_point: time(&view, "in_point").unwrap_or(Time::ZERO),
         out_point: time(&view, "out_point").unwrap_or(comp_end),
     }
+}
+
+/// Duration of a layer's time-based source (a pre-comp, or footage with a duration),
+/// in source time; None for stills, solids, text, shapes and other layers without one
+/// (AE: they can be trimmed without limit and have no slip-edit bar).
+pub fn source_duration(stage: &Stage, layer: &PrimPath) -> Option<Time> {
+    let view = stage.prim(layer)?;
+    let source = view
+        .value("source")
+        .and_then(|v| v.as_prim_ref())
+        .cloned()?;
+    let src = stage.prim(&source)?;
+    let d = time(&src, "duration")?;
+    (d > Time::ZERO).then_some(d)
+}
+
+/// Comp-time span a layer's whole source covers (start, end), when it has one.
+pub fn source_span(stage: &Stage, layer: &PrimPath) -> Option<(Time, Time)> {
+    let d = source_duration(stage, layer)?;
+    let t = layer_timing(stage, layer);
+    let a = t.comp_time(Time::ZERO);
+    let b = t.comp_time(d);
+    Some((a.min(b), a.max(b)))
 }
 
 /// How keyframe times of the prim at `path` relate to comp time: the owning layer's

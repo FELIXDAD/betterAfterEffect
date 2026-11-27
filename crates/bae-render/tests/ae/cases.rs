@@ -12,7 +12,31 @@ use bae_render::png_out::{read_rgba8, write_rgba8};
 use serde_json::Value as Json;
 
 pub fn cases() -> Json {
-    serde_json::from_str(include_str!("cases.json")).expect("cases.json")
+    let mut spec: Json = serde_json::from_str(include_str!("cases.json")).expect("cases.json");
+    let pairs = spec["hsl_pairs"].as_array().unwrap().clone();
+    for case in spec["cases"].as_array_mut().unwrap() {
+        if let Some(mode) = case["hsl_grid"].as_str() {
+            let mut layers = Vec::new();
+            for (row, pair) in pairs.iter().enumerate() {
+                for j in 0..4 {
+                    for k in 0..4 {
+                        let pos = [4 * (k + 4 * j) + 2, 4 * row + 2];
+                        for (level, color, opacity, mode) in [
+                            ("s", &pair[1], (k + 1) * 25, mode),
+                            ("b", &pair[0], (j + 1) * 25, "normal"),
+                        ] {
+                            layers.push(serde_json::json!({
+                                "name": format!("{level}{row}{j}{k}"), "solid": color,
+                                "size": [4,4], "pos": pos, "opacity": opacity, "mode": mode
+                            }));
+                        }
+                    }
+                }
+            }
+            case["layers"] = Json::Array(layers);
+        }
+    }
+    spec
 }
 
 pub fn write_image(path: &Path, w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) {
@@ -48,6 +72,17 @@ pub fn prepare(dir: &Path) {
         [x as u8, y as u8, 255 - x as u8, 255]
     });
     write_label_png(&dir.join("label.png"), 64, 24, 0.1).expect("label");
+    // A 20-frame sequence (10 fps in the cases): each frame its own colour and a
+    // bar that moves 3 px per frame.
+    for k in 0..20u32 {
+        write_image(&dir.join(format!("seq_{k:04}.png")), 64, 32, |x, _| {
+            if (3 * k..3 * k + 4).contains(&x) {
+                [255, 255, 255, 255]
+            } else {
+                [(12 * k) as u8, (255 - 12 * k) as u8, 128, 255]
+            }
+        });
+    }
 }
 
 pub fn num(v: &Json) -> f64 {
@@ -56,6 +91,27 @@ pub fn num(v: &Json) -> f64 {
 
 pub fn vec2(v: &Json) -> [f64; 2] {
     [num(&v[0]), num(&v[1])]
+}
+
+/// `[x, y]` or `[x, y, z]` (z defaults to 0).
+pub fn vec3(v: &Json) -> [f64; 3] {
+    [num(&v[0]), num(&v[1]), num(&v[2])]
+}
+
+/// The comp time a case is rendered at (`frame`, 30 fps; default 0).
+pub fn render_time(name: &str) -> Time {
+    let frame = cases()["cases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["name"].as_str() == Some(name))
+        .and_then(|c| c["frame"].as_i64())
+        .unwrap_or(0);
+    frame_time(frame)
+}
+
+fn frame_time(frame: i64) -> Time {
+    Time::from_flicks(frame * FrameRate::FPS_30.frame_duration().flicks())
 }
 
 /// Builds every case into one stage (inner comps first, as listed).
@@ -77,11 +133,84 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                 Time::ONE_SECOND,
             )
             .expect("comp");
+        if let Some(mb) = case.get("motion_blur").filter(|m| m.is_object()) {
+            b.set(&comp, "motion_blur", Value::Bool(true)).expect("mb");
+            b.set(&comp, "shutter_angle", Value::Float(num(&mb["angle"])))
+                .expect("angle");
+            b.set(&comp, "shutter_phase", Value::Float(num(&mb["phase"])))
+                .expect("phase");
+            b.set(
+                &comp,
+                "motion_blur_samples",
+                Value::Int(mb["samples"].as_i64().unwrap_or(16)),
+            )
+            .expect("samples");
+        }
         let layers = case["layers"].as_array().expect("layers");
         let mut paths = Vec::new();
         for l in layers {
             let lname = l["name"].as_str().expect("layer name");
-            let (layer, size) = if let Some(c) = l["solid"].as_array() {
+            let (layer, size) = if let Some(cam) = l.get("camera").filter(|c| c.is_object()) {
+                let layer = b.layer(&comp, lname, "camera", None).expect("camera");
+                let kind = cam["type"].as_str().unwrap_or("two_node");
+                b.set(&layer, "camera:type", Value::Enum(kind.into()))
+                    .expect("type");
+                b.set(&layer, "camera:zoom", Value::Float(num(&cam["zoom"])))
+                    .expect("zoom");
+                if l["poi"].is_array() {
+                    b.set(
+                        &layer,
+                        "transform:point_of_interest",
+                        Value::Vec3(vec3(&l["poi"])),
+                    )
+                    .expect("poi");
+                }
+                (layer, None)
+            } else if let Some(lt) = l.get("light").filter(|c| c.is_object()) {
+                let layer = b.layer(&comp, lname, "light", None).expect("light");
+                let kind = lt["type"].as_str().unwrap_or("spot");
+                b.set(&layer, "light:type", Value::Enum(kind.into()))
+                    .expect("type");
+                let c = lt["color"]
+                    .as_array()
+                    .map_or([1.0; 3], |c| [num(&c[0]), num(&c[1]), num(&c[2])]);
+                b.set(&layer, "light:color", Value::Color([c[0], c[1], c[2], 1.0]))
+                    .expect("color");
+                if lt["shadows"].as_bool() == Some(true) {
+                    b.set(&layer, "light:casts_shadows", Value::Bool(true))
+                        .expect("shadows");
+                }
+                for (key, attr) in [
+                    ("intensity", "light:intensity"),
+                    ("cone", "light:cone_angle"),
+                    ("feather", "light:cone_feather"),
+                    ("radius", "light:radius"),
+                    ("dist", "light:falloff_distance"),
+                    ("dark", "light:shadow_darkness"),
+                    ("diff", "light:shadow_diffusion"),
+                ] {
+                    if let Some(v) = lt[key].as_f64() {
+                        b.set(&layer, attr, Value::Float(v)).expect(key);
+                    }
+                }
+                if let Some(f) = lt["falloff"].as_str() {
+                    b.set(&layer, "light:falloff", Value::Enum(f.into()))
+                        .expect("falloff");
+                }
+                if l["poi"].is_array() {
+                    b.set(
+                        &layer,
+                        "transform:point_of_interest",
+                        Value::Vec3(vec3(&l["poi"])),
+                    )
+                    .expect("poi");
+                }
+                if l["adjustment"].as_bool() == Some(true) {
+                    b.set(&layer, "adjustment_layer", Value::Bool(true))
+                        .expect("adjustment");
+                }
+                (layer, None)
+            } else if let Some(c) = l["solid"].as_array() {
                 let [sw, sh] = vec2(&l["size"]);
                 let color = [
                     num(&c[0]) / 255.0,
@@ -94,7 +223,36 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                     .expect("solid");
                 (
                     b.layer(&comp, lname, "solid", Some(&asset)).expect("layer"),
-                    [sw, sh],
+                    Some([sw, sh]),
+                )
+            } else if let Some(file) = l["sequence"].as_str() {
+                let path = assets.join(file);
+                let (fw, fh, _) = read_rgba8(&path).expect("sequence frame");
+                let asset = b
+                    .footage_asset(&format!("{name}_seq"), &path, None, Some([fw, fh]))
+                    .expect("sequence");
+                let rate = l["seq_rate"].as_u64().unwrap_or(10) as u32;
+                b.set(&asset, "kind", Value::Enum("sequence".into()))
+                    .expect("kind");
+                b.set(
+                    &asset,
+                    "frame_rate",
+                    Value::FrameRate(FrameRate::new(rate, 1)),
+                )
+                .expect("rate");
+                let frames = l["seq_frames"].as_u64().unwrap_or(20) as i64;
+                b.set(
+                    &asset,
+                    "duration",
+                    Value::Time(Time::from_flicks(
+                        frames * FrameRate::new(rate, 1).frame_duration().flicks(),
+                    )),
+                )
+                .expect("duration");
+                (
+                    b.layer(&comp, lname, "footage", Some(&asset))
+                        .expect("layer"),
+                    Some([f64::from(fw), f64::from(fh)]),
                 )
             } else if let Some(file) = l["footage"].as_str() {
                 let path = assets.join(file);
@@ -106,7 +264,7 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                 (
                     b.layer(&comp, lname, "footage", Some(&asset))
                         .expect("layer"),
-                    [f64::from(fw), f64::from(fh)],
+                    Some([f64::from(fw), f64::from(fh)]),
                 )
             } else {
                 let inner = l["comp"].as_str().expect("solid, footage or comp");
@@ -114,18 +272,107 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                 (
                     b.layer(&comp, lname, "pre_comp", Some(&src))
                         .expect("layer"),
-                    comp_sizes[inner],
+                    Some(comp_sizes[inner]),
                 )
             };
-            b.set(
-                &layer,
-                "transform:anchor_point",
-                Value::Vec3([size[0] / 2.0, size[1] / 2.0, 0.0]),
-            )
-            .expect("anchor");
-            let [x, y] = vec2(&l["pos"]);
-            b.set(&layer, "transform:position", Value::Vec3([x, y, 0.0]))
-                .expect("position");
+            if let Some(size) = size {
+                b.set(
+                    &layer,
+                    "transform:anchor_point",
+                    Value::Vec3([size[0] / 2.0, size[1] / 2.0, 0.0]),
+                )
+                .expect("anchor");
+            }
+            if l["three_d"].as_bool() == Some(true) {
+                b.set(&layer, "three_d", Value::Bool(true)).expect("3d");
+            }
+            if l["mb"].as_bool() == Some(true) {
+                b.set(&layer, "motion_blur", Value::Bool(true)).expect("mb");
+            }
+            let keys = &l["keys"];
+            if keys["pos"].is_array() {
+                for k in keys["pos"].as_array().into_iter().flatten() {
+                    let t = frame_time(k[0].as_i64().expect("frame"));
+                    b.key(&layer, "transform:position", t, Value::Vec3(vec3(&k[1])))
+                        .expect("position key");
+                }
+            } else {
+                b.set(&layer, "transform:position", Value::Vec3(vec3(&l["pos"])))
+                    .expect("position");
+            }
+            for k in keys["rot"].as_array().into_iter().flatten() {
+                let t = frame_time(k[0].as_i64().expect("frame"));
+                b.key(&layer, "transform:rotation", t, Value::Float(num(&k[1])))
+                    .expect("rotation key");
+            }
+            if l["rot3"].is_array() {
+                let [rx, ry, rz] = vec3(&l["rot3"]);
+                for (attr, v) in [
+                    ("transform:rotation_x", rx),
+                    ("transform:rotation_y", ry),
+                    ("transform:rotation", rz),
+                ] {
+                    b.set(&layer, attr, Value::Float(v)).expect("rotation");
+                }
+            }
+            if let Some(st) = l["stretch"].as_f64() {
+                b.set(&layer, "stretch", Value::Float(st)).expect("stretch");
+            }
+            if let Some(st) = l["start_time"].as_f64() {
+                b.set(&layer, "start_time", Value::Time(Time::from_seconds(st)))
+                    .expect("start");
+            }
+            if let Some(keys) = l["remap"].as_array() {
+                // Keys at comp frames (start 0, stretch 100: comp time = layer
+                // time), values in seconds of source time.
+                b.set(&layer, "time_remap_enabled", Value::Bool(true))
+                    .expect("remap on");
+                let hold = l["remap_hold"].as_bool() == Some(true);
+                for k in keys {
+                    let t = frame_time(k[0].as_i64().expect("frame"));
+                    let v = Value::Time(Time::from_seconds(num(&k[1])));
+                    let key = if hold {
+                        bae_model::Keyframe::hold(v)
+                    } else {
+                        bae_model::Keyframe::linear(v)
+                    };
+                    b.key_with(&layer, "time_remap", t, key).expect("remap key");
+                }
+            }
+            if let Some(m) = l.get("mat").filter(|m| m.is_object()) {
+                for (key, attr) in [
+                    ("amb", "material:ambient"),
+                    ("diff", "material:diffuse"),
+                    ("spec", "material:specular_intensity"),
+                    ("shin", "material:specular_shininess"),
+                    ("metal", "material:metal"),
+                    ("trans", "material:light_transmission"),
+                ] {
+                    if let Some(v) = m[key].as_f64() {
+                        b.set(&layer, attr, Value::Float(v)).expect(key);
+                    }
+                }
+                if m["accepts"].as_bool() == Some(false) {
+                    b.set(&layer, "material:accepts_lights", Value::Bool(false))
+                        .expect("accepts");
+                }
+                if let Some(v) = m["casts"].as_bool() {
+                    b.set(&layer, "material:casts_shadows", Value::Int(i64::from(v)))
+                        .expect("casts");
+                }
+                if let Some(v) = m["accepts_shadows"].as_bool() {
+                    b.set(&layer, "material:accepts_shadows", Value::Int(i64::from(v)))
+                        .expect("accepts shadows");
+                }
+            }
+            if l["orient"].is_array() {
+                b.set(
+                    &layer,
+                    "transform:orientation",
+                    Value::Vec3(vec3(&l["orient"])),
+                )
+                .expect("orientation");
+            }
             if l["scale"].is_array() {
                 let [sx, sy] = vec2(&l["scale"]);
                 b.set(&layer, "transform:scale", Value::Vec3([sx, sy, 100.0]))

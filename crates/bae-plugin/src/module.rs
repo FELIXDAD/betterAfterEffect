@@ -1,7 +1,9 @@
 //! The plugin host as an app module (ARCHITECTURE §3, spec §6, §7).
 //!
 //! * [`PluginModule`] creates the [`PluginRuntime`] resource and implements
-//!   `bae plugin check <DIR>...` and `bae plugin list [--json]`.
+//!   `bae plugin check <DIR>...`, `bae plugin list [--json]` and the hidden
+//!   `bae plugin runner` (the process out-of-process native plugins run in,
+//!   [`crate::native::runner`]).
 //! * [`load_installed`] scans the plugin directories and loads the active
 //!   plugins. The app calls it once at startup, after the directories are
 //!   resolved and logging is up, so problems with installed plugins are logged.
@@ -15,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use bae_app::{App, AppBuilder, AppModule};
 use bae_model::EffectDef;
@@ -32,21 +35,25 @@ use crate::package::{DirSource, Package, PackageSource};
 /// project scope; for plugin development.
 pub const PLUGIN_PATH_ENV: &str = "BAE_PLUGIN_PATH";
 
+type PackageProblems = Vec<(PathBuf, Vec<Diagnostic>)>;
+
 /// The running plugin host (an app resource).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PluginRuntime {
-    host: Mutex<PluginHost>,
+    host: Arc<Mutex<PluginHost>>,
     registries: AppEffectRegistries,
-    problems: Mutex<Vec<(PathBuf, Vec<Diagnostic>)>>,
+    problems: Arc<Mutex<PackageProblems>>,
+    notices: crate::native::Notices,
 }
 
 impl PluginRuntime {
-    /// A runtime publishing into `registries`.
-    pub fn new(registries: AppEffectRegistries) -> Self {
+    fn new(registries: AppEffectRegistries, host: PluginHost) -> Self {
+        let notices = host.notices().clone();
         Self {
-            host: Mutex::new(PluginHost::new()),
+            host: Arc::new(Mutex::new(host)),
             registries,
-            problems: Mutex::new(Vec::new()),
+            problems: Arc::default(),
+            notices,
         }
     }
 
@@ -63,6 +70,12 @@ impl PluginRuntime {
     /// Problems found by the last [`PluginRuntime::load_dirs`], by package path.
     pub fn problems(&self) -> Vec<(PathBuf, Vec<Diagnostic>)> {
         self.problems.lock().clone()
+    }
+
+    /// Plugin notices for the user since the last call: load failures,
+    /// crashes, disabled plugins (the UI shows them, e.g. in the status bar).
+    pub fn take_notices(&self) -> Vec<crate::native::Notice> {
+        self.notices.take()
     }
 
     /// Scans `dirs`, selects the active versions and loads them.
@@ -147,12 +160,6 @@ impl AppModule for PluginModule {
     }
 
     fn build(&self, app: &mut AppBuilder) {
-        let runtime = PluginRuntime::new(AppEffectRegistries {
-            definitions: app.registry::<EffectDef>(),
-            effects: app.registry::<dyn Effect>(),
-        });
-        app.insert_resource(runtime);
-
         let registry = app.registry::<CliSubcommand>();
         let plugin = CliSubcommand::new("plugin", "Check and list plugins")
             .with_args(args)
@@ -163,6 +170,7 @@ impl AppModule for PluginModule {
                     .map(plugin_dirs)
                     .unwrap_or_default();
                 match ctx.matches.subcommand() {
+                    Some(("runner", _)) => Ok(crate::native::runner_main()),
                     Some(("check", m)) => check(m),
                     Some(("list", m)) => {
                         let runtime = ctx.app.resource::<PluginRuntime>();
@@ -174,6 +182,29 @@ impl AppModule for PluginModule {
         if let Err(error) = cli::implement(&registry, app.current_owner(), plugin) {
             tracing::warn!("plugin subcommand not registered: {error}");
         }
+    }
+
+    fn finish(&self, app: &mut AppBuilder) {
+        let defs = app.registry::<EffectDef>();
+        let view = app
+            .resource::<std::sync::Arc<dyn bae_script::ScriptView>>()
+            .cloned();
+        let scripts = crate::scripts::ScriptCommands::new(
+            app.registry::<dyn bae_model::DynCommand>(),
+            defs.clone(),
+            view,
+        );
+        let bindings = app
+            .resource::<std::sync::Arc<dyn crate::scripts::ScriptBindings>>()
+            .cloned();
+        let runtime = PluginRuntime::new(
+            AppEffectRegistries {
+                definitions: defs,
+                effects: app.registry::<dyn Effect>(),
+            },
+            PluginHost::with_scripts(scripts, bindings),
+        );
+        app.insert_resource(runtime);
     }
 }
 
@@ -190,6 +221,11 @@ fn args(cmd: Command) -> Command {
                         .value_parser(clap::value_parser!(PathBuf))
                         .help("Package directories (containing bae-plugin.toml)"),
                 ),
+        )
+        .subcommand(
+            Command::new("runner")
+                .about("Serve one native plugin over stdin/stdout (started by BAE itself)")
+                .hide(true),
         )
         .subcommand(
             Command::new("list")
@@ -256,6 +292,9 @@ struct Row {
     /// `loaded`, `active` (selected but not loaded in this process),
     /// `inactive` (another version wins) or `failed`.
     status: &'static str,
+    /// Native plugins: `in-process` or `out-of-process` (how they run here).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    isolation: Option<&'static str>,
     effects: Vec<String>,
     problems: Vec<String>,
 }
@@ -281,6 +320,9 @@ fn list(
         .map(|c| c.path.as_path())
         .collect();
     let load_problems = runtime.map(PluginRuntime::problems).unwrap_or_default();
+    let native = runtime.map_or_else(crate::native::NativeConfig::from_env, |r| {
+        r.with_host(|h| h.native_config().clone())
+    });
     // (id, package location) of what the runtime actually loaded.
     let loaded: Vec<(String, String)> = runtime
         .map(|r| {
@@ -319,6 +361,13 @@ fn list(
                 scope: scope_name(c.scope),
                 path: c.path.clone(),
                 status,
+                isolation: c.manifest.native.as_ref().map(|n| {
+                    if native.out_of_process(&c.manifest.plugin.id, c.scope, n.isolation) {
+                        "out-of-process"
+                    } else {
+                        "in-process"
+                    }
+                }),
                 effects: c
                     .manifest
                     .effects
@@ -335,6 +384,7 @@ fn list(
         scope: "",
         path: path.clone(),
         status: "failed",
+        isolation: None,
         effects: Vec::new(),
         problems: diags.iter().map(ToString::to_string).collect(),
     }));
@@ -372,6 +422,9 @@ fn list(
                 r.scope,
                 r.path.display()
             );
+        }
+        if let Some(isolation) = r.isolation {
+            println!("            native, {isolation}");
         }
         for e in &r.effects {
             println!("            effect {e}");

@@ -25,24 +25,10 @@ fn gpu() -> Option<Arc<GpuContext>> {
 }
 
 fn doc(text: &str) -> TextDocument {
-    TextDocument {
-        text: text.to_owned(),
-        font: "PingFangSC-Regular".to_owned(),
-        font_size: 64.0,
-        fill_color: [1.0, 0.0, 0.0, 1.0],
-        stroke_color: None,
-        stroke_width: 0.0,
-        stroke_over_fill: false,
-        justification: "left".to_owned(),
-        tracking: 0.0,
-        leading: None,
-        baseline_shift: 0.0,
-        faux_bold: false,
-        faux_italic: false,
-        all_caps: false,
-        small_caps: false,
-        box_size: None,
-        box_position: None,
+    {
+        let mut doc = TextDocument::new(text, "PingFangSC-Regular", 64.0);
+        doc.style.fill_color = [1., 0., 0., 1.];
+        doc
     }
 }
 
@@ -116,11 +102,11 @@ fn stroke_and_faux_bold_add_ink() {
         return;
     }
     let mut stroked_doc = doc("Hi 中");
-    stroked_doc.stroke_color = Some([1.0, 1.0, 1.0, 1.0]);
-    stroked_doc.stroke_width = 6.0;
+    stroked_doc.style.stroke_color = Some([1.0, 1.0, 1.0, 1.0]);
+    stroked_doc.style.stroke_width = 6.0;
     let stroked = Arc::new(layout_text(&mut fonts, &stroked_doc));
     let mut bold_doc = doc("Hi 中");
-    bold_doc.faux_bold = true;
+    bold_doc.style.faux_bold = true;
     let bold = Arc::new(layout_text(&mut fonts, &bold_doc));
 
     // Render all three over the same region so coverage is comparable.
@@ -185,7 +171,19 @@ fn evaluated_text_layer_reaches_the_provider() {
         Value::TextDocument(Box::new(doc("你好 BAE"))),
     )
     .unwrap();
-    let stage = b.into_stage();
+    let mut stage = b.into_stage();
+    let registry = bae_model::CommandRegistry::with_builtins();
+    let author = bae_model::AuthorId::new("user:test").unwrap();
+    let group = registry
+        .execute(
+            &mut stage,
+            &author,
+            "text.create_animator",
+            serde_json::json!({"layer":layer, "name":"rise"}),
+        )
+        .unwrap()
+        .output;
+    registry.execute(&mut stage,&author,"attr.set",serde_json::json!({"path":group["path"], "attr":"animator:position","value":Value::Vec3([10.0,20.0,0.0])})).unwrap();
     let evaluated = evaluate_comp(&stage, &comp, Time::ZERO).unwrap();
     let l = evaluated.layer(&layer).unwrap();
     assert_eq!(l.text.as_ref().map(|d| d.text.as_str()), Some("你好 BAE"));
@@ -200,5 +198,9 @@ fn evaluated_text_layer_reaches_the_provider() {
     };
     let layout = provider.layout_of(&content).unwrap();
     assert_eq!(layout.chars.len(), 6);
+    let base = provider.layout(l.text.as_deref().unwrap());
+    let delta = kurbo::Vec2::new(10., 20.);
+    assert_eq!(layout.bounds(true), base.bounds(true).map(|r| r + delta));
+    assert_ne!(layout.content_hash(), base.content_hash());
     assert!(provider.source(&content).is_ok());
 }

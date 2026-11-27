@@ -1,5 +1,7 @@
 //! Colour-correction effects on the GPU vs CPU references of the AE formulas
-//! (docs/spec/ae/_parts/effects--fx-a.md AE-FX-036…043).
+//! (docs/spec/ae/_parts/effects--fx-a.md AE-FX-036…043), with the constants
+//! fitted to AE 26 renders (`tests/ae/`). The references are 32-bpc (no
+//! clamping); `eight_bpc_clamps` checks the 8 / 16-bpc behaviour.
 
 mod common;
 
@@ -13,8 +15,9 @@ const TOL32: f32 = 2e-4;
 /// RGBA16F tolerance (half precision storage of values up to ~2.5).
 const TOL16: f32 = 4e-3;
 
+/// Rec.601 weights (Tint and Tritone in AE 26).
 fn luma(c: [f64; 3]) -> f64 {
-    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
 }
 
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
@@ -34,12 +37,22 @@ fn straight(input: &Pixels, f: impl Fn([f64; 4]) -> [f64; 4]) -> Pixels {
 
 /// Checks the effect against `reference` in RGBA32F and RGBA16F.
 fn check(match_name: &str, params: Vec<(u32, Value)>, reference: impl Fn([f64; 4]) -> [f64; 4]) {
+    check_tol(match_name, params, TOL16, reference);
+}
+
+/// [`check`] with an RGBA16F tolerance of `tol16`.
+fn check_tol(
+    match_name: &str,
+    params: Vec<(u32, Value)>,
+    tol16: f32,
+    reference: impl Fn([f64; 4]) -> [f64; 4],
+) {
     let Some(gpu) = context() else { return };
     let fx = builtin(match_name);
     let input = test_image(RECT);
     let want = straight(&input, &reference);
     let soft = tolerance_scale(&gpu);
-    for (format, tol) in [(F32, TOL32 * soft), (F16, TOL16 * soft)] {
+    for (format, tol) in [(F32, TOL32 * soft), (F16, tol16 * soft)] {
         let got = run(&gpu, format, fx, params.clone(), &input, RECT, 1.0);
         // Tolerance relative to the magnitude (HDR values in half precision).
         let (d, (x, y), k) = max_diff(&got, &want, RECT);
@@ -117,7 +130,8 @@ fn tritone() {
     }
 }
 
-/// AE-FX-038 map(); clip popups 1 = On.
+/// AE-FX-038 map() in a 32-bpc project; clip popups 1 = On (3 = off for
+/// 32 bpc). Below input black the curve is mirrored (AE 26).
 fn levels_map(x: f64, v: [f64; 5], clip: [i64; 2]) -> f64 {
     let [ib, iw, g, ob, ow] = v;
     let mut t = if iw == ib {
@@ -125,7 +139,7 @@ fn levels_map(x: f64, v: [f64; 5], clip: [i64; 2]) -> f64 {
     } else {
         (x - ib) / (iw - ib)
     };
-    t = t.max(0.0).powf(1.0 / g);
+    t = t.signum() * t.abs().powf(1.0 / g);
     let mut y = ob + (ow - ob) * t;
     if clip[0] == 1 {
         y = y.max(ob.min(ow));
@@ -215,31 +229,18 @@ fn exposure_ch(x: f64, e: f64, o: f64, g: f64) -> f64 {
     v.signum() * v.abs().powf(1.0 / g)
 }
 
-fn srgb_to_linear(x: f64) -> f64 {
-    let a = x.abs();
-    let y = if a <= 0.04045 {
-        a / 12.92
-    } else {
-        ((a + 0.055) / 1.055).powf(2.4)
-    };
-    y.copysign(x)
-}
-
-fn linear_to_srgb(x: f64) -> f64 {
-    let a = x.abs();
-    let y = if a <= 0.0031308 {
-        a * 12.92
-    } else {
-        1.055 * a.powf(1.0 / 2.4) - 0.055
-    };
-    y.copysign(x)
+/// AE 26 linearizes Exposure with a pure 2.4 power (sign kept).
+fn pow_signed(x: f64, p: f64) -> f64 {
+    x.signum() * x.abs().powf(p)
 }
 
 #[test]
 fn exposure() {
     for bypass in [false, true] {
         let (e, o, g) = (0.7, -0.02, 1.3);
-        check(
+        // The 2.4 power curve is infinitely steep at 0: half-precision inputs
+        // near 0 (negative after the offset) move the result more.
+        check_tol(
             "ADBE Exposure2",
             vec![
                 (3, Value::Float(e)),
@@ -247,12 +248,13 @@ fn exposure() {
                 (5, Value::Float(g)),
                 (22, Value::Bool(bypass)),
             ],
+            1e-2,
             |s| {
                 let f = |x: f64| {
                     if bypass {
                         exposure_ch(x, e, o, g)
                     } else {
-                        linear_to_srgb(exposure_ch(srgb_to_linear(x), e, o, g))
+                        pow_signed(exposure_ch(pow_signed(x, 2.4), e, o, g), 1.0 / 2.4)
                     }
                 };
                 [f(s[0]), f(s[1]), f(s[2]), s[3]]
@@ -438,6 +440,52 @@ fn hue_saturation() {
     );
 }
 
+/// 8 / 16 bpc (AE's default): every result is clamped to [0, 1] (straight)
+/// like AE's integer buffers, and Levels' "Off for 32 bpc Color" clips.
+#[test]
+fn eight_bpc_clamps() {
+    let Some(gpu) = context() else { return };
+    let input = test_image(RECT);
+    let clamp01 = |o: [f64; 4]| o.map(|v| v.clamp(0.0, 1.0));
+    // Exposure +2: HDR in 32 bpc, clipped at white in 8 bpc.
+    let fx = builtin("ADBE Exposure2");
+    let params = vec![(3, Value::Float(2.0)), (22, Value::Bool(true))];
+    let got = run_depth(&gpu, F32, fx, params, &input, RECT, 1.0, false);
+    let want = straight(&input, |s| {
+        let f = |x: f64| exposure_ch(x, 2.0, 0.0, 1.0);
+        clamp01([f(s[0]), f(s[1]), f(s[2]), s[3]])
+    });
+    assert_close(
+        &got,
+        &want,
+        RECT,
+        TOL32 * tolerance_scale(&gpu),
+        "exposure 8 bpc",
+    );
+    // Levels with the default clip options clip to the output range.
+    let v = [0.1, 0.8, 1.7, 0.05, 0.95];
+    let fx = builtin("ADBE Easy Levels2");
+    let params = vec![
+        (3, Value::Float(v[0])),
+        (4, Value::Float(v[1])),
+        (5, Value::Float(v[2])),
+        (6, Value::Float(v[3])),
+        (7, Value::Float(v[4])),
+    ];
+    let got = run_depth(&gpu, F32, fx, params, &input, RECT, 1.0, false);
+    let want = straight(&input, |s| {
+        let m = |x| levels_map(x, v, [1, 1]);
+        clamp01([m(s[0]), m(s[1]), m(s[2]), s[3]])
+    });
+    assert_close(
+        &got,
+        &want,
+        RECT,
+        TOL32 * tolerance_scale(&gpu),
+        "levels 8 bpc",
+    );
+}
+
 /// Identity parameters return the input image itself (no pass).
 #[test]
 fn identity_skips_the_pass() {
@@ -458,4 +506,99 @@ fn identity_skips_the_pass() {
         let got = run(&gpu, F32, fx, params, &input, RECT, 1.0);
         assert_close(&got, &input, RECT, 0.0, name);
     }
+}
+
+#[test]
+fn linked_channel_average_and_neutralizer_preserve_alpha() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(16, 8);
+    let image = Pixels::new(r, |x, _| {
+        if x < 8 {
+            [1., 0., 0., 1.]
+        } else {
+            [0., 0., 1., 1.]
+        }
+    });
+    // The source layer (its own layer here, half of it transparent outside the
+    // two colours: the average ignores transparent pixels).
+    let linked = {
+        let fx = builtin("ADBE Color Link");
+        let inst = instance("ADBE Color Link", vec![]);
+        let p = bae_render::EffectParams::new(&inst);
+        let dep = fx.effect().layer_dependencies(&p).pop().unwrap();
+        let source = Pixels::new(IRect::from_size(16, 16), |x, y| {
+            if y >= 8 {
+                [0.; 4]
+            } else if x < 8 {
+                [1., 0., 0., 1.]
+            } else {
+                [0., 0., 1., 1.]
+            }
+        })
+        .upload(&gpu, F32);
+        let input = image.upload(&gpu, F32);
+        let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+        target.set_effect_inputs(vec![(dep, source)], vec![]);
+        let out = fx.render(&mut target, &p, &input, r).unwrap();
+        target.finish().unwrap();
+        Pixels::download(&gpu, &out)
+    };
+    assert_close(
+        &linked,
+        &Pixels::new(r, |_, _| [0.5, 0., 0.5, 1.]),
+        r,
+        0.005,
+        "linked average",
+    );
+    let a = run(
+        &gpu,
+        F32,
+        builtin("CS Color Neutralizer"),
+        vec![],
+        &image,
+        r,
+        1.,
+    );
+    assert_close(&a, &image, r, 0.0001, "neutral controls");
+}
+
+#[test]
+fn color_stabilizer_restores_the_pivot_frame_levels() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(64, 36);
+    let reference = Pixels::new(rect, |x, _| {
+        let l = (x as f32 + 0.5) / 64.;
+        [l, l * 0.8, l * 0.6, 1.]
+    });
+    let current = reference.map(|c| {
+        [
+            c[0] * 0.75 + 0.07,
+            c[1] * 0.8 + 0.08,
+            c[2] * 0.85 + 0.09,
+            c[3],
+        ]
+    });
+    let fx = builtin("ADBE Deflicker");
+    let inst = instance(&fx.info.match_name, vec![]);
+    let mut p = bae_render::EffectParams::new(&inst);
+    p.layer_bounds = rect;
+    p.comp_time = p.time_step;
+    p.time = p.comp_time;
+    let dep = fx.effect().layer_dependencies(&p).remove(0);
+    assert_eq!(dep.time, bae_model::Time::ZERO);
+    let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+    target.set_effect_inputs(vec![(dep, reference.upload(&gpu, F32))], vec![]);
+    let out = fx
+        .render(&mut target, &p, &current.upload(&gpu, F32), rect)
+        .unwrap();
+    target.finish().unwrap();
+    assert_close(
+        &Pixels::download(&gpu, &out),
+        &reference,
+        rect,
+        0.002,
+        "pivot levels",
+    );
 }

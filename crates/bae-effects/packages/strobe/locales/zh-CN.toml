@@ -1,0 +1,32 @@
+[effect.strobe]
+name = "闪光灯"
+keywords = ["闪光灯", "闪烁"]
+
+[effect.strobe.params]
+color = "闪光颜色"
+blend = "与原始图像混合"
+duration = "闪光持续时间（秒）"
+period = "闪光间隔时间（秒）"
+probability = "随机闪光概率"
+mode = "闪光"
+operation = "闪光运算符"
+random_seed = "随机植入"
+
+[effect.strobe.choices.mode]
+1 = "仅对颜色操作"
+2 = "使图层透明"
+
+[effect.strobe.choices.operation]
+1 = "复制"
+2 = "相加"
+3 = "相减"
+4 = "相乘"
+5 = "差值"
+6 = "与"
+7 = "或"
+8 = "异或"
+9 = "变亮"
+10 = "变暗"
+11 = "最小值"
+12 = "最大值"
+13 = "滤色"

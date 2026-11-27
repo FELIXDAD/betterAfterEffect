@@ -9,6 +9,7 @@ use bae_anim::EvaluatedPrim;
 use bae_model::{BezierPath, PrimPath, PrimType, Value};
 use kurbo::{Affine, BezPath};
 
+use crate::operators::{Offset, Repeater, Wiggle};
 use crate::paint::{
     BlendMode, Brush, Composite, FillRule, Gradient, GradientKind, LineCap, LineJoin, Paint,
     PaintKind, StrokeStyle, paint_color,
@@ -167,6 +168,20 @@ impl MergeMode {
 pub enum Operator {
     Trim(TrimPaths),
     Merge(MergeMode),
+    Offset(Offset),
+    Pucker(f64),
+    Repeater(Repeater),
+    Round(f64),
+    Twist {
+        angle: f64,
+        center: [f64; 2],
+    },
+    Wiggle(Wiggle),
+    Zigzag {
+        size: f64,
+        detail: f64,
+        smooth: bool,
+    },
     /// An operator that is not implemented yet (token from the `operator`
     /// attribute); it passes geometry through unchanged.
     Unsupported(String),
@@ -330,36 +345,7 @@ fn parse_items(
                 composite: a.composite(),
             })
         } else if *ty == PrimType::SHAPE_OPERATOR {
-            let token = a.token("operator").unwrap_or_else(|| "trim".to_owned());
-            ShapeItem::Operator(match token.as_str() {
-                "trim" => Operator::Trim(TrimPaths {
-                    start: a.f64("trim:start", 0.0),
-                    end: a.f64("trim:end", 100.0),
-                    offset: a.f64("trim:offset", 0.0),
-                    mode: match a.token("trim:mode").as_deref() {
-                        Some("individually") => TrimMode::Individually,
-                        _ => TrimMode::Simultaneously,
-                    },
-                }),
-                "merge" => {
-                    let mode =
-                        MergeMode::from_token(a.token("merge:mode").as_deref().unwrap_or("merge"));
-                    if mode != MergeMode::Merge {
-                        warnings.push(format!(
-                            "{}: merge mode {mode:?} is not implemented yet, paths are combined",
-                            prim.path
-                        ));
-                    }
-                    Operator::Merge(mode)
-                }
-                other => {
-                    warnings.push(format!(
-                        "{}: shape operator `{other}` is not implemented yet",
-                        prim.path
-                    ));
-                    Operator::Unsupported(other.to_owned())
-                }
-            })
+            ShapeItem::Operator(parse_operator(&a, warnings))
         } else {
             warnings.push(format!(
                 "{}: `{}` is not a shape item",
@@ -369,6 +355,126 @@ fn parse_items(
             continue;
         };
         out.push(item);
+    }
+}
+
+fn parse_operator(a: &Attrs<'_>, warnings: &mut Vec<String>) -> Operator {
+    let token = a
+        .token("match_name")
+        .or_else(|| a.token("operator"))
+        .unwrap_or_else(|| "trim".into());
+    let param = |name| crate::operators::parameter_attr(name);
+    let number = |name, legacy, default| a.f64(&param(name), a.f64(legacy, default));
+    let vector = |name, legacy, default| a.vec2(&param(name), a.vec2(legacy, default));
+    match token.as_str() {
+        "ADBE Vector Filter - Trim" | "trim" => Operator::Trim(TrimPaths {
+            start: a.f64("trim:start", 0.0),
+            end: a.f64("trim:end", 100.0),
+            offset: a.f64("trim:offset", 0.0),
+            mode: match a.token("trim:mode").as_deref() {
+                Some("individually") => TrimMode::Individually,
+                _ => TrimMode::Simultaneously,
+            },
+        }),
+        "ADBE Vector Filter - Merge" | "merge" => {
+            let mode = match a.0.f64(&param("ADBE Vector Merge Type")).map(|v| v as i32) {
+                Some(2) => MergeMode::Add,
+                Some(3) => MergeMode::Subtract,
+                Some(4) => MergeMode::Intersect,
+                Some(5) => MergeMode::Exclude,
+                Some(_) => MergeMode::Merge,
+                None => MergeMode::from_token(a.token("merge:mode").as_deref().unwrap_or("merge")),
+            };
+            Operator::Merge(mode)
+        }
+        "ADBE Vector Filter - Offset" | "offset" => Operator::Offset(Offset {
+            amount: number("ADBE Vector Offset Amount", "offset:amount", 10.0),
+            join: match number("ADBE Vector Offset Line Join", "offset:line_join", 1.0) as i32 {
+                2 => kurbo::Join::Round,
+                3 => kurbo::Join::Bevel,
+                _ => kurbo::Join::Miter,
+            },
+            miter_limit: number("ADBE Vector Offset Miter Limit", "offset:miter_limit", 4.0),
+            copies: number("ADBE Vector Offset Copies", "offset:copies", 1.0),
+            copy_offset: number("ADBE Vector Offset Copy Offset", "offset:copy_offset", 1.0),
+        }),
+        "ADBE Vector Filter - PB" | "pucker_bloat" => Operator::Pucker(number(
+            "ADBE Vector PuckerBloat Amount",
+            "pucker_bloat:amount",
+            10.0,
+        )),
+        "ADBE Vector Filter - RC" | "round_corners" => Operator::Round(number(
+            "ADBE Vector RoundCorner Radius",
+            "round_corners:radius",
+            10.0,
+        )),
+        "ADBE Vector Filter - Twist" | "twist" => Operator::Twist {
+            angle: number("ADBE Vector Twist Angle", "twist:angle", 10.0),
+            center: vector("ADBE Vector Twist Center", "twist:center", [0.0; 2]),
+        },
+        "ADBE Vector Filter - Repeater" | "repeater" => Operator::Repeater(Repeater {
+            copies: number("ADBE Vector Repeater Copies", "repeater:copies", 1.0),
+            offset: number("ADBE Vector Repeater Offset", "repeater:offset", 0.0),
+            order: match a.0.f64(&param("ADBE Vector Repeater Order")) {
+                Some(1.0) => Composite::Below,
+                Some(_) => Composite::Above,
+                None => Composite::from_token(
+                    a.token("repeater:composite").as_deref().unwrap_or("below"),
+                ),
+            },
+            anchor: vector(
+                "ADBE Vector Repeater Anchor",
+                "repeater:anchor_point",
+                [0.0; 2],
+            ),
+            position: vector(
+                "ADBE Vector Repeater Position",
+                "repeater:position",
+                [0.0; 2],
+            ),
+            scale: vector("ADBE Vector Repeater Scale", "repeater:scale", [100.0; 2]),
+            rotation: number("ADBE Vector Repeater Rotation", "repeater:rotation", 0.0),
+            start_opacity: number(
+                "ADBE Vector Repeater Opacity 1",
+                "repeater:start_opacity",
+                100.0,
+            ),
+            end_opacity: number(
+                "ADBE Vector Repeater Opacity 2",
+                "repeater:end_opacity",
+                100.0,
+            ),
+        }),
+        "ADBE Vector Filter - Roughen" | "roughen" | "wiggle_paths" => Operator::Wiggle(Wiggle {
+            size: number("ADBE Vector Roughen Size", "wiggle_paths:size", 10.0),
+            detail: number("ADBE Vector Roughen Detail", "wiggle_paths:detail", 10.0),
+            smooth: number("ADBE Vector Roughen Points", "wiggle_paths:points", 1.0) == 2.0,
+            frequency: number("ADBE Vector Temporal Freq", "wiggle_paths:frequency", 2.0),
+            correlation: number("ADBE Vector Correlation", "wiggle_paths:correlation", 50.0),
+            temporal_phase: number(
+                "ADBE Vector Temporal Phase",
+                "wiggle_paths:temporal_phase",
+                0.0,
+            ),
+            spatial_phase: number(
+                "ADBE Vector Spatial Phase",
+                "wiggle_paths:spatial_phase",
+                0.0,
+            ),
+            seed: number("ADBE Vector Random Seed", "wiggle_paths:seed", 0.0) as i32,
+        }),
+        "ADBE Vector Filter - Zigzag" | "zig_zag" => Operator::Zigzag {
+            size: number("ADBE Vector Zigzag Size", "zig_zag:size", 5.0),
+            detail: number("ADBE Vector Zigzag Detail", "zig_zag:detail", 10.0),
+            smooth: number("ADBE Vector Zigzag Points", "zig_zag:points", 1.0) == 2.0,
+        },
+        other => {
+            warnings.push(format!(
+                "{}: shape operator `{other}` is not implemented yet",
+                a.0.path
+            ));
+            Operator::Unsupported(other.to_owned())
+        }
     }
 }
 
@@ -485,11 +591,13 @@ mod tests {
         EvaluatedPrim {
             path: PrimPath::new(path).unwrap(),
             prim_type: Some(ty),
-            attrs: attrs
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), v.clone()))
-                .collect::<BTreeMap<_, _>>(),
-            children: Vec::new(),
+            attrs: std::sync::Arc::new(
+                attrs
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                    .collect::<BTreeMap<_, _>>(),
+            ),
+            children: Vec::new().into(),
         }
     }
 
@@ -550,8 +658,9 @@ mod tests {
                 PrimType::SHAPE_OPERATOR,
                 &[("operator", Value::Enum("wiggle_paths".into()))],
             ),
-        ];
-        group.children = vec![folder];
+        ]
+        .into();
+        group.children = vec![folder].into();
         let mut warnings = Vec::new();
         let root = ShapeGroup::from_evaluated(&[group], &mut warnings);
         let ShapeItem::Group(g) = &root.items[0] else {
@@ -572,6 +681,6 @@ mod tests {
         assert_eq!(fill.opacity, 0.5);
         assert_eq!(fill.kind, PaintKind::Fill(FillRule::EvenOdd));
         assert_eq!(fill.brush, Brush::Solid([0.0, 1.0, 0.0, 1.0]));
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 }

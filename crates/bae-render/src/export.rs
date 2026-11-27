@@ -34,6 +34,65 @@ use crate::renderer::{OUTPUT_PARAMS_SIZE, OutputAlpha, RenderedFrame, Renderer, 
 use crate::request::BitDepth;
 use crate::request::RenderRequest;
 
+/// Rounds of `sampleImage` read-backs per exported frame (samples of layers
+/// whose own pixels come from samples need one more each).
+const MAX_SAMPLE_ROUNDS: usize = 4;
+
+#[cfg(feature = "media")]
+fn export_wav(
+    job: &ExportJob<'_>,
+    cancel: Option<&AtomicBool>,
+    on_frame: &mut dyn FnMut(&ExportedFrame),
+) -> Result<ExportReport, RenderError> {
+    use bae_media::audio::time_to_sample;
+    const RATE: u32 = 48_000;
+    let started = Instant::now();
+    let mut report = ExportReport::default();
+    let mut mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
+    let io_error =
+        |e: std::io::Error| RenderError::Other(format!("{}: {e}", job.settings.path.display()));
+    let mut wav = bae_media::wav::WavWriter::create(&job.settings.path, RATE).map_err(io_error)?;
+    let mut buffer = [[0.0; 2]; 512];
+    for (index, &(frame, time)) in job.times.iter().enumerate() {
+        if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+            report.stopped = true;
+            return Ok(report);
+        }
+        let mut start = time_to_sample(time, RATE);
+        let end = time_to_sample(time + job.rate.frame_duration(), RATE);
+        while start < end {
+            let count = (end - start).min(buffer.len() as i64) as usize;
+            mix.render(start, RATE, &mut buffer[..count])
+                .map_err(media_error)?;
+            wav.write(&buffer[..count]).map_err(io_error)?;
+            start += count as i64;
+        }
+        let entry = ExportedFrame {
+            index,
+            frame,
+            time,
+            file: job.settings.path.clone(),
+            width: 0,
+            height: 0,
+            eval: Duration::ZERO,
+            render: Duration::ZERO,
+            draws: 0,
+            draw_calls: 0,
+        };
+        on_frame(&entry);
+        report.frames.push(entry);
+    }
+    if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+        report.stopped = true;
+        return Ok(report);
+    }
+    report.stats.bytes = wav.finish().map_err(io_error)?;
+    report.stats.files = 1;
+    report.stats.frames = report.frames.len();
+    report.stats.wall = started.elapsed();
+    Ok(report)
+}
+
 /// Staging buffers in flight by default: the GPU works on one frame while the
 /// previous one is mapped and the one before is copied out.
 pub const READBACK_DEPTH: usize = 3;
@@ -141,6 +200,36 @@ impl std::fmt::Debug for MappedFrame {
 }
 
 impl MappedFrame {
+    #[cfg(feature = "media")]
+    fn write_to(self, encoder: &mut dyn bae_media::Encoder) -> Result<Duration, RenderError> {
+        #[cfg(target_os = "macos")]
+        {
+            let staging = self.staging.as_ref().expect("present until consumed");
+            let view = staging
+                .buffer
+                .get_mapped_range(..)
+                .map_err(|e| GpuError::Map(e.to_string()))?;
+            if encoder
+                .push_mapped_rows(
+                    self.format.into(),
+                    self.alpha.into(),
+                    [self.width, self.height],
+                    self.padded_bytes_per_row as usize,
+                    &view,
+                )
+                .map_err(media_error)?
+            {
+                // The encoder consumed shared Metal storage directly.
+                return Ok(Duration::ZERO);
+            }
+        }
+        let frame = self.into_frame()?;
+        let elapsed = frame.copy;
+        let frame = cpu_frame(frame, encoder.settings());
+        encoder.push_frame_owned(frame).map_err(media_error)?;
+        Ok(elapsed)
+    }
+
     /// Copies the pixels out (rows tightly packed) and returns the staging
     /// buffer for reuse.
     pub fn into_frame(mut self) -> Result<ReadFrame, RenderError> {
@@ -464,6 +553,81 @@ pub(crate) struct EncoderThread {
     handle: Option<std::thread::JoinHandle<Result<EncoderOutput, RenderError>>>,
 }
 
+#[cfg(feature = "media")]
+struct MovieAudio {
+    mix: bae_media::mix::AudioMix,
+    times: Vec<Time>,
+    frame_duration: Time,
+    scratch: Vec<[f32; 2]>,
+    /// The next frame whose audio goes to the encoder.
+    next: usize,
+}
+
+#[cfg(feature = "media")]
+impl MovieAudio {
+    /// Audio goes to the encoder this far ahead of the video it accompanies:
+    /// a movie writer interleaves and, with uncompressed audio, takes the next
+    /// frame only once audio past it has arrived (#793).
+    const LEAD_SECONDS: f64 = 1.0;
+
+    /// Hands over the audio of every frame up to `index` plus the lead.
+    fn push_ahead_of(
+        &mut self,
+        index: usize,
+        encoder: &mut dyn bae_media::Encoder,
+    ) -> Result<(), RenderError> {
+        let lead =
+            (Self::LEAD_SECONDS / self.frame_duration.as_seconds().max(1e-6)).ceil() as usize;
+        let end = (index + lead.max(1)).min(self.times.len());
+        if self.next >= end {
+            return Ok(());
+        }
+        while self.next < end {
+            self.push(self.next, encoder)?;
+            self.next += 1;
+        }
+        if self.next == self.times.len() {
+            encoder.end_audio().map_err(media_error)?;
+        }
+        Ok(())
+    }
+
+    fn new(job: &ExportJob<'_>) -> Option<Self> {
+        let mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
+        if mix.is_empty() {
+            return None;
+        }
+        Some(Self {
+            mix,
+            times: job.times.iter().map(|&(_, t)| t).collect(),
+            frame_duration: job.rate.frame_duration(),
+            scratch: Vec::new(),
+            next: 0,
+        })
+    }
+    fn push(
+        &mut self,
+        index: usize,
+        encoder: &mut dyn bae_media::Encoder,
+    ) -> Result<(), RenderError> {
+        use bae_media::audio::time_to_sample;
+        const RATE: u32 = 48_000;
+        let t = self.times[index];
+        let first = time_to_sample(t, RATE);
+        let count = time_to_sample(t + self.frame_duration, RATE) - first;
+        self.scratch.resize(count as usize, [0.0; 2]);
+        self.mix
+            .render(first, RATE, &mut self.scratch)
+            .map_err(media_error)?;
+        let block = bae_media::AudioBuffer {
+            sample_rate: RATE,
+            channels: 2,
+            samples: self.scratch.as_flattened().to_vec(),
+        };
+        encoder.push_audio(&block).map_err(media_error)
+    }
+}
+
 /// What the encoder thread did.
 #[cfg(feature = "media")]
 pub(crate) struct EncoderOutput {
@@ -480,18 +644,20 @@ impl EncoderThread {
     /// Frames that were written stay written when the export stops or fails
     /// (AE keeps the frames rendered before Stop): on an error the encoder is
     /// finished, not aborted, so complete files are kept.
-    pub(crate) fn spawn(mut encoder: Box<dyn bae_media::Encoder>) -> Self {
+    fn spawn(mut encoder: Box<dyn bae_media::Encoder>, mut audio: Option<MovieAudio>) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel::<MappedFrame>(Self::QUEUE);
         let handle = std::thread::Builder::new()
             .name("bae-render.encode".into())
             .spawn(move || {
                 let mut copy = Duration::ZERO;
-                for mapped in receiver.iter() {
-                    let pushed = mapped.into_frame().and_then(|frame| {
-                        copy += frame.copy;
-                        let frame = cpu_frame(frame, encoder.settings());
-                        encoder.push_frame_owned(frame).map_err(media_error)
-                    });
+                for (index, mapped) in receiver.iter().enumerate() {
+                    // The audio leads the video it accompanies (#793).
+                    let pushed = match &mut audio {
+                        Some(track) => track.push_ahead_of(index, &mut *encoder),
+                        None => Ok(()),
+                    }
+                    .and_then(|()| mapped.write_to(&mut *encoder))
+                    .map(|elapsed| copy += elapsed);
                     if let Err(error) = pushed {
                         // Wait for the frames before this one; keep them.
                         let _ = encoder.finish();
@@ -569,10 +735,18 @@ pub enum ExportFormat {
     Tiff,
     /// OpenEXR sequence (half or float, premultiplied).
     Exr,
-    /// H.264 movie (macOS).
+    /// Stereo 48 kHz PCM WAV.
+    Wav,
+    /// H.264 movie.
     H264,
-    /// HEVC movie (macOS).
+    /// HEVC movie.
     Hevc,
+    /// H.264 in a QuickTime container.
+    QuickTimeH264,
+    /// HEVC in a QuickTime container.
+    QuickTimeHevc,
+    /// Standard ProRes 422 movie.
+    ProRes422,
     /// ProRes 422 HQ movie (macOS).
     ProRes,
     /// ProRes 4444 movie with alpha (macOS).
@@ -581,17 +755,32 @@ pub enum ExportFormat {
 
 impl ExportFormat {
     /// Names accepted by [`Self::parse`] (`bae render --format`).
-    pub const NAMES: [&'static str; 7] =
-        ["png", "tiff", "exr", "h264", "hevc", "prores", "prores4444"];
+    pub const NAMES: [&'static str; 11] = [
+        "png",
+        "tiff",
+        "exr",
+        "h264",
+        "hevc",
+        "mov-h264",
+        "mov-hevc",
+        "prores422",
+        "prores",
+        "prores4444",
+        "wav",
+    ];
 
     /// From a name in [`Self::NAMES`] or a file extension.
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
+            "wav" => Self::Wav,
             "png" => Self::Png,
             "tiff" | "tif" => Self::Tiff,
             "exr" => Self::Exr,
             "h264" | "mp4" => Self::H264,
             "hevc" => Self::Hevc,
+            "mov-h264" => Self::QuickTimeH264,
+            "mov-hevc" => Self::QuickTimeHevc,
+            "prores422" => Self::ProRes422,
             "prores" | "mov" => Self::ProRes,
             "prores4444" => Self::ProRes4444,
             _ => return None,
@@ -607,11 +796,15 @@ impl ExportFormat {
     /// The name in [`Self::NAMES`].
     pub fn name(self) -> &'static str {
         match self {
+            Self::Wav => "wav",
             Self::Png => "png",
             Self::Tiff => "tiff",
             Self::Exr => "exr",
             Self::H264 => "h264",
             Self::Hevc => "hevc",
+            Self::QuickTimeH264 => "mov-h264",
+            Self::QuickTimeHevc => "mov-hevc",
+            Self::ProRes422 => "prores422",
             Self::ProRes => "prores",
             Self::ProRes4444 => "prores4444",
         }
@@ -620,12 +813,22 @@ impl ExportFormat {
     /// File extension.
     pub fn extension(self) -> &'static str {
         match self {
+            Self::Wav => "wav",
             Self::Png => "png",
             Self::Tiff => "tif",
             Self::Exr => "exr",
             Self::H264 | Self::Hevc => "mp4",
-            Self::ProRes | Self::ProRes4444 => "mov",
+            Self::ProRes
+            | Self::ProRes422
+            | Self::ProRes4444
+            | Self::QuickTimeH264
+            | Self::QuickTimeHevc => "mov",
         }
+    }
+
+    /// The output module writes a QuickTime container.
+    pub fn is_quicktime(self) -> bool {
+        self.extension() == "mov"
     }
 
     /// One file per frame.
@@ -688,8 +891,15 @@ pub struct ExportSettings {
     pub bits: Option<u8>,
     /// Encoder threads for image sequences; `None`: one per core.
     pub threads: Option<usize>,
+    /// Maximum number of GPU frames awaiting readback.
+    pub frames_in_flight: usize,
     /// Alpha.
     pub alpha: ExportAlpha,
+    /// Movies: average bit rate in bits per second (AE's H.264 "target
+    /// bitrate"); `None`: the encoder's default. Ignored for image sequences.
+    pub bit_rate: Option<u64>,
+    /// Write uncompressed 24-bit audio to QuickTime instead of AAC.
+    pub pcm_audio: bool,
 }
 
 impl ExportSettings {
@@ -701,7 +911,10 @@ impl ExportSettings {
             compression: None,
             bits: None,
             threads: None,
+            frames_in_flight: READBACK_DEPTH,
             alpha: ExportAlpha::default(),
+            bit_rate: None,
+            pcm_audio: format.is_quicktime(),
         }
     }
 
@@ -709,6 +922,19 @@ impl ExportSettings {
     pub fn validate(&self, rate: FrameRate, request: &RenderRequest) -> Result<(), RenderError> {
         #[cfg(feature = "media")]
         {
+            if self.format == ExportFormat::Wav {
+                if self.bits.is_some_and(|b| b != 24)
+                    || self
+                        .compression
+                        .as_deref()
+                        .is_some_and(|c| !matches!(c, "none" | "default"))
+                {
+                    return Err(RenderError::Other(
+                        "WAV supports 24-bit uncompressed PCM".into(),
+                    ));
+                }
+                return Ok(());
+            }
             encode_settings(
                 self,
                 request.depth == BitDepth::Float32,
@@ -783,7 +1009,7 @@ pub fn has_frame_run(pattern: &Path) -> bool {
 /// `pattern` with an explicit `####` run when its file name has none, so
 /// bae-media numbers files exactly like [`frame_file`].
 #[cfg_attr(not(feature = "media"), allow(dead_code))]
-pub(crate) fn explicit_pattern(pattern: &Path) -> PathBuf {
+pub fn explicit_pattern(pattern: &Path) -> PathBuf {
     if has_frame_run(pattern) {
         return pattern.to_owned();
     }
@@ -833,6 +1059,7 @@ fn encode_settings(
     };
     let format = settings.format;
     let codec = match format {
+        ExportFormat::Wav => return Err(RenderError::Other("WAV uses the audio encoder".into())),
         ExportFormat::Png => VideoCodec::Png,
         ExportFormat::Tiff => VideoCodec::Tiff(match level {
             None | Some("none") => TiffCompression::None,
@@ -849,8 +1076,9 @@ fn encode_settings(
             Some("piz") => ExrCompression::Piz,
             Some(_) => return Err(bad("exr (none | rle | zips | zip | piz)")),
         }),
-        ExportFormat::H264 => VideoCodec::H264,
-        ExportFormat::Hevc => VideoCodec::Hevc,
+        ExportFormat::H264 | ExportFormat::QuickTimeH264 => VideoCodec::H264,
+        ExportFormat::Hevc | ExportFormat::QuickTimeHevc => VideoCodec::Hevc,
+        ExportFormat::ProRes422 => VideoCodec::ProRes(ProResProfile::Standard),
         ExportFormat::ProRes => VideoCodec::ProRes(ProResProfile::Hq),
         ExportFormat::ProRes4444 => VideoCodec::ProRes(ProResProfile::P4444),
     };
@@ -895,6 +1123,9 @@ fn encode_settings(
         encode.alpha = AlphaMode::Premultiplied;
     }
     encode.threads = settings.threads;
+    if !format.is_image() {
+        encode.bit_rate = settings.bit_rate;
+    }
     encode.start_number = start_number;
     encode.validate().map_err(media_error)?;
     Ok(encode)
@@ -1002,7 +1233,20 @@ impl Sink {
             } else {
                 settings.path.clone()
             };
-            let encode = encode_settings(settings, float_project, &path, size, job.rate, first)?;
+            let mut encode =
+                encode_settings(settings, float_project, &path, size, job.rate, first)?;
+            let audio = if settings.format.is_image() {
+                None
+            } else {
+                MovieAudio::new(job)
+            };
+            if audio.is_some() {
+                let mut track = bae_media::export::AudioEncodeSettings::aac_stereo();
+                if settings.pcm_audio && settings.format.is_quicktime() {
+                    track.codec = "pcm_s24le".into();
+                }
+                encode.audio = Some(track);
+            }
             let builtin;
             let encoders = match job.encoders {
                 Some(encoders) => encoders,
@@ -1020,7 +1264,7 @@ impl Sink {
                     .format
                     .is_image()
                     .then(|| bae_media::export::SequencePattern::parse(&path)),
-                thread: EncoderThread::spawn(encoder),
+                thread: EncoderThread::spawn(encoder, audio),
                 alpha: alpha_for(&encode),
                 settings: encode,
                 format,
@@ -1207,23 +1451,36 @@ impl Sink {
 
 /// A read-back frame as bae-media's frame type.
 #[cfg(feature = "media")]
+impl From<ReadbackFormat> for bae_media::PixelFormat {
+    fn from(value: ReadbackFormat) -> Self {
+        match value {
+            ReadbackFormat::Rgba8 => Self::Rgba8,
+            ReadbackFormat::Bgra8 => Self::Bgra8,
+            ReadbackFormat::Rgba16Float => Self::Rgba16Float,
+            ReadbackFormat::Rgba32Float => Self::Rgba32Float,
+        }
+    }
+}
+
+#[cfg(feature = "media")]
+impl From<OutputAlpha> for bae_media::AlphaMode {
+    fn from(value: OutputAlpha) -> Self {
+        match value {
+            OutputAlpha::Straight => Self::Straight,
+            OutputAlpha::Premultiplied => Self::Premultiplied,
+            OutputAlpha::Over(_) => Self::Opaque,
+        }
+    }
+}
+
+#[cfg(feature = "media")]
 fn cpu_frame(frame: ReadFrame, settings: &bae_media::EncodeSettings) -> bae_media::CpuFrame {
-    use bae_media::{AlphaMode, PixelFormat};
     bae_media::CpuFrame {
         width: frame.width,
         height: frame.height,
-        format: match frame.format {
-            ReadbackFormat::Rgba8 => PixelFormat::Rgba8,
-            ReadbackFormat::Bgra8 => PixelFormat::Bgra8,
-            ReadbackFormat::Rgba16Float => PixelFormat::Rgba16Float,
-            ReadbackFormat::Rgba32Float => PixelFormat::Rgba32Float,
-        },
+        format: frame.format.into(),
         data: frame.data,
-        alpha: match frame.alpha {
-            OutputAlpha::Straight => AlphaMode::Straight,
-            OutputAlpha::Premultiplied => AlphaMode::Premultiplied,
-            OutputAlpha::Over(_) => AlphaMode::Opaque,
-        },
+        alpha: frame.alpha.into(),
         color: settings.color.clone(),
         pixel_aspect: settings.pixel_aspect,
     }
@@ -1412,6 +1669,11 @@ pub fn export_frames(
     on_frame: &mut dyn FnMut(&ExportedFrame),
 ) -> Result<ExportReport, RenderError> {
     let started = Instant::now();
+    #[cfg(feature = "media")]
+    if job.settings.format == ExportFormat::Wav {
+        job.settings.validate(job.rate, job.request)?;
+        return export_wav(job, cancel, on_frame);
+    }
     // More than one frame, or one comp frame whose image file name has a `#`
     // run (AE numbers it too, #207); otherwise a single still image.
     let sequence = job.times.len() > 1
@@ -1419,16 +1681,20 @@ pub fn export_frames(
             && has_frame_run(&job.settings.path)
             && job.times.first().is_some_and(|(frame, _)| frame.is_some()));
     let float_work = renderer.work_format(job.request) == wgpu::TextureFormat::Rgba32Float;
+    let depth = job.settings.frames_in_flight.clamp(1, READBACK_DEPTH);
     let mut run = Run {
-        readback: ExportReadback::new(renderer.gpu().clone(), READBACK_DEPTH),
+        readback: ExportReadback::new(renderer.gpu().clone(), depth),
         sink: None,
-        pending: VecDeque::with_capacity(READBACK_DEPTH + 1),
+        pending: VecDeque::with_capacity(depth + 1),
         stats: ExportStats::default(),
         frames: Vec::with_capacity(job.times.len()),
         on_frame,
     };
     let mut warnings: Vec<String> = Vec::new();
     let mut stopped = false;
+    // sampleImage: export waits for the sampled pixels (the preview never does).
+    let samples = Arc::new(bae_anim::ImageSamples::new());
+    evaluator.set_image_samples(Some(samples.clone()));
     let result = (|| -> Result<(), RenderError> {
         for (index, (frame, time)) in job.times.iter().enumerate() {
             if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
@@ -1440,10 +1706,33 @@ pub fn export_frames(
                 None => error,
             };
             let t0 = Instant::now();
-            let rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
+            let mut rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
+            // Layers sampled by expressions: drawn, read back, evaluated again (a
+            // few rounds for samples of layers whose own pixels use samples).
+            for _ in 0..MAX_SAMPLE_ROUNDS {
+                if !samples.has_requests() {
+                    break;
+                }
+                let mut frames = crate::eval::EvaluatorFrames {
+                    stage: job.stage,
+                    evaluator: &mut *evaluator,
+                };
+                renderer
+                    .read_samples(&samples, &rc, job.request, Some(&mut frames))
+                    .map_err(at)?;
+                renderer.wait_samples(&samples).map_err(at)?;
+                rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
+            }
             let eval = t0.elapsed();
             let t1 = Instant::now();
-            let rendered = renderer.render_frame(&rc, job.request).map_err(at)?;
+            // Effects reading other frames evaluate them with the same evaluator.
+            let mut frames = crate::eval::EvaluatorFrames {
+                stage: job.stage,
+                evaluator: &mut *evaluator,
+            };
+            let rendered = renderer
+                .render_frame_with(&rc, job.request, Some(&mut frames))
+                .map_err(at)?;
             let render = t1.elapsed();
             run.stats.eval += eval;
             run.stats.render += render;
@@ -1483,7 +1772,11 @@ pub fn export_frames(
                 draw_calls: rendered.stats.draw_calls,
             });
             drop(rendered);
-            run.collect_ready()?;
+            if depth == 1 {
+                run.wait_one()?;
+            } else {
+                run.collect_ready()?;
+            }
         }
         // Frames already rendered (in flight on the GPU) are written too.
         while run.wait_one()? {}

@@ -1,0 +1,24 @@
+[effect.dust-scratches]
+name = "蒙尘与划痕"
+keywords = ["蒙尘与划痕"]
+
+[effect.dust-scratches.params]
+radius = "半径"
+threshold = "阈值"
+operate_on_alpha_channel = "在 Alpha 通道上运算"
+
+[effect.median]
+name = "中间值"
+keywords = ["中间值"]
+
+[effect.median.params]
+radius = "半径"
+operate_on_alpha_channel = "在 Alpha 通道上运算"
+
+[effect.median-legacy]
+name = "中间值（旧版）"
+keywords = ["中间值"]
+
+[effect.median-legacy.params]
+radius = "半径"
+operate_on_alpha_channel = "在 Alpha 通道上运算"

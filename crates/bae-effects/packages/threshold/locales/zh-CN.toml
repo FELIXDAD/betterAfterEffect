@@ -1,0 +1,39 @@
+[effect.threshold]
+name = "阈值"
+keywords = ["阈值", "黑白"]
+
+[effect.threshold.params]
+level = "级别"
+
+[effect.threshold_legacy]
+name = "阈值"
+keywords = ["阈值", "旧版"]
+
+[effect.threshold_legacy.params]
+level = "级别"
+
+[effect.cc-threshold]
+name = "CC Threshold"
+keywords = ["阈值"]
+
+[effect.cc-threshold.params]
+threshold = "Threshold"
+channel = "Channel"
+invert = "Invert"
+blend_w_original = "Blend w. Original"
+
+[effect.cc-threshold.choices]
+channel = ["Luminance", "RGB", "Saturation", "Alpha"]
+
+[effect.cc-threshold-rgb]
+name = "CC Threshold RGB"
+keywords = ["三通道阈值"]
+
+[effect.cc-threshold-rgb.params]
+red_threshold = "Red Threshold"
+green_threshold = "Green Threshold"
+blue_threshold = "Blue Threshold"
+invert_red_channel = "Invert Red Channel"
+invert_green_channel = "Invert Green Channel"
+invert_blue_channel = "Invert Blue Channel"
+blend_w_original = "Blend w. Original"

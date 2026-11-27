@@ -1,0 +1,325 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "channel-mixer"
+name = "Channel Mixer"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE CHANNEL MIXER"]
+flags = ["pixel-independent"]
+shader = "shaders/channel_mixer.wgsl"
+
+[[effect.param]]
+id = 1
+key = "red_red"
+type = "float"
+name = "Red - Red"
+default = 100
+range = [-200, 200]
+
+[[effect.param]]
+id = 2
+key = "red_green"
+type = "float"
+name = "Red - Green"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 3
+key = "red_blue"
+type = "float"
+name = "Red - Blue"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 4
+key = "red_const"
+type = "float"
+name = "Red - Const"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 5
+key = "green_red"
+type = "float"
+name = "Green - Red"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 6
+key = "green_green"
+type = "float"
+name = "Green - Green"
+default = 100
+range = [-200, 200]
+
+[[effect.param]]
+id = 7
+key = "green_blue"
+type = "float"
+name = "Green - Blue"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 8
+key = "green_const"
+type = "float"
+name = "Green - Const"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 9
+key = "blue_red"
+type = "float"
+name = "Blue - Red"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 10
+key = "blue_green"
+type = "float"
+name = "Blue - Green"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 11
+key = "blue_blue"
+type = "float"
+name = "Blue - Blue"
+default = 100
+range = [-200, 200]
+
+[[effect.param]]
+id = 12
+key = "blue_const"
+type = "float"
+name = "Blue - Const"
+default = 0
+range = [-200, 200]
+
+[[effect.param]]
+id = 13
+key = "monochrome"
+type = "checkbox"
+name = "Monochrome"
+default = false
+
+[[effect]]
+id = "change-color"
+name = "Change Color"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Change Color"]
+flags = ["pixel-independent"]
+shader = "shaders/change_color.wgsl"
+includes = ["shaders/hls.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "view"
+type = "popup"
+name = "View"
+choices = ["Corrected Layer", "Color Correction Mask"]
+default = 1
+
+[[effect.param]]
+id = 2
+key = "hue_transform"
+type = "float"
+name = "Hue Transform"
+default = 0
+range = [-1800, 1800]
+
+[[effect.param]]
+id = 3
+key = "lightness_transform"
+type = "float"
+name = "Lightness Transform"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 4
+key = "saturation_transform"
+type = "float"
+name = "Saturation Transform"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 5
+key = "color_to_change"
+type = "color"
+name = "Color To Change"
+default = [0, 0, 1, 1]
+
+[[effect.param]]
+id = 6
+key = "matching_tolerance"
+type = "float"
+name = "Matching Tolerance"
+default = 15
+range = [0, 100]
+
+[[effect.param]]
+id = 7
+key = "matching_softness"
+type = "float"
+name = "Matching Softness"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 8
+key = "match_colors"
+type = "popup"
+name = "Match Colors"
+choices = ["Using RGB", "Using Hue", "Using Chroma"]
+default = 1
+
+[[effect.param]]
+id = 9
+key = "invert_color_correction_mask"
+type = "checkbox"
+name = "Invert Color Correction Mask"
+default = false
+
+[[effect]]
+id = "change-to-color"
+name = "Change To Color"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Change To Color"]
+flags = ["pixel-independent"]
+shader = "shaders/change_to_color.wgsl"
+includes = ["shaders/hls.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "from_color"
+type = "color"
+name = "From"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 2
+key = "to_color"
+type = "color"
+name = "To"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 3
+key = "change"
+type = "popup"
+name = "Change"
+choices = ["Hue", "Hue & Lightness", "Hue & Saturation", "Hue, Lightness & Saturation"]
+default = 1
+
+[[effect.param]]
+id = 4
+key = "change_by"
+type = "popup"
+name = "Change By"
+choices = ["Setting To Color", "Transforming To Color"]
+default = 1
+
+[[effect.param]]
+id = 10
+key = "tolerance"
+type = "group"
+name = "Tolerance"
+end_id = 11
+
+[[effect.param]]
+id = 5
+key = "hue"
+type = "float"
+name = "Hue"
+default = 0.100006
+range = [0, 2]
+group = "tolerance"
+
+[[effect.param]]
+id = 6
+key = "lightness"
+type = "float"
+name = "Lightness"
+default = 1
+range = [0, 2]
+group = "tolerance"
+
+[[effect.param]]
+id = 7
+key = "saturation"
+type = "float"
+name = "Saturation"
+default = 1
+range = [0, 2]
+group = "tolerance"
+
+[[effect.param]]
+id = 8
+key = "softness"
+type = "float"
+name = "Softness"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 9
+key = "view_correction_matte"
+type = "checkbox"
+name = "View Correction Matte"
+default = false
+
+[[effect]]
+id = "color-balance-hls"
+name = "Color Balance (HLS)"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Color Balance (HLS)"]
+flags = ["pixel-independent"]
+shader = "shaders/color_balance_hls.wgsl"
+includes = ["shaders/hls.wgsl"]
+identity_when = "params.hue == 0 && params.lightness == 0 && params.saturation == 0"
+
+[[effect.param]]
+id = 1
+key = "hue"
+type = "angle"
+name = "Hue"
+default = 0
+
+[[effect.param]]
+id = 2
+key = "lightness"
+type = "float"
+name = "Lightness"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 3
+key = "saturation"
+type = "float"
+name = "Saturation"
+default = 0
+range = [-100, 100]

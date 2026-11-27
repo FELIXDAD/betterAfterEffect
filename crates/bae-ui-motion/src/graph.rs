@@ -67,7 +67,9 @@ pub(crate) struct GraphSettings {
     pub show_set: bool,
     pub graph_type: GraphType,
     pub show_reference: bool,
+    pub show_waveforms: bool,
     pub show_in_out: bool,
+    pub show_markers: bool,
     pub show_tooltips: bool,
     pub show_expression_editor: bool,
     pub allow_between_frames: bool,
@@ -84,7 +86,9 @@ impl Default for GraphSettings {
             show_set: false,
             graph_type: GraphType::Auto,
             show_reference: true,
+            show_waveforms: true,
             show_in_out: true,
+            show_markers: true,
             show_tooltips: true,
             show_expression_editor: false,
             allow_between_frames: false,
@@ -142,6 +146,13 @@ enum GDrag {
         handle: BoxHandle,
         bounds: Rect,
         keys: Vec<KeyRef>,
+        /// The anchor point (fractions of `bounds`).
+        anchor: egui::Vec2,
+    },
+    /// The transform box's anchor point follows the pointer.
+    Anchor {
+        bounds: Rect,
+        keys: Vec<KeyRef>,
     },
     Marquee {
         origin: Pos2,
@@ -164,6 +175,9 @@ pub(crate) struct GraphEditor {
     expr_buf: Option<(PrimPath, String, String)>,
     /// The keyframe right-clicked for the context menu.
     menu_key: Option<KeyRef>,
+    /// The transform box's anchor point (fractions of the box) for the keys it
+    /// was set with; the centre otherwise. Ctrl-drags scale about it (AE).
+    box_anchor: Option<(Vec<KeyRef>, egui::Vec2)>,
     /// Sampled graphs by (property, speed graph): reused while the keyframes and
     /// the view stay the same, so idle frames and drags resample only what changed.
     cache: HashMap<RangeKey, CacheEntry>,
@@ -179,8 +193,11 @@ pub(crate) struct TestGeometry {
     pub keys: Vec<(KeyRef, usize, Pos2)>,
     pub handles: Vec<(KeyRef, usize, bool, Pos2)>,
     pub selection_box: Option<Rect>,
+    pub box_anchor: Option<Pos2>,
     pub vaxes: Vec<((PrimPath, String), VAxis)>,
     pub buttons: Vec<(String, Rect)>,
+    /// Layer markers drawn (x).
+    pub markers: Vec<f32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +307,7 @@ pub(crate) fn comps(v: &Value) -> Option<Vec<f64>> {
 }
 
 /// `template` with its components replaced.
-fn recompose(template: &Value, c: &[f64]) -> Value {
+pub(crate) fn recompose(template: &Value, c: &[f64]) -> Value {
     let g = |i: usize| c.get(i).copied().unwrap_or(0.0);
     match template {
         Value::Float(_) => Value::Float(g(0)),
@@ -644,7 +661,10 @@ fn data_range(pieces: &[Piece], extra: impl Iterator<Item = f64>) -> Option<(f64
 /// A range with room around the data (and never empty).
 fn padded((lo, hi): (f64, f64)) -> (f64, f64) {
     let span = hi - lo;
-    if span.abs() < 1e-9 {
+    // Flat when the spread is rounding noise next to the values (a linear
+    // segment's speed samples differ by ~1e-9): fitting it would blow the noise
+    // up to the full height (#552).
+    if span.abs() <= 1e-9 * lo.abs().max(hi.abs()).max(1.0) {
         let m = lo.abs().max(1.0) * 0.1;
         (lo - m, hi + m)
     } else {
@@ -1113,6 +1133,7 @@ fn box_handles(r: Rect) -> [(Pos2, BoxHandle); 8] {
 enum Hit {
     Handle(HandlePt),
     BoxHandle(BoxHandle),
+    BoxAnchor,
     Key(KeyPt),
     InBox,
     Segment(usize),
@@ -1131,6 +1152,8 @@ struct Frame {
     /// Tight bounds of the selected keys (screen); the transform box is drawn
     /// [`BOX_MARGIN`] outside.
     selection_box: Option<Rect>,
+    /// The transform box's anchor point (screen).
+    box_anchor: Pos2,
 }
 
 impl GraphEditor {
@@ -1313,11 +1336,17 @@ impl GraphEditor {
                 handle,
                 bounds,
                 keys,
+                anchor,
             }) => {
-                let about_center = mods.command;
-                let fixed = |lo: f32, hi: f32, h: i8| {
-                    if about_center {
-                        (lo + hi) / 2.0
+                // AE's transform box: Ctrl scales about the anchor point; on a
+                // corner, Alt moves that corner alone, Ctrl+Alt tapers the
+                // values, Ctrl+Alt+Shift moves that side up or down.
+                let corner = handle.hx != 0 && handle.hy != 0;
+                let about_anchor = mods.command && !mods.alt;
+                let a = bounds.min + *anchor * bounds.size();
+                let fixed = |lo: f32, hi: f32, h: i8, a: f32| {
+                    if about_anchor {
+                        a
                     } else if h < 0 {
                         hi
                     } else {
@@ -1325,8 +1354,44 @@ impl GraphEditor {
                     }
                 };
                 let start = |lo: f32, hi: f32, h: i8| if h < 0 { lo } else { hi };
-                let fx = fixed(bounds.left(), bounds.right(), handle.hx);
-                let fy = fixed(bounds.top(), bounds.bottom(), handle.hy);
+                let fx = fixed(bounds.left(), bounds.right(), handle.hx, a.x);
+                let fy = fixed(bounds.top(), bounds.bottom(), handle.hy, a.y);
+                let d = pointer - *origin;
+                // Weight of the dragged side / corner at a point (1 there, 0 at
+                // the opposite side).
+                let wx = |x: f32| {
+                    let u = ((x - bounds.left()) / bounds.width().max(1e-3)).clamp(0.0, 1.0);
+                    if handle.hx > 0 { u } else { 1.0 - u }
+                };
+                let wy = |y: f32| {
+                    let v = ((y - bounds.top()) / bounds.height().max(1e-3)).clamp(0.0, 1.0);
+                    if handle.hy > 0 { v } else { 1.0 - v }
+                };
+                let corner_y = if handle.hy > 0 {
+                    bounds.bottom()
+                } else {
+                    bounds.top()
+                };
+                let mid_y = bounds.center().y;
+                let taper = if (corner_y - mid_y).abs() > 1e-3 {
+                    (corner_y + d.y - mid_y) / (corner_y - mid_y)
+                } else {
+                    1.0
+                };
+                // Where a point goes in the special corner modes (None: plain
+                // scaling).
+                let special = |p: Pos2| -> Option<Pos2> {
+                    if !corner || !mods.alt {
+                        return None;
+                    }
+                    Some(match (mods.command, mods.shift) {
+                        (false, _) => p + d * (wx(p.x) * wy(p.y)),
+                        (true, false) => {
+                            pos2(p.x, mid_y + (p.y - mid_y) * (1.0 + (taper - 1.0) * wx(p.x)))
+                        }
+                        (true, true) => pos2(p.x, p.y + d.y * wx(p.x)),
+                    })
+                };
                 let scale = |h: i8, p: f32, o: f32, f: f32, s: f32| -> f32 {
                     if h == 0 || (s - f).abs() < 1e-3 {
                         1.0
@@ -1366,7 +1431,7 @@ impl GraphEditor {
                         continue;
                     };
                     let mut e = KeyEdit::new(k.clone());
-                    let nx = fx + (first.pos.x - fx) * sx;
+                    let nx = special(first.pos).map_or(fx + (first.pos.x - fx) * sx, |q| q.x);
                     let mut nct = axis.t(nx);
                     if !self.settings.allow_between_frames {
                         nct = round_frame(info, nct);
@@ -1376,12 +1441,12 @@ impl GraphEditor {
                         e.time = Some(nt);
                     }
                     if !p.speed
-                        && (sy - 1.0).abs() > 1e-6
+                        && ((sy - 1.0).abs() > 1e-6 || special(first.pos).is_some())
                         && let Some(mut c) = comps(&kf.value)
                     {
                         for kp in &pts {
                             if self.picked(k, kp.dim) {
-                                let ny = fy + (kp.pos.y - fy) * sy;
+                                let ny = special(kp.pos).map_or(fy + (kp.pos.y - fy) * sy, |q| q.y);
                                 if let Some(cj) = c.get_mut(kp.dim) {
                                     *cj = vaxes[pi].v(ny);
                                 }
@@ -1479,6 +1544,9 @@ impl GraphEditor {
                     return Hit::BoxHandle(which);
                 }
             }
+            if f.box_anchor.distance(pos) <= 5.0 {
+                return Hit::BoxAnchor;
+            }
         }
         if let Some(k) = f
             .keys
@@ -1521,6 +1589,7 @@ impl GraphEditor {
         axis: &TimeAxis,
         rect: Rect,
         now: Time,
+        waveform: &mut dyn FnMut(&Ui, &PrimPath, Rect),
     ) -> GraphOut {
         let mut out = GraphOut::default();
         let stage = cx.stage;
@@ -1588,6 +1657,11 @@ impl GraphEditor {
         let fit = self.settings.auto_zoom && self.drag.is_none();
         let mut frame = self.geometry(&props, axis, area, &selected, fit);
 
+        // The transform box's anchor point follows the pointer (no edit).
+        if let (Some(GDrag::Anchor { bounds, keys }), Some(ptr)) = (&self.drag, pointer) {
+            let a = (ptr - bounds.min) / bounds.size().max(vec2(1e-3, 1e-3));
+            self.box_anchor = Some((keys.clone(), vec2(a.x.clamp(0.0, 1.0), a.y.clamp(0.0, 1.0))));
+        }
         // Drag preview: the edits the drag would make now, applied locally.
         let mut edits: Vec<KeyEdit> = Vec::new();
         let (mut vline, mut hline) = (None, None);
@@ -1606,6 +1680,7 @@ impl GraphEditor {
             );
             (edits, vline, hline) = (e, v, h);
             if !edits.is_empty() {
+                let mut specs = Vec::new();
                 for p in &mut props {
                     let mine: Vec<&KeyEdit> = edits
                         .iter()
@@ -1613,8 +1688,19 @@ impl GraphEditor {
                         .collect();
                     if !mine.is_empty() {
                         p.spec = bae_motion::apply_key_edits(&p.attr, &p.spec, &mine).0;
+                        specs.push(bae_anim::AttrOverride {
+                            prim: p.path.clone(),
+                            attr: p.attr.clone(),
+                            spec: p.spec.clone(),
+                        });
                     }
                 }
+                // The comp follows the drag (#593).
+                session.lock().key_preview = Some(crate::session::KeyPreview {
+                    owner: "graph",
+                    specs,
+                    committed: None,
+                });
                 let moved: Vec<KeyRef> = selected
                     .iter()
                     .map(|k| {
@@ -1638,7 +1724,11 @@ impl GraphEditor {
         self.ranges.retain(|k, _| shown.contains(k));
         self.cache.retain(|_, e| e.used);
 
-        self.paint(ui, stage, &frame, axis, area, &selected);
+        let _markers = self.paint(ui, stage, &frame, axis, area, &selected, waveform);
+        #[cfg(test)]
+        {
+            self.last.markers = _markers;
+        }
         let p = ui.painter().with_clip_rect(area);
         if let Some(x) = vline {
             p.vline(x, area.y_range(), Stroke::new(1.0, SNAP));
@@ -1686,7 +1776,17 @@ impl GraphEditor {
         // Wheel: Alt = time zoom; with Auto-Zoom off, plain = vertical pan and
         // Cmd/Ctrl = vertical zoom.
         if resp.hovered() {
-            let dy = ui.input(|i| i.smooth_scroll_delta.y);
+            let trackpad = cfg!(target_os = "macos") && ui.input(|i| i.events.iter().any(|event| matches!(event, egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, .. } if delta.y != 0.0)));
+            let dy = if trackpad {
+                crate::viewer::wheel(ui, crate::viewer::Magnification::default())
+                    .pan
+                    .y
+            } else {
+                ui.input(|i| i.smooth_scroll_delta.y)
+            };
+            if trackpad && dy != 0.0 && !mods.alt {
+                self.settings.auto_zoom = false;
+            }
             if dy != 0.0 {
                 if mods.alt {
                     out.zoom_by = dy * 0.002;
@@ -1776,9 +1876,11 @@ impl GraphEditor {
         // Right-click on a keyframe: the keyframe menu; elsewhere the Keyframe
         // Assistant and Toggle Hold items for the selection.
         let menu_key = self.menu_key.clone();
+        let settings = &mut self.settings;
         crate::common::context_menu(&resp, &mut |ui| match &menu_key {
             Some(k) => crate::timeline::key_menu(ui, cx, session, k),
-            None => crate::timeline::keyframe_menu(ui, cx, session),
+            // Empty graph space: AE's view options.
+            None => area_menu(ui, settings),
         });
 
         // Drag start.
@@ -1814,6 +1916,11 @@ impl GraphEditor {
                     handle,
                     bounds,
                     keys: shown_selected.clone(),
+                    anchor: self.anchor_for(&selected),
+                }),
+                Hit::BoxAnchor => frame.selection_box.map(|bounds| GDrag::Anchor {
+                    bounds,
+                    keys: selected.clone(),
                 }),
                 Hit::Key(k) if editable(&frame.props[k.prop]) => {
                     self.focus = Some(frame.props[k.prop].id());
@@ -1893,11 +2000,20 @@ impl GraphEditor {
                 .collect();
             cx.invoke_with("key.edit", json!({ "edits": edits }));
             let mut s = session.lock();
+            if let Some(k) = s.key_preview.as_mut().filter(|k| k.owner == "graph") {
+                k.committed = Some((stage.revision(), std::time::Instant::now()));
+            }
             for k in &mut s.selected_keys {
                 if let Some((_, t)) = moved.iter().find(|(m, _)| m == k) {
                     k.time = *t;
                 }
             }
+            // Panels drawn before the edit runs keep the moved keys selected.
+            let landing: Vec<KeyRef> = moved
+                .iter()
+                .map(|(k, t)| KeyRef::new(k.path.clone(), k.attr.clone(), *t))
+                .collect();
+            s.expect(crate::session::Pending::Keys(landing));
             self.sel_dims = self
                 .sel_dims
                 .drain()
@@ -1908,6 +2024,16 @@ impl GraphEditor {
                 .collect();
         }
 
+        // A drag that ended without an edit (or was cancelled) shows nothing.
+        if self.drag.is_none() {
+            let mut s = session.lock();
+            if s.key_preview
+                .as_ref()
+                .is_some_and(|k| k.owner == "graph" && k.committed.is_none())
+            {
+                s.key_preview = None;
+            }
+        }
         self.button_bar(ui, cx, session, info, bar, &frame, &mut out);
         #[cfg(test)]
         {
@@ -1922,6 +2048,7 @@ impl GraphEditor {
                 .map(|h| (h.key.clone(), h.dim, h.side == Side::Out, h.pos))
                 .collect();
             self.last.selection_box = frame.selection_box;
+            self.last.box_anchor = frame.selection_box.map(|_| frame.box_anchor);
             self.last.vaxes = frame
                 .props
                 .iter()
@@ -1996,6 +2123,7 @@ impl GraphEditor {
             keys: Vec::new(),
             handles: Vec::new(),
             selection_box: None,
+            box_anchor: Pos2::ZERO,
         };
         for (pi, p) in props.iter().enumerate() {
             let Some(data) = self.sampled(p, axis, area, p.speed) else {
@@ -2035,12 +2163,17 @@ impl GraphEditor {
                 .collect();
             let distinct = pts.iter().any(|p| p.distance(pts[0]) > 0.5);
             if pts.len() >= 2 && distinct {
-                f.selection_box = Some(Rect::from_points(&pts));
+                let r = Rect::from_points(&pts);
+                f.selection_box = Some(r);
+                let a = self.anchor_for(selected);
+                f.box_anchor = r.min + a * r.size();
             }
         }
         f
     }
 
+    /// Draws the graphs; returns the x of the layer markers drawn.
+    #[allow(clippy::too_many_arguments)]
     fn paint(
         &self,
         ui: &Ui,
@@ -2049,7 +2182,20 @@ impl GraphEditor {
         axis: &TimeAxis,
         area: Rect,
         selected: &[KeyRef],
-    ) {
+        waveform: &mut dyn FnMut(&Ui, &PrimPath, Rect),
+    ) -> Vec<f32> {
+        let mut layers: Vec<&PrimPath> = Vec::new();
+        for prop in &f.props {
+            if !layers.contains(&&prop.layer) {
+                layers.push(&prop.layer);
+            }
+        }
+        // Audio waveforms of the shown layers, behind everything (AE).
+        if self.settings.show_waveforms {
+            for layer in &layers {
+                waveform(ui, layer, area);
+            }
+        }
         let p = ui.painter().with_clip_rect(area);
         let focus = f
             .props
@@ -2106,6 +2252,22 @@ impl GraphEditor {
                         theme::font(16.0),
                         color::TEXT_DIM,
                     );
+                }
+            }
+        }
+        // Layer markers along the bottom (AE).
+        let mut marker_xs = Vec::new();
+        if self.settings.show_markers {
+            for layer in &layers {
+                for (m, t) in bae_motion::markers::markers_of(stage, layer) {
+                    let x = axis.x(query::to_comp_time(stage, &m, t));
+                    let b = area.bottom() - 2.0;
+                    p.add(egui::Shape::convex_polygon(
+                        vec![pos2(x, b - 7.0), pos2(x + 4.0, b), pos2(x - 4.0, b)],
+                        color::TEXT_DIM,
+                        Stroke::NONE,
+                    ));
+                    marker_xs.push(x);
                 }
             }
         }
@@ -2182,6 +2344,12 @@ impl GraphEditor {
                     color::TEXT_STRONG,
                 );
             }
+            // Anchor point: a small crosshair circle (AE).
+            let a = f.box_anchor;
+            let stroke = Stroke::new(1.0, color::TEXT_STRONG);
+            p.circle_stroke(a, 3.5, stroke);
+            p.line_segment([a - vec2(6.0, 0.0), a + vec2(6.0, 0.0)], stroke);
+            p.line_segment([a - vec2(0.0, 6.0), a + vec2(0.0, 6.0)], stroke);
         }
         if f.props.is_empty() {
             p.text(
@@ -2192,6 +2360,7 @@ impl GraphEditor {
                 color::TEXT_DIM,
             );
         }
+        marker_xs
     }
 }
 
@@ -2441,15 +2610,70 @@ fn bar_button(
     resp.on_hover_text(label)
 }
 
-fn menu_check(ui: &mut Ui, on: &mut bool, label: &str) -> bool {
-    widgets::checkbox(ui, on, label).clicked()
+/// Right-click on the graph's empty space (AE 26, 14 entries; `None` is a
+/// separator).
+pub(crate) const AREA_MENU: [Option<&str>; 17] = [
+    Some("Auto-Zoom Graph Height"),
+    Some("Show Selected Properties"),
+    None,
+    Some("Show Animated Properties"),
+    Some("Show Graph Editor Set"),
+    Some("Auto-Select Graph Type"),
+    Some("Edit Value Graph"),
+    None,
+    Some("Edit Speed Graph"),
+    Some("Show Reference Graph"),
+    Some("Snap"),
+    Some("Show Audio Waveforms"),
+    Some("Show Layer In/Out Points"),
+    None,
+    Some("Show Layer Markers"),
+    Some("Show Graph Tool Tips"),
+    Some("Show Expression Editor"),
+];
+
+fn area_menu(ui: &mut Ui, s: &mut GraphSettings) {
+    ui.set_min_width(240.0);
+    for entry in AREA_MENU {
+        let Some(title) = entry else {
+            ui.separator();
+            continue;
+        };
+        let label = tr(title);
+        let graph_type = match title {
+            "Auto-Select Graph Type" => Some(GraphType::Auto),
+            "Edit Value Graph" => Some(GraphType::Value),
+            "Edit Speed Graph" => Some(GraphType::Speed),
+            _ => None,
+        };
+        if let Some(t) = graph_type {
+            if ui.radio(s.graph_type == t, label).clicked() {
+                s.graph_type = t;
+                ui.close();
+            }
+            continue;
+        }
+        let on = match title {
+            "Auto-Zoom Graph Height" => &mut s.auto_zoom,
+            "Show Selected Properties" => &mut s.show_selected,
+            "Show Animated Properties" => &mut s.show_animated,
+            "Show Graph Editor Set" => &mut s.show_set,
+            "Show Reference Graph" => &mut s.show_reference,
+            "Snap" => &mut s.snap,
+            "Show Audio Waveforms" => &mut s.show_waveforms,
+            "Show Layer In/Out Points" => &mut s.show_in_out,
+            "Show Layer Markers" => &mut s.show_markers,
+            "Show Graph Tool Tips" => &mut s.show_tooltips,
+            _ => &mut s.show_expression_editor,
+        };
+        if menu_check(ui, on, label) {
+            ui.close();
+        }
+    }
 }
 
-fn menu_check_disabled(ui: &mut Ui, label: &str) {
-    ui.add_enabled_ui(false, |ui| {
-        let mut off = false;
-        widgets::checkbox(ui, &mut off, label);
-    });
+fn menu_check(ui: &mut Ui, on: &mut bool, label: &str) -> bool {
+    widgets::checkbox(ui, on, label).clicked()
 }
 
 const POSITION_FAMILY: [&str; 4] = [
@@ -2558,9 +2782,9 @@ impl GraphEditor {
             }
             ui.separator();
             menu_check(ui, &mut s.show_reference, tr("Show Reference Graph"));
-            menu_check_disabled(ui, tr("Show Audio Waveforms"));
+            menu_check(ui, &mut s.show_waveforms, tr("Show Audio Waveforms"));
             menu_check(ui, &mut s.show_in_out, tr("Show Layer In/Out Points"));
-            menu_check_disabled(ui, tr("Show Layer Markers"));
+            menu_check(ui, &mut s.show_markers, tr("Show Layer Markers"));
             menu_check(ui, &mut s.show_tooltips, tr("Show Graph Tool Tips"));
             menu_check(
                 ui,
@@ -2758,6 +2982,15 @@ impl GraphEditor {
         let _ = info;
     }
 
+    /// The transform box anchor (fractions of the box) for the selected keys:
+    /// where it was dragged to for these keys, else the centre.
+    fn anchor_for(&self, selected: &[KeyRef]) -> egui::Vec2 {
+        match &self.box_anchor {
+            Some((keys, a)) if keys.as_slice() == selected => *a,
+            _ => vec2(0.5, 0.5),
+        }
+    }
+
     /// Fit the time axis (and, with Auto-Zoom off, each graph's height) to the
     /// selected keys or to every key.
     fn fit(&mut self, f: &Frame, only: Option<&[KeyRef]>, out: &mut GraphOut) {
@@ -2839,15 +3072,18 @@ impl GraphEditor {
         } else {
             expr.source.clone()
         };
-        let (font, text, bg) = crate::common::expression_style(cx.resources);
-        let r = ui
-            .put(
-                strip.shrink2(vec2(4.0, 1.0)),
-                egui::TextEdit::singleline(&mut buf)
-                    .font(font)
-                    .text_color(text)
-                    .background_color(bg),
-            )
+        let field_id = ui.make_persistent_id(("graph expression", &path, &attr));
+        let shown = crate::expr_menu::assist::show(
+            ui,
+            cx.resources,
+            strip.shrink2(vec2(4.0, 1.0)),
+            field_id,
+            &mut buf,
+            None,
+        );
+        let r = shown
+            .response
+            .response
             .labeled(egui::WidgetType::TextEdit, tr("Expression"));
         if r.changed() || r.has_focus() {
             self.expr_buf = Some((path.clone(), attr.clone(), buf.clone()));
@@ -2862,6 +3098,72 @@ impl GraphEditor {
             }
         }
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Graph Editor (AE-UI-077 … 083): AE's Simplified Chinese wording.
+    ("Graph Editor", "图表编辑器"),
+    ("Graph Editor Set", "图表编辑器集"),
+    (
+        "Choose which properties are shown in the graph editor",
+        "选择图表编辑器中显示的属性",
+    ),
+    ("Show Selected Properties", "显示选择的属性"),
+    ("Show Animated Properties", "显示动画属性"),
+    ("Show Graph Editor Set", "显示图表编辑器集"),
+    ("Choose graph type and options", "选择图表类型和选项"),
+    ("Auto-Select Graph Type", "自动选择图表类型"),
+    ("Edit Value Graph", "编辑值图表"),
+    ("Edit Speed Graph", "编辑速度图表"),
+    ("Show Reference Graph", "显示参考图表"),
+    ("Show Audio Waveforms", "显示音频波形"),
+    ("Show Layer In/Out Points", "显示图层的入点/出点"),
+    ("Show Layer Markers", "显示图层标记"),
+    ("Show Graph Tool Tips", "显示图表工具技巧"),
+    ("Show Expression Editor", "显示表达式编辑器"),
+    ("Allow Keyframes Between Frames", "允许帧之间的关键帧"),
+    (
+        "Show Transform Box when multiple keys are selected",
+        "选择多个关键帧时，显示变换框",
+    ),
+    ("Snap", "对齐"),
+    ("Auto-zoom graph height", "自动缩放图表高度"),
+    ("Fit selection to view", "使选择适于查看"),
+    ("Fit all graphs to view", "使所有图表适于查看"),
+    ("Separate Dimensions", "单独尺寸"),
+    ("Edit selected keyframes", "编辑选定的关键帧"),
+    (
+        "Convert selected keyframes to Hold",
+        "将选定的关键帧转换为定格",
+    ),
+    (
+        "Convert selected keyframes to Linear",
+        "将选定的关键帧转换为线性",
+    ),
+    (
+        "Convert selected keyframes to Auto Bezier",
+        "将选定的关键帧转换为自动贝塞尔曲线",
+    ),
+    ("sec", "秒"),
+    ("X Position", "X 位置"),
+    ("Y Position", "Y 位置"),
+    ("Z Position", "Z 位置"),
+    (
+        "Select a property to show its graph",
+        "选择属性以显示其图表",
+    ),
+    (
+        "No expression on the focused property",
+        "当前属性没有表达式",
+    ),
+    ("Edit Keyframes", "编辑关键帧"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
 }
 
 #[cfg(test)]
@@ -3004,6 +3306,42 @@ mod tests {
         for (_, v) in &pieces[0].pts {
             assert!((v - 500.0).abs() < 1e-3, "{v}");
         }
+    }
+
+    /// #552: a linear segment's constant speed draws as a level line, not as its
+    /// rounding noise fitted to the full height.
+    #[test]
+    fn constant_speed_draws_level() {
+        let lin = prop(
+            "transform:position",
+            vec![
+                (62.0 / 30.0, Keyframe::linear([960.0, 540.0, 0.0])),
+                (242.0 / 30.0, Keyframe::linear([1500.0, 540.0, 0.0])),
+            ],
+            true,
+            true,
+        );
+        let axis = TimeAxis {
+            left: 0.0,
+            width: 1500.0,
+            start: Time::ZERO,
+            span: Time::from_seconds(10.0),
+        };
+        let c = lin.curve().unwrap();
+        let data = Sampled::new(
+            sample(&lin, &c, &axis, 0.0, 1500.0, true),
+            key_values(&lin, &c, true),
+        );
+        let va = VAxis::new(
+            padded(data.range.unwrap()),
+            Rect::from_min_size(Pos2::ZERO, vec2(1500.0, 300.0)),
+        );
+        let ys: Vec<f32> = data.pieces[0].pts.iter().map(|(_, v)| va.y(*v)).collect();
+        let (lo, hi) = ys
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(*y), b.max(*y)));
+        assert!(hi - lo < 0.5, "a level line, not spikes: {lo}..{hi}");
+        assert!((va.v(lo) - 90.0).abs() < 1e-6);
     }
 
     #[test]

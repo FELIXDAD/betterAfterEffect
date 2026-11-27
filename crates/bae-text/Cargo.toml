@@ -19,6 +19,8 @@ bae-model.workspace = true
 bae-anim.workspace = true
 bae-vector.workspace = true
 fontique.workspace = true
+icu_properties = { version = "2.3", default-features = false, features = ["compiled_data"] }
+icu_segmenter = { version = "2.3", default-features = false, features = ["compiled_data"] }
 kurbo.workspace = true
 parley.workspace = true
 rustc-hash.workspace = true
@@ -31,6 +33,8 @@ vello = { workspace = true, optional = true }
 vello_cpu = { workspace = true, optional = true }
 
 [dev-dependencies]
+png.workspace = true
+serde_json.workspace = true
 # GPU tests always run with the `render` feature (`cargo test -p bae-text`).
 bae-text = { path = ".", features = ["render"] }
 bae-gpu.workspace = true

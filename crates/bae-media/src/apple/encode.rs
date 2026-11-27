@@ -52,7 +52,7 @@ use crate::frame::{CpuFrame, PixelFormat};
 use crate::meta::{AlphaMode, ColorPrimaries, MatrixCoefficients};
 use crate::source::MediaError;
 
-fn writer_error(writer: &AVAssetWriter, what: &str) -> MediaError {
+pub(super) fn writer_error(writer: &AVAssetWriter, what: &str) -> MediaError {
     // SAFETY: error query.
     let detail = unsafe { writer.error() }
         .map(|e| e.localizedDescription().to_string())
@@ -69,11 +69,13 @@ fn ns(s: &CFString) -> &NSString {
     unsafe { &*std::ptr::from_ref(s).cast::<NSString>() }
 }
 
-fn any<T: AsRef<AnyObject> + ?Sized>(obj: &T) -> &AnyObject {
+pub(super) fn any<T: AsRef<AnyObject> + ?Sized>(obj: &T) -> &AnyObject {
     obj.as_ref()
 }
 
-fn dict(entries: &[(&NSString, &AnyObject)]) -> Retained<NSDictionary<NSString, AnyObject>> {
+pub(super) fn dict(
+    entries: &[(&NSString, &AnyObject)],
+) -> Retained<NSDictionary<NSString, AnyObject>> {
     let keys: Vec<&NSString> = entries.iter().map(|(k, _)| *k).collect();
     let values: Vec<&AnyObject> = entries.iter().map(|(_, v)| *v).collect();
     NSDictionary::from_slices(&keys, &values)
@@ -94,6 +96,84 @@ fn is_mp4(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "mp4" | "m4v"))
+}
+
+/// Prepare the system codecs one at a time on the low-priority warm-up thread.
+pub struct EncoderWarmUp;
+
+impl bae_gpu::WarmUp for EncoderWarmUp {
+    fn name(&self) -> &str {
+        "QuickTime encoders"
+    }
+
+    fn run(&self, _: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        use objc2_core_media::{
+            kCMVideoCodecType_AppleProRes422, kCMVideoCodecType_AppleProRes422HQ,
+            kCMVideoCodecType_AppleProRes4444, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC,
+        };
+
+        let mut errors = Vec::new();
+        for codec in [
+            kCMVideoCodecType_H264,
+            kCMVideoCodecType_AppleProRes422,
+            kCMVideoCodecType_AppleProRes422HQ,
+            kCMVideoCodecType_AppleProRes4444,
+            kCMVideoCodecType_HEVC,
+        ] {
+            if let Err(error) = prepare_codec(codec) {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join(", "))
+        }
+    }
+}
+
+fn prepare_codec(codec: objc2_core_media::CMVideoCodecType) -> Result<(), String> {
+    use objc2_core_foundation::{CFBoolean, CFDictionary};
+    use objc2_video_toolbox::VTCompressionSession;
+
+    // SAFETY: the key is a process-lifetime VideoToolbox constant.
+    let hardware = CFDictionary::from_slices(
+        &[unsafe { kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder }],
+        &[CFBoolean::new(true)],
+    );
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: no frames or callbacks are scheduled. The session is owned by
+    // this worker and invalidated before preparing the next codec.
+    let status = unsafe {
+        let created = VTCompressionSession::create(
+            None,
+            128,
+            128,
+            codec,
+            Some(hardware.as_opaque()),
+            None,
+            None,
+            None,
+            std::ptr::null_mut(),
+            NonNull::from(&mut raw),
+        );
+        let Some(ptr) = NonNull::new(raw) else {
+            return Err(format!("VTCompressionSessionCreate({codec:#x}): {created}"));
+        };
+        let session = CFRetained::from_raw(ptr);
+        let status = if created == 0 {
+            session.prepare_to_encode_frames()
+        } else {
+            created
+        };
+        session.invalidate();
+        status
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("prepare encoder {codec:#x}: {status}"))
+    }
 }
 
 /// Encoder format for QuickTime / MPEG-4 movies through AVFoundation.
@@ -119,10 +199,18 @@ pub struct AvWriterEncoder {
     settings: EncodeSettings,
     writer: Retained<AVAssetWriter>,
     input: Retained<AVAssetWriterInput>,
+    audio: Option<super::audio_input::AudioInput>,
     adaptor: Retained<AVAssetWriterInputPixelBufferAdaptor>,
     pixel_format: PixelFormat,
     frame_alpha: AlphaMode,
     frames: u64,
+    /// Audio handed over but not yet taken by the writer: appended as soon as
+    /// its input is ready, never waited for (#793).
+    pending_audio: std::collections::VecDeque<crate::AudioBuffer>,
+    /// No more audio follows; the input is marked finished once the queue
+    /// is written (`audio_finished`).
+    audio_complete: bool,
+    audio_finished: bool,
 }
 
 // SAFETY: the AVFoundation objects are only used through `&mut self` / `self`,
@@ -194,6 +282,11 @@ impl AvWriterEncoder {
                 return Err(writer_error(&writer, "cannot add the video input"));
             }
             writer.addInput(&input);
+            let audio = settings
+                .audio
+                .as_ref()
+                .map(|a| super::audio_input::AudioInput::add(&writer, a))
+                .transpose()?;
 
             let format = NSNumber::new_u32(cv_format);
             let width = NSNumber::new_u32(settings.width);
@@ -220,12 +313,25 @@ impl AvWriterEncoder {
                 adaptor,
                 pixel_format,
                 frame_alpha,
+                audio,
                 frames: 0,
+                pending_audio: Default::default(),
+                audio_complete: false,
+                audio_finished: false,
             })
         }
     }
 
-    fn pixel_buffer(&self, frame: &CpuFrame) -> Result<CFRetained<CVPixelBuffer>, MediaError> {
+    fn pixel_buffer(
+        &self,
+        bytes: &[u8],
+        source_stride: usize,
+    ) -> Result<CFRetained<CVPixelBuffer>, MediaError> {
+        let row = self.settings.width as usize * self.pixel_format.bytes_per_pixel() as usize;
+        let rows = self.settings.height as usize;
+        if source_stride < row || bytes.len() / source_stride < rows {
+            return Err(MediaError::Unsupported("invalid source row layout".into()));
+        }
         // SAFETY: the pool exists once writing started; the buffer is locked
         // while written, rows are `stride` apart and at least `row` bytes long.
         unsafe {
@@ -243,26 +349,87 @@ impl AvWriterEncoder {
                     framework: "CoreVideo",
                     message: format!("CVPixelBufferPoolCreatePixelBuffer failed ({status})"),
                 })?;
-            CVPixelBufferLockBaseAddress(&buffer, CVPixelBufferLockFlags(0));
+            if CVPixelBufferLockBaseAddress(&buffer, CVPixelBufferLockFlags(0)) != kCVReturnSuccess
+            {
+                return Err(writer_error(&self.writer, "cannot lock pixel buffer"));
+            }
             let base = CVPixelBufferGetBaseAddress(&buffer).cast::<u8>();
             let stride = CVPixelBufferGetBytesPerRow(&buffer);
-            let row = frame.bytes_per_row() as usize;
-            for y in 0..frame.height as usize {
-                std::ptr::copy_nonoverlapping(
-                    frame.data.as_ptr().add(y * row),
-                    base.add(y * stride),
-                    row,
-                );
+            if base.is_null() || stride < row {
+                CVPixelBufferUnlockBaseAddress(&buffer, CVPixelBufferLockFlags(0));
+                return Err(writer_error(&self.writer, "invalid pixel buffer layout"));
+            }
+            if stride == row && source_stride == row {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), base, row * rows);
+            } else {
+                for y in 0..rows {
+                    std::ptr::copy_nonoverlapping(
+                        bytes.as_ptr().add(y * source_stride),
+                        base.add(y * stride),
+                        row,
+                    );
+                }
             }
             CVPixelBufferUnlockBaseAddress(&buffer, CVPixelBufferLockFlags(0));
             Ok(buffer)
         }
     }
 
-    fn wait_ready(&self) -> Result<(), MediaError> {
+    fn append_rows(&mut self, bytes: &[u8], stride: usize) -> Result<(), MediaError> {
+        let buffer = self.pixel_buffer(bytes, stride)?;
+        // The writer interleaves: with uncompressed audio it takes the next
+        // frame only once audio ahead of it is in, so queued audio goes in
+        // while the frame waits (#793: PCM audio deadlocked the export).
+        // SAFETY: status queries on a writing session.
+        while !unsafe { self.input.isReadyForMoreMediaData() } {
+            // SAFETY: a status query on a writing session.
+            if unsafe { self.writer.status() } == AVAssetWriterStatus::Failed {
+                return Err(writer_error(&self.writer, "encoding failed"));
+            }
+            if !self.drain_audio()? {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        let rate = self.settings.frame_rate;
+        // SAFETY: building a time and appending a pool buffer to a writing session.
+        let appended = unsafe {
+            let time = CMTime::new(self.frames as i64 * i64::from(rate.den), rate.num as i32);
+            self.adaptor
+                .appendPixelBuffer_withPresentationTime(&buffer, time)
+        };
+        if !appended {
+            return Err(writer_error(&self.writer, "cannot append a frame"));
+        }
+        self.frames += 1;
+        Ok(())
+    }
+
+    /// Appends queued audio while its input takes it; whether any went in.
+    fn drain_audio(&mut self) -> Result<bool, MediaError> {
+        let Some(audio) = self.audio.as_mut() else {
+            return Ok(false);
+        };
+        let mut appended = false;
+        // SAFETY: a status query on a writing session.
+        while !self.pending_audio.is_empty() && unsafe { audio.input.isReadyForMoreMediaData() } {
+            let pcm = self.pending_audio.pop_front().expect("queued audio");
+            audio.append(&self.writer, &pcm)?;
+            appended = true;
+        }
+        // All of it is in: the writer stops waiting for audio past its end.
+        if self.audio_complete && self.pending_audio.is_empty() && !self.audio_finished {
+            // SAFETY: closing one input of a writing session.
+            unsafe { audio.input.markAsFinished() };
+            self.audio_finished = true;
+            appended = true;
+        }
+        Ok(appended)
+    }
+
+    fn wait_ready(&self, input: &AVAssetWriterInput) -> Result<(), MediaError> {
         // SAFETY: status queries on a writing session.
         unsafe {
-            while !self.input.isReadyForMoreMediaData() {
+            while !input.isReadyForMoreMediaData() {
                 if self.writer.status() == AVAssetWriterStatus::Failed {
                     return Err(writer_error(&self.writer, "encoding failed"));
                 }
@@ -426,20 +593,25 @@ impl Encoder for AvWriterEncoder {
             )));
         }
         let converted = convert_frame_cow(frame, self.pixel_format, self.frame_alpha);
-        let buffer = self.pixel_buffer(&converted)?;
-        self.wait_ready()?;
-        let rate = self.settings.frame_rate;
-        // SAFETY: building a time and appending a pool buffer to a writing session.
-        let appended = unsafe {
-            let time = CMTime::new(self.frames as i64 * i64::from(rate.den), rate.num as i32);
-            self.adaptor
-                .appendPixelBuffer_withPresentationTime(&buffer, time)
-        };
-        if !appended {
-            return Err(writer_error(&self.writer, "cannot append a frame"));
+        self.append_rows(&converted.data, converted.bytes_per_row() as usize)
+    }
+
+    fn push_mapped_rows(
+        &mut self,
+        format: PixelFormat,
+        alpha: AlphaMode,
+        size: [u32; 2],
+        stride: usize,
+        bytes: &[u8],
+    ) -> Result<bool, MediaError> {
+        if format != self.pixel_format
+            || alpha != self.frame_alpha
+            || size != [self.settings.width, self.settings.height]
+        {
+            return Ok(false);
         }
-        self.frames += 1;
-        Ok(())
+        self.append_rows(bytes, stride)?;
+        Ok(true)
     }
 
     fn frames_written(&self) -> u64 {
@@ -450,19 +622,49 @@ impl Encoder for AvWriterEncoder {
         Some((self.pixel_format, self.frame_alpha))
     }
 
+    fn push_audio(&mut self, pcm: &crate::AudioBuffer) -> Result<(), MediaError> {
+        if self.audio.is_none() {
+            return Err(MediaError::Unsupported("no audio stream".into()));
+        }
+        self.settings
+            .audio
+            .as_ref()
+            .expect("configured audio")
+            .validate_input(pcm)?;
+        self.pending_audio.push_back(pcm.clone());
+        self.drain_audio().map(|_| ())
+    }
+
+    fn end_audio(&mut self) -> Result<(), MediaError> {
+        self.audio_complete = true;
+        self.drain_audio().map(|_| ())
+    }
+
     fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {
+        let mut this = self;
         // SAFETY: closing a writing session.
         unsafe {
-            self.input.markAsFinished();
+            // The video ends first, so the writer takes the rest of the audio.
+            this.input.markAsFinished();
+            while !this.pending_audio.is_empty() {
+                let input = &this.audio.as_ref().expect("configured audio").input;
+                this.wait_ready(input)?;
+                this.drain_audio()?;
+            }
+            if let Some(audio) = &this.audio
+                && !this.audio_finished
+            {
+                audio.input.markAsFinished();
+            }
             #[allow(deprecated)]
-            let finished = self.writer.finishWriting();
-            if !finished || self.writer.status() != AVAssetWriterStatus::Completed {
-                return Err(writer_error(&self.writer, "cannot finish the movie"));
+            let finished = this.writer.finishWriting();
+            if !finished || this.writer.status() != AVAssetWriterStatus::Completed {
+                return Err(writer_error(&this.writer, "cannot finish the movie"));
             }
         }
         Ok(EncodeOutput {
-            files: vec![self.settings.path.clone()],
-            frames: self.frames,
+            files: vec![this.settings.path.clone()],
+            frames: this.frames,
             stats: crate::export::EncodeStats {
                 threads: 1,
                 ..Default::default()

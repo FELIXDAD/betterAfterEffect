@@ -123,16 +123,37 @@ pub type MenuEnabled = dyn Fn(&MenuContext<'_>) -> bool + Send + Sync;
 
 /// Decides whether a checkable item shows a check mark.
 pub type MenuChecked = dyn Fn(&MenuContext<'_>) -> bool + Send + Sync;
+/// A title that follows the state (shown as given, already translated).
+pub type MenuLabel = dyn Fn(&MenuContext<'_>) -> Option<String> + Send + Sync;
 
 /// Where an entry sits in one level of the menu: entries sort by `(group,
 /// order)`; a separator goes between groups. `sorted`: the entry is placed by its
 /// localized title among the sorted entries of its group (AE's panel list).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct MenuPos {
     pub group: i32,
     pub order: i32,
     pub sorted: bool,
+    /// For a sorted entry: the key its localized title sorts by, when not the
+    /// title itself (AE sorts its Effect menu by pinyin in Chinese).
+    pub collate: Option<fn(&str) -> String>,
 }
+
+/// Positions compare by place; a collation key only by whether there is one
+/// (function addresses are not meaningful).
+impl PartialEq for MenuPos {
+    fn eq(&self, other: &Self) -> bool {
+        (self.group, self.order, self.sorted, self.collate.is_some())
+            == (
+                other.group,
+                other.order,
+                other.sorted,
+                other.collate.is_some(),
+            )
+    }
+}
+
+impl Eq for MenuPos {}
 
 impl MenuPos {
     pub const fn new(group: i32, order: i32) -> Self {
@@ -140,7 +161,15 @@ impl MenuPos {
             group,
             order,
             sorted: false,
+            collate: None,
         }
+    }
+
+    /// Sorted by `key` of the localized title.
+    pub const fn collated(mut self, key: fn(&str) -> String) -> Self {
+        self.sorted = true;
+        self.collate = Some(key);
+        self
     }
 
     pub const fn sorted(mut self) -> Self {
@@ -156,6 +185,8 @@ pub struct MenuItemSpec {
     pub path: Vec<String>,
     /// English title of the item.
     pub title: String,
+    /// Optional package-supplied Simplified Chinese title.
+    pub title_zh: Option<String>,
     /// Command id run when the item is chosen.
     pub action: String,
     /// Parameters of the command (`Null` = none).
@@ -172,8 +203,11 @@ pub struct MenuItemSpec {
     pub is_placeholder: bool,
     /// Greyed until a module handles the action ([`MenuItemSpec::needs_handler`]).
     pub handler_needed: bool,
+    /// The letter Alt picks on Windows (AE's underlined letter), if any.
+    pub mnemonic: Option<char>,
     enabled: Option<Arc<MenuEnabled>>,
     checked: Option<Arc<MenuChecked>>,
+    label: Option<Arc<MenuLabel>>,
 }
 
 impl std::fmt::Debug for MenuItemSpec {
@@ -194,11 +228,22 @@ impl std::fmt::Debug for MenuItemSpec {
 }
 
 impl MenuItemSpec {
+    /// Menu label in the active language.
+    pub fn display_title(&self) -> &str {
+        if crate::i18n::lang() == crate::i18n::Lang::Zh
+            && let Some(title) = &self.title_zh
+        {
+            return title;
+        }
+        crate::i18n::tr(&self.title)
+    }
+
     /// An item in `path` (English menu titles) running `action`.
     pub fn new(path: &[&str], title: impl Into<String>, action: impl Into<String>) -> Self {
         MenuItemSpec {
             path: path.iter().map(|s| (*s).to_owned()).collect(),
             title: title.into(),
+            title_zh: None,
             action: action.into(),
             params: serde_json::Value::Null,
             group: 0,
@@ -207,9 +252,17 @@ impl MenuItemSpec {
             levels: Vec::new(),
             is_placeholder: false,
             handler_needed: false,
+            mnemonic: None,
             enabled: None,
             checked: None,
+            label: None,
         }
+    }
+
+    /// The Windows menu mnemonic (Alt+letter).
+    pub fn mnemonic(mut self, letter: Option<char>) -> Self {
+        self.mnemonic = letter;
+        self
     }
 
     pub fn params(mut self, params: serde_json::Value) -> Self {
@@ -259,6 +312,21 @@ impl MenuItemSpec {
     ) -> Self {
         self.checked = Some(Arc::new(f));
         self
+    }
+
+    /// A title that follows the state (AE's Window ▸ "Composition: Comp 1"):
+    /// `f` gives the shown text, already translated; `None` keeps the title.
+    pub fn label_when(
+        mut self,
+        f: impl Fn(&MenuContext<'_>) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.label = Some(Arc::new(f));
+        self
+    }
+
+    /// The text shown now, when it follows the state ([`MenuItemSpec::label_when`]).
+    pub fn label(&self, cx: &MenuContext<'_>) -> Option<String> {
+        self.label.as_ref().and_then(|f| f(cx))
     }
 
     /// Holds a place without being shown: the submenu of its path exists even
@@ -431,6 +499,7 @@ impl Level {
                 Node::Sub(title, _) if pos.sorted => localize(title),
                 _ => String::new(),
             };
+            let title = pos.collate.map_or(title.clone(), |key| key(&title));
             let unsorted = (!pos.sorted).then_some((pos.order, *index));
             (pos.group, unsorted, title)
         });

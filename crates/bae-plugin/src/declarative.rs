@@ -13,9 +13,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use bae_gpu::GpuContext;
-use bae_gpu::wgpu::{self, util::DeviceExt as _};
-use bae_model::{EffectDef, Value};
-use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
+use bae_gpu::wgpu;
+use bae_model::{EffectDef, Value, effect::PointDefaultSpace};
+use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, ImageAlpha, RenderError};
 use parking_lot::Mutex;
 
 use crate::diag::Diagnostic;
@@ -33,7 +33,7 @@ struct Slot {
     id: u32,
     ty: ParamType,
     default: [f64; 4],
-    relative: bool,
+    point_space: PointDefaultSpace,
     range: Option<[f64; 2]>,
     choices: usize,
 }
@@ -49,6 +49,8 @@ pub struct DeclarativeEffect {
     identity: Option<Expr>,
     /// Read margins `[left, top, right, bottom]`.
     margins: [Option<Expr>; 4],
+    canvas_size: Option<[Expr; 2]>,
+    whole_input: bool,
     extent: RoiExtent,
     grows: bool,
     sources: Vec<Source>,
@@ -89,7 +91,11 @@ impl DeclarativeEffect {
                     id: p.id,
                     ty: p.ty,
                     default,
-                    relative: p.is_relative_point(),
+                    point_space: if p.is_relative_point() {
+                        PointDefaultSpace::LayerFraction
+                    } else {
+                        PointDefaultSpace::Pixels
+                    },
                     range: matches!(p.ty, ParamType::Float | ParamType::Int)
                         .then(|| p.valid_range()),
                     choices: p.choices.as_ref().map_or(0, Vec::len),
@@ -127,6 +133,11 @@ impl DeclarativeEffect {
             }
             None => ([None, None, None, None], None, false),
         };
+        let whole_input = decl.roi.as_ref().is_some_and(|r| r.whole_input);
+        let canvas_size = match decl.roi.as_ref().and_then(|r| r.size.as_ref()) {
+            Some([w, h]) => Some([parse(w)?, parse(h)?]),
+            None => None,
+        };
         let extent = extent.unwrap_or(match decl.class {
             EffectClass::Generator => RoiExtent::Layer,
             _ => RoiExtent::Input,
@@ -138,6 +149,8 @@ impl DeclarativeEffect {
             files: effect.shader_files.clone(),
             slots,
             scalar_slots,
+            canvas_size,
+            whole_input,
             identity,
             margins,
             extent,
@@ -185,6 +198,9 @@ impl DeclarativeEffect {
                 fx.def.plugin = None;
                 if let Some(ae) = e.decl.ae_match_names.first() {
                     fx.def.match_name = ae.clone();
+                    for param in &mut fx.def.params {
+                        param.match_name = Some(format!("{ae}-{:04}", param.id));
+                    }
                 }
                 Ok(Arc::new(fx))
             })
@@ -270,12 +286,12 @@ impl DeclarativeEffect {
                     let p = match v {
                         Some(Value::Vec2([x, y])) => [*x, *y, 0.0],
                         Some(Value::Vec3([x, y, z])) => [*x, *y, *z],
-                        _ if s.relative => [
-                            s.default[0] * layer_size[0],
-                            s.default[1] * layer_size[1],
-                            s.default[2],
-                        ],
-                        _ => [s.default[0], s.default[1], s.default[2]],
+                        _ => {
+                            let [x, y] = s
+                                .point_space
+                                .layer_pixels([s.default[0], s.default[1]], layer_size);
+                            [x, y, s.default[2]]
+                        }
                     };
                     // Layer pixels → render pixels.
                     [p[0] * scale, p[1] * scale, p[2] * scale, 0.0]
@@ -284,7 +300,11 @@ impl DeclarativeEffect {
             };
             slots.push(x);
         }
-        Values { slots, scale }
+        Values {
+            slots,
+            scale,
+            aspect: f64::from(layer.width()) / f64::from(layer.height().max(1)),
+        }
     }
 
     fn env<'a>(&'a self, values: &'a Values) -> Env<'a> {
@@ -307,6 +327,21 @@ impl DeclarativeEffect {
             Some(e) => (e.eval(&env).max(0.0) * values.scale).ceil().min(1e6) as i32,
             None => 0,
         })
+    }
+
+    fn canvas(&self, values: &Values, input: IRect) -> Option<IRect> {
+        let size = self.canvas_size.as_ref()?;
+        let [w, h] = size.each_ref().map(|dim| {
+            (dim.eval(&self.env(values)) * values.scale)
+                .round()
+                .clamp(1., i32::MAX as f64) as i32
+        });
+        Some(IRect::new(
+            input.x0,
+            input.y0,
+            input.x0.saturating_add(w),
+            input.y0.saturating_add(h),
+        ))
     }
 
     /// The rects of a frame: output and intermediates.
@@ -352,8 +387,21 @@ impl DeclarativeEffect {
         textures: &[GpuImage],
     ) {
         let device = gpu.device();
-        // Params and sources: one buffer each, shared by every pass.
-        let params_buffer = program.params.as_ref().map(|layout| {
+        // Frames, parameters and source descriptors occupy aligned slices of one lease.
+        let pool = &program.uniforms;
+        let buffer = pool
+            .idle
+            .lock()
+            .pop()
+            .unwrap_or_else(|| pool.allocate(device));
+        let binding = |offset: u64, bytes: u64| {
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &buffer,
+                offset,
+                size: wgpu::BufferSize::new(bytes),
+            })
+        };
+        if let Some(layout) = &program.params {
             let mut bytes = vec![0u8; layout.buffer_size() as usize];
             for ((slot, v), &offset) in self
                 .slots
@@ -363,36 +411,39 @@ impl DeclarativeEffect {
             {
                 pack_param(&mut bytes, offset as usize, slot.ty, v);
             }
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("bae-plugin params"),
-                contents: &bytes,
-                usage: wgpu::BufferUsages::UNIFORM,
-            })
-        });
+            gpu.queue().write_buffer(&buffer, pool.params_at, &bytes);
+        }
         let mut src_bytes = vec![0u8; program.sources.buffer_size() as usize];
         for (i, src) in self.sources.iter().enumerate() {
-            let rect = match src {
-                Source::Input => input.rect,
+            let image = match src {
+                Source::Input => Some(input),
                 Source::Texture(name) => self
                     .decl
                     .textures
                     .iter()
                     .position(|t| &t.name == name)
-                    .map_or(IRect::EMPTY, |k| textures[k].rect),
-                // Transitions and layer params need render-graph support (R04-1).
-                Source::To | Source::LayerParam(_) => IRect::EMPTY,
+                    .map(|k| &textures[k]),
+                Source::To | Source::LayerParam(_) => None,
             };
-            let o = program.source_offsets[i] as usize;
-            for (k, x) in [rect.x0, rect.y0, rect.x1, rect.y1].into_iter().enumerate() {
-                src_bytes[o + 4 * k..o + 4 * k + 4].copy_from_slice(&x.to_le_bytes());
+            if let Some(image) = image {
+                let o = program.source_offsets[i] as usize;
+                let rect = render_rect(image.rect, frame.pixel_scale);
+                put_i32s(&mut src_bytes, o, &[rect.x0, rect.y0, rect.x1, rect.y1]);
+                let map = [
+                    f64::from(image.rect.x0) / frame.pixel_scale,
+                    f64::from(image.rect.y0) / frame.pixel_scale,
+                    frame.pixel_scale / image.pixel_scale,
+                ];
+                for (k, x) in map.into_iter().enumerate() {
+                    src_bytes[o + 16 + 4 * k..o + 20 + 4 * k]
+                        .copy_from_slice(&(x as f32).to_le_bytes());
+                }
+                let [width, height] = image.texel_size();
+                put_i32s(&mut src_bytes, o + 32, &[width as i32, height as i32]);
             }
         }
-        let sources_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("bae-plugin sources"),
-            contents: &src_bytes,
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-
+        gpu.queue()
+            .write_buffer(&buffer, pool.sources_at, &src_bytes);
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(self.def.match_name.as_str()),
             timestamp_writes: None,
@@ -402,30 +453,28 @@ impl DeclarativeEffect {
                 PassTarget::Output => output,
                 PassTarget::Texture(k) => &textures[k],
             };
-            let frame_bytes = frame.pack(&program.frame, target.rect, values.scale, index as u32);
-            let frame_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("bae-plugin frame"),
-                contents: &frame_bytes,
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+            let target_rect = render_rect(target.rect, frame.pixel_scale);
+            let frame_bytes = frame.pack(&program.frame, target_rect, values.scale, index as u32);
+            let frame_at = index as u64 * pool.frame_stride;
+            gpu.queue().write_buffer(&buffer, frame_at, &frame_bytes);
             let mut entries = vec![
                 wgpu::BindGroupEntry {
                     binding: wgsl::BINDING_FRAME,
-                    resource: frame_buffer.as_entire_binding(),
+                    resource: binding(frame_at, program.frame.buffer_size()),
                 },
                 wgpu::BindGroupEntry {
                     binding: wgsl::BINDING_SOURCES,
-                    resource: sources_buffer.as_entire_binding(),
+                    resource: binding(pool.sources_at, program.sources.buffer_size()),
                 },
                 wgpu::BindGroupEntry {
                     binding: wgsl::BINDING_OUT,
                     resource: wgpu::BindingResource::TextureView(&target.view),
                 },
             ];
-            if let Some(buffer) = &params_buffer {
+            if let Some(layout) = &program.params {
                 entries.push(wgpu::BindGroupEntry {
                     binding: wgsl::BINDING_PARAMS,
-                    resource: buffer.as_entire_binding(),
+                    resource: binding(pool.params_at, layout.buffer_size()),
                 });
             }
             for (i, src) in self.sources.iter().enumerate() {
@@ -450,7 +499,7 @@ impl DeclarativeEffect {
                 layout: &pass.layout,
                 entries: &entries,
             });
-            let [w, h] = target.rect.size();
+            let [w, h] = target_rect.size();
             if w == 0 || h == 0 {
                 continue;
             }
@@ -462,11 +511,15 @@ impl DeclarativeEffect {
                 1,
             );
         }
+        drop(cpass);
+        let idle = pool.idle.clone();
+        encoder.on_submitted_work_done(move || idle.lock().push(buffer));
     }
 
     /// Renders with explicit GPU objects instead of an `EncodeContext`
     /// (tests, benchmarks and hosts without the render graph). `allocate`
-    /// creates an image covering a rect at a pixel scale in a format.
+    /// creates an image covering a full-resolution rectangle at a pixel scale
+    /// in a format. `output_roi` is in render pixels.
     #[allow(clippy::too_many_arguments)]
     pub fn render_with(
         &self,
@@ -478,20 +531,28 @@ impl DeclarativeEffect {
         input: &GpuImage,
         output_roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        let layer = input.rect;
+        let grid = pixel_scale(params, input);
+        let layer = if self.whole_input {
+            render_rect(input.rect, grid)
+        } else {
+            layer_rect(params, input, grid)
+        };
         let values = self.evaluate(params, layer);
         if self.is_identity(&values) {
             return Ok(input.clone());
         }
         let program = self.program(gpu, format)?;
         let plan = self.plan(&values, output_roi);
-        let output = allocate(plan.output, input.pixel_scale, format)?;
+        let output = allocate(pixel_rect(plan.output, grid), grid, format)?;
         let mut textures = Vec::with_capacity(plan.textures.len());
         for (t, rect) in self.decl.textures.iter().zip(&plan.textures) {
             let f = texture_format(t.format, format);
-            textures.push(allocate(*rect, input.pixel_scale, f)?);
+            textures.push(allocate(pixel_rect(*rect, grid), grid, f)?);
         }
-        let frame = FrameInfo::new(params, layer);
+        let mut frame = FrameInfo::new(params, layer, grid, input.alpha);
+        if let Some(canvas) = self.canvas(&values, layer) {
+            frame.output_rect = canvas;
+        }
         self.encode(
             gpu, encoder, &program, &values, &frame, input, &output, &textures,
         );
@@ -509,6 +570,9 @@ impl Effect for DeclarativeEffect {
         if self.is_identity(&values) {
             return input;
         }
+        if let Some(canvas) = self.canvas(&values, input) {
+            return canvas;
+        }
         match self.extent {
             // Layer bounds are not in EffectParams yet (R04-11): the input
             // extent is the layer's own extent for the first effect.
@@ -524,10 +588,24 @@ impl Effect for DeclarativeEffect {
         }
     }
 
+    fn required_input(&self, params: &EffectParams<'_>, output: IRect, available: IRect) -> IRect {
+        if self.whole_input
+            && !output.is_empty()
+            && !self.is_identity(&self.evaluate(params, available))
+        {
+            available
+        } else {
+            self.input_roi(params, output).intersect(&available)
+        }
+    }
+
     fn input_roi(&self, params: &EffectParams<'_>, output_roi: IRect) -> IRect {
         let values = self.evaluate(params, output_roi);
         if self.is_identity(&values) {
             return output_roi;
+        }
+        if self.whole_input && !params.layer_bounds.is_empty() && !output_roi.is_empty() {
+            return render_rect(params.layer_bounds, 1. / params.scale);
         }
         let [l, t, r, b] = self.margins(&values);
         IRect::new(
@@ -545,7 +623,12 @@ impl Effect for DeclarativeEffect {
         input: &GpuImage,
         output_roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        let layer = input.rect;
+        let grid = pixel_scale(params, input);
+        let layer = if self.whole_input {
+            render_rect(input.rect, grid)
+        } else {
+            layer_rect(params, input, grid)
+        };
         let values = self.evaluate(params, layer);
         if self.is_identity(&values) {
             return Ok(input.clone());
@@ -554,17 +637,20 @@ impl Effect for DeclarativeEffect {
         let gpu = ctx.gpu.clone();
         let program = self.program(&gpu, format)?;
         let plan = self.plan(&values, output_roi);
-        let output = ctx.allocate(plan.output, input.pixel_scale)?;
+        let output = ctx.allocate(pixel_rect(plan.output, grid), grid)?;
         let mut textures = Vec::with_capacity(plan.textures.len());
         for (t, rect) in self.decl.textures.iter().zip(&plan.textures) {
             let f = texture_format(t.format, format);
             textures.push(if f == format {
-                ctx.allocate(*rect, input.pixel_scale)?
+                ctx.allocate(pixel_rect(*rect, grid), grid)?
             } else {
-                create_image(&gpu, *rect, input.pixel_scale, f)?
+                create_image(&gpu, pixel_rect(*rect, grid), grid, f)?
             });
         }
-        let frame = FrameInfo::new(params, layer);
+        let mut frame = FrameInfo::new(params, layer, grid, input.alpha);
+        if let Some(canvas) = self.canvas(&values, layer) {
+            frame.output_rect = canvas;
+        }
         self.encode(
             &gpu,
             ctx.encoder,
@@ -581,6 +667,7 @@ impl Effect for DeclarativeEffect {
 
 /// Evaluated numeric params (render-pixel units for points).
 struct Values {
+    aspect: f64,
     slots: Vec<[f64; 4]>,
     scale: f64,
 }
@@ -591,6 +678,9 @@ struct Env<'a> {
 }
 
 impl ExprEnv for Env<'_> {
+    fn input_aspect(&self) -> f64 {
+        self.values.aspect
+    }
     fn param(&self, index: usize) -> f64 {
         self.effect
             .scalar_slots
@@ -609,23 +699,66 @@ struct Plan {
     textures: Vec<IRect>,
 }
 
+fn pixel_scale(params: &EffectParams<'_>, input: &GpuImage) -> f64 {
+    if params.layer_bounds.is_empty() {
+        input.pixel_scale
+    } else {
+        1.0 / params.scale
+    }
+}
+
+fn layer_rect(params: &EffectParams<'_>, input: &GpuImage, grid: f64) -> IRect {
+    let rect = if params.layer_bounds.is_empty() {
+        input.rect
+    } else {
+        params.layer_bounds
+    };
+    render_rect(rect, grid)
+}
+
+fn render_rect(r: IRect, scale: f64) -> IRect {
+    let min = |value| (f64::from(value) / scale).floor() as i32;
+    let max = |value| (f64::from(value) / scale).ceil() as i32;
+    IRect::new(min(r.x0), min(r.y0), max(r.x1), max(r.y1))
+}
+
+fn pixel_rect(r: IRect, scale: f64) -> IRect {
+    let px = |value| (f64::from(value) * scale).round() as i32;
+    IRect::new(px(r.x0), px(r.y0), px(r.x1), px(r.y1))
+}
+
 /// Per-frame values of `BaeFrame` that do not depend on the pass.
 struct FrameInfo {
     output_rect: IRect,
     layer_bounds: IRect,
+    pixel_scale: f64,
     time: f32,
+    frame_index: i32,
+    frame_rate: f32,
+    time_step: f32,
     seed: u32,
+    flags: u32,
 }
 
 impl FrameInfo {
-    fn new(params: &EffectParams<'_>, layer: IRect) -> Self {
+    fn new(params: &EffectParams<'_>, layer: IRect, pixel_scale: f64, alpha: ImageAlpha) -> Self {
         let mut h = rustc_hash::FxHasher::default();
         params.effect.path.hash(&mut h);
         Self {
             output_rect: IRect::EMPTY,
             layer_bounds: layer,
+            pixel_scale,
             time: params.time.as_seconds() as f32,
+            frame_index: params.frame_rate.time_to_frame(params.time) as i32,
+            frame_rate: params.frame_rate.as_f64() as f32,
+            time_step: params.time_step.as_seconds() as f32,
             seed: h.finish() as u32,
+            flags: frame_flags(params)
+                | match alpha {
+                    ImageAlpha::Premultiplied => 0,
+                    ImageAlpha::Straight => wgsl::FRAME_INPUT_STRAIGHT,
+                    ImageAlpha::Opaque => wgsl::FRAME_INPUT_OPAQUE,
+                },
         }
     }
 
@@ -654,17 +787,37 @@ impl FrameInfo {
         };
         f32s("downsample", &[scale as f32, scale as f32]);
         f32s("time", &[self.time]);
+        f32s("frame_rate", &[self.frame_rate]);
+        f32s("time_step", &[self.time_step]);
         f32s("pixel_aspect", &[1.0]);
         let mut u32s = |name: &str, v: u32| {
             if let Some(o) = layout.offset(name) {
                 b[o as usize..o as usize + 4].copy_from_slice(&v.to_le_bytes());
             }
         };
-        u32s("flags", wgsl::FRAME_HIGH_QUALITY);
+        u32s("flags", self.flags);
         u32s("seed", self.seed);
         u32s("pass_index", pass);
+        u32s("frame_index", self.frame_index as u32);
         b
     }
+}
+
+/// `BaeFrame.flags` for `params`.
+fn frame_flags(params: &EffectParams<'_>) -> u32 {
+    let mut flags = wgsl::FRAME_HIGH_QUALITY;
+    if params.linear {
+        flags |= wgsl::FRAME_LINEAR;
+    }
+    if params.purpose == bae_render::RenderPurpose::Final {
+        flags |= wgsl::FRAME_FINAL;
+    }
+    if params.float {
+        flags |= wgsl::FRAME_FLOAT;
+    } else if params.sixteen_bpc {
+        flags |= wgsl::FRAME_16_BPC;
+    }
+    flags
 }
 
 fn put_i32s(b: &mut [u8], offset: usize, v: &[i32]) {
@@ -707,7 +860,7 @@ pub fn create_image(
     pixel_scale: f64,
     format: wgpu::TextureFormat,
 ) -> Result<GpuImage, RenderError> {
-    let [w, h] = rect.size();
+    let [w, h] = bae_render::source::texels_for(rect, pixel_scale);
     let limit = gpu.limits().max_texture_dimension_2d;
     if w > limit || h > limit {
         return Err(RenderError::TooLarge {
@@ -762,7 +915,44 @@ struct GpuProgram {
     param_offsets: Vec<u32>,
     sources: UniformLayout,
     source_offsets: Vec<u32>,
+    uniforms: UniformPool,
     placeholder: wgpu::TextureView,
+}
+
+struct UniformPool {
+    idle: Arc<Mutex<Vec<wgpu::Buffer>>>,
+    params_at: u64,
+    sources_at: u64,
+    frame_stride: u64,
+    bytes: u64,
+}
+
+impl UniformPool {
+    fn new(device: &wgpu::Device, frames: usize, frame: u64, params: u64, sources: u64) -> Self {
+        let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment);
+        let aligned = |size: u64| size.div_ceil(alignment) * alignment;
+        let frame_stride = aligned(frame);
+        let params_at = frame_stride * frames as u64;
+        let sources_at = params_at + aligned(params);
+        let pool = Self {
+            idle: Arc::default(),
+            params_at,
+            sources_at,
+            frame_stride,
+            bytes: sources_at + sources,
+        };
+        pool.idle.lock().push(pool.allocate(device));
+        pool
+    }
+
+    fn allocate(&self, device: &wgpu::Device) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bae-plugin uniforms"),
+            size: self.bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        })
+    }
 }
 
 impl GpuProgram {
@@ -923,7 +1113,15 @@ impl GpuProgram {
                 view_formats: &[],
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let uniforms = UniformPool::new(
+            device,
+            passes.len(),
+            frame.buffer_size(),
+            params.as_ref().map_or(0, |p| p.buffer_size()),
+            sources.buffer_size(),
+        );
         Ok(Self {
+            uniforms,
             passes,
             frame,
             params,

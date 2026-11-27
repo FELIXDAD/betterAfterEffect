@@ -171,6 +171,17 @@ pub mod ids {
     pub const CLOSE_PROJECT: &str = "file.close_project";
     pub const SAVE: &str = "file.save";
     pub const SAVE_AS: &str = "file.save_as";
+    /// Save a copy elsewhere; the open project keeps its location and stays
+    /// unsaved if it was (AE File > Save As > Save a Copy...).
+    pub const SAVE_A_COPY: &str = "file.save_a_copy";
+    /// Save under the project's name with the next number and go on working
+    /// in that file (AE File > Increment and Save).
+    pub const INCREMENT_AND_SAVE: &str = "file.increment_and_save";
+    /// Reload the last saved version, after asking (AE File > Revert).
+    pub const REVERT: &str = "file.revert";
+    /// Show the saved project file in Finder / Explorer (Project panel ▸
+    /// Reveal Project in Finder).
+    pub const REVEAL_PROJECT: &str = "file.reveal_project";
     /// Switch workspace; params `{"id": "<workspace id>"}`.
     pub const SWITCH_WORKSPACE: &str = "workspace.switch";
     /// Restore the active workspace's saved layout.
@@ -180,6 +191,7 @@ pub mod ids {
     /// Save the current layout as a new workspace; params `{"title": "..."}`
     /// (without params: open Edit Workspaces).
     pub const NEW_WORKSPACE: &str = "workspace.new";
+    pub const ASSIGN_WORKSPACE_SHORTCUT: &str = "workspace.assign_shortcut";
     /// Open the Edit Workspaces dialog (reorder, hide, delete).
     pub const EDIT_WORKSPACES: &str = "workspace.edit";
     /// Open (or focus) a panel; params `{"id": "<panel id>"}`.
@@ -188,6 +200,9 @@ pub mod ids {
     pub const CLOSE_PANEL: &str = "window.close_panel";
     /// Maximize / restore the focused panel group (AE: `~`).
     pub const MAXIMIZE_FRAME: &str = "window.maximize_frame";
+    /// Minimize the main window (macOS ⌘M, a system shortcut AE keeps without a
+    /// menu item).
+    pub const MINIMIZE: &str = "window.minimize";
     /// Switch the UI language; params `{"id": "en" | "zh"}`.
     pub const SET_LANGUAGE: &str = "app.language";
     /// Open the help documentation.
@@ -206,14 +221,23 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::CLOSE_PROJECT, "Close Project"),
     (ids::SAVE, "Save"),
     (ids::SAVE_AS, "Save As..."),
+    (ids::SAVE_A_COPY, "Save a Copy..."),
+    (ids::INCREMENT_AND_SAVE, "Increment and Save"),
+    (ids::REVERT, "Revert"),
+    (ids::REVEAL_PROJECT, "Reveal Project"),
     (ids::SWITCH_WORKSPACE, "Switch Workspace"),
     (ids::RESET_WORKSPACE, "Reset to Saved Layout"),
     (ids::SAVE_WORKSPACE, "Save Changes to this Workspace"),
     (ids::NEW_WORKSPACE, "Save as New Workspace..."),
+    (
+        ids::ASSIGN_WORKSPACE_SHORTCUT,
+        "Assign Shortcut to Workspace",
+    ),
     (ids::EDIT_WORKSPACES, "Edit Workspaces..."),
     (ids::OPEN_PANEL, "Open Panel"),
     (ids::CLOSE_PANEL, "Close Panel"),
     (ids::MAXIMIZE_FRAME, "Maximize Panel Group"),
+    (ids::MINIMIZE, "Minimize"),
     (ids::SET_LANGUAGE, "Language"),
     (ids::HELP, "BAE Help"),
 ];

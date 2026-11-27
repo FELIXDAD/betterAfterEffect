@@ -17,7 +17,7 @@
 mod shortcuts;
 mod workspaces;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bae_app::{App, Registry, RegistrySnapshot, Resources};
@@ -38,6 +38,9 @@ use crate::workspace::WorkspacePreset;
 use crate::{titlebar, widgets};
 
 pub use shortcuts::CommandEntry;
+pub(crate) use shortcuts::ZH as SHORTCUTS_ZH;
+/// Folder of the Keyboard Shortcuts presets in the config folder.
+pub use shortcuts::presets::FOLDER as SHORTCUT_PRESETS_FOLDER;
 
 /// Height of the status strip at the bottom of the window.
 pub const STATUS_H: f32 = 20.0;
@@ -58,6 +61,13 @@ pub struct WorkbenchState {
     pub panels: BTreeMap<String, serde_json::Value>,
     /// Shortcut customizations, by keymap id.
     pub keymaps: BTreeMap<String, KeymapOverrides>,
+    /// The Keyboard Shortcuts preset selected for each keymap (a file name such
+    /// as "Custom.txt"; the built-in preset when absent).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub shortcut_presets: BTreeMap<String, String>,
+    /// Panels whose first-use instruction the user dismissed.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub dismissed_coachmarks: BTreeSet<String>,
     /// Workspace bar order chosen in Edit Workspaces (ids; others follow).
     pub order: Vec<String>,
     /// Workspaces not shown in the bar (still in Window > Workspace).
@@ -132,6 +142,8 @@ pub struct Workbench {
     /// Workspaces sorted by order, rebuilt when the registry changes.
     workspaces: Vec<(String, Arc<WorkspacePreset>)>,
     presets_gen: u64,
+    #[cfg(target_os = "macos")]
+    standard_system_shortcuts: bool,
     keymaps_gen: u64,
     extensions_gen: u64,
     active: String,
@@ -139,12 +151,23 @@ pub struct Workbench {
     state: WorkbenchState,
     requests: PanelRequests,
     tool: usize,
+    /// Modifiers held at the end of the last frame (Copy / Cut / Paste chords).
+    held: egui::Modifiers,
+    /// Keyboard focus at the end of the last frame. egui drops the focus as a
+    /// frame with Esc begins, so a focused field's Esc is judged by this.
+    focus_before: KeyFocus,
     /// Toolbars by keymap id (`Registry<dyn Toolbar>`).
     toolbars: Arc<Registry<dyn Toolbar>>,
     /// Keymaps whose toolbar got its saved state back.
     toolbars_loaded: Vec<String>,
     /// A dialog the host draws (Preferences) is open: shortcuts wait.
     external_modal: bool,
+    /// Menu items (`Registry<MenuItemSpec>`): the shortcut editor groups commands by menu.
+    menus: Arc<Registry<crate::menu::MenuItemSpec>>,
+    /// The state changed in a way the shell should save now (OK in Keyboard Shortcuts).
+    save_requested: bool,
+    /// Folder of the Keyboard Shortcuts presets (`None`: kept in memory).
+    shortcut_presets_dir: Option<std::path::PathBuf>,
 }
 
 impl Workbench {
@@ -162,6 +185,29 @@ impl Workbench {
         .with_command_variants(app.registry::<crate::action::CommandVariant>())
         .with_toolbars(app.registry::<dyn Toolbar>())
         .with_dialog_hosts(app.registry::<dyn crate::dialog::DialogHost>())
+        .with_menus(app.registry::<crate::menu::MenuItemSpec>())
+    }
+
+    /// Menu items (`Registry<MenuItemSpec>`), for the Keyboard Shortcuts tree.
+    pub fn with_menus(mut self, menus: Arc<Registry<crate::menu::MenuItemSpec>>) -> Self {
+        self.menus = menus;
+        for (id, custom) in &self.state.custom {
+            self.register_workspace_menu(id, &custom.title);
+        }
+        self
+    }
+
+    /// Where the Keyboard Shortcuts dialog keeps its presets (the shell passes
+    /// `<config>/Keyboard Shortcuts`, [`SHORTCUT_PRESETS_FOLDER`]); without one
+    /// they live in memory.
+    pub fn set_shortcut_presets_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.shortcut_presets_dir = dir;
+    }
+
+    /// Whether the state changed in a way to save now (not only at exit): the
+    /// shell asks once per frame.
+    pub fn take_save_request(&mut self) -> bool {
+        std::mem::take(&mut self.save_requested)
     }
 
     /// Toolbars modules register for their keymaps (`Registry<dyn Toolbar>`).
@@ -185,7 +231,9 @@ impl Workbench {
     /// dialog. Hosts use it to disable the native menu bar, like AE.
     pub fn modal_open(&self, resources: &bae_app::Resources) -> bool {
         self.role_picker_open()
+            || self.dialogs.naming_workspace()
             || self.external_modal
+            || self.editor.open
             || self
                 .dialog_hosts
                 .snapshot()
@@ -288,6 +336,8 @@ impl Workbench {
             dialogs: workspaces::Dialogs::default(),
             workspaces: Vec::new(),
             presets_gen: u64::MAX,
+            #[cfg(target_os = "macos")]
+            standard_system_shortcuts: true,
             keymaps_gen: u64::MAX,
             extensions_gen: u64::MAX,
             active: String::new(),
@@ -295,9 +345,14 @@ impl Workbench {
             state,
             requests: PanelRequests::default(),
             tool: 1,
+            held: egui::Modifiers::NONE,
+            focus_before: KeyFocus::None,
             toolbars: Arc::new(Registry::new()),
             toolbars_loaded: Vec::new(),
             external_modal: false,
+            menus: Arc::new(Registry::new()),
+            save_requested: false,
+            shortcut_presets_dir: None,
         };
         wb.refresh_registries();
         let active = wb
@@ -363,6 +418,12 @@ impl Workbench {
     pub fn state(&mut self) -> WorkbenchState {
         self.capture();
         self.state.clone()
+    }
+
+    /// Show previously dismissed panel instructions again.
+    pub fn reset_coachmarks(&mut self) {
+        self.state.dismissed_coachmarks.clear();
+        self.save_requested = true;
     }
 
     /// Model commands `(id, English title)` the shortcut editor lists in addition
@@ -531,23 +592,88 @@ impl Workbench {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn set_standard_system_shortcuts(&mut self, standard: bool) {
+        if self.standard_system_shortcuts != standard {
+            self.standard_system_shortcuts = standard;
+            self.rebuild_keymap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_system_shortcuts(&self, base: &mut Keymap) {
+        if !self.standard_system_shortcuts {
+            for b in &mut base.bindings {
+                let c = &mut b.chord;
+                if matches!(
+                    b.action.as_str(),
+                    crate::action::ids::MINIMIZE | "app.hide" | "app.hide_others"
+                ) {
+                    c.mac_ctrl = true;
+                    continue;
+                }
+                if c.mac_ctrl
+                    && c.command
+                    && !c.shift
+                    && matches!(
+                        (b.action.as_str(), c.key, c.alt),
+                        ("motion.file.replace_footage_file", egui::Key::H, false)
+                            | ("motion.toggle_hold", egui::Key::H, true)
+                            | ("motion.add_to_render_queue", egui::Key::M, false)
+                    )
+                {
+                    c.mac_ctrl = false;
+                }
+            }
+        }
+    }
+
     fn rebuild_keymap(&mut self) {
         let id = self.keymap_id();
+        let base = self.extended_keymap_logged(&id);
+        self.keymap = match self.state.keymaps.get(&id) {
+            Some(overrides) => base.with_overrides(overrides),
+            None => base,
+        };
+    }
+
+    /// Keymap `id` with the modules' extensions, without the user's changes.
+    pub(super) fn extended_keymap(&self, id: &str) -> Keymap {
         let mut base = self
             .keymaps
-            .get(&id)
+            .get(id)
             .map(|k| (*k).clone())
             .unwrap_or_default();
-        // Modules of the active workspace first, then registration order: the
-        // first binding of a chord wins.
+        for (_, _, k) in self.keymap_extensions_for(id) {
+            base.bindings.extend(k.bindings.iter().cloned());
+        }
+        #[cfg(target_os = "macos")]
+        self.apply_system_shortcuts(&mut base);
+        base
+    }
+
+    /// The extensions of keymap `id` in priority order: modules of the active
+    /// workspace first, then registration order (the first binding of a chord wins).
+    fn keymap_extensions_for(&self, id: &str) -> Vec<(usize, String, Arc<KeymapBindings>)> {
         let extensions = self.keymap_extensions.snapshot();
-        let mut ext: Vec<(usize, &str, &KeymapBindings)> = extensions
+        let mut ext: Vec<(usize, String, Arc<KeymapBindings>)> = extensions
             .iter()
             .enumerate()
             .filter(|(_, e)| e.item().keymap == id)
-            .map(|(i, e)| (i, e.id().as_ref(), e.item().as_ref()))
+            .map(|(i, e)| (i, e.id().to_string(), e.item().clone()))
             .collect();
         ext.sort_by_key(|(i, _, k)| (k.workspace.as_deref() != Some(self.active.as_str()), *i));
+        ext
+    }
+
+    /// [`Self::extended_keymap`], recording chords two modules bind.
+    fn extended_keymap_logged(&mut self, id: &str) -> Keymap {
+        let mut base = self
+            .keymaps
+            .get(id)
+            .map(|k| (*k).clone())
+            .unwrap_or_default();
+        let ext = self.keymap_extensions_for(id);
         self.keymap_conflicts.clear();
         let mut claimed: Vec<(&Chord, Option<&str>, &str)> = Vec::new();
         for (_, owner, k) in &ext {
@@ -564,17 +690,16 @@ impl Workbench {
                     tracing::warn!("{m}");
                     self.keymap_conflicts.push(m);
                 } else {
-                    claimed.push((&b.chord, b.when.as_deref(), owner));
+                    claimed.push((&b.chord, b.when.as_deref(), owner.as_str()));
                 }
             }
         }
         for (_, _, k) in &ext {
             base.bindings.extend(k.bindings.iter().cloned());
         }
-        self.keymap = match self.state.keymaps.get(&id) {
-            Some(overrides) => base.with_overrides(overrides),
-            None => base,
-        };
+        #[cfg(target_os = "macos")]
+        self.apply_system_shortcuts(&mut base);
+        base
     }
 
     // ---- frame ---------------------------------------------------------------------
@@ -589,12 +714,13 @@ impl Workbench {
     ) -> Vec<Invocation> {
         self.refresh_registries();
         crate::a11y::install(ui.ctx());
+        ime_undo_before(ui.ctx());
         // A modal dialog (the welcome / role picker, an external window such as
         // Preferences, a module dialog) owns the keyboard: no shortcuts and no
         // panel keys reach the project behind it.
         let modal = self.modal_open(cx.resources) || crate::color_picker::open_last_pass(ui.ctx());
         crate::panel::set_modal_open(ui.ctx(), modal);
-        if !modal && !self.record_shortcut(ui.ctx()) {
+        if !modal {
             self.collect_shortcuts(ui.ctx());
         }
 
@@ -645,7 +771,14 @@ impl Workbench {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(dock_rect));
         let kinds = self.kinds.snapshot();
         let focused = self.dock.focused_panel().cloned();
+        let show_coachmarks = cx
+            .resources
+            .get::<Arc<bae_prefs::PrefsStore>>()
+            .is_some_and(|p| p.current().bool("appearance.show_coachmarks"))
+            && !self.modal_open(cx.resources);
         let mut host = Host {
+            dismissed_coachmarks: show_coachmarks.then_some(&mut self.state.dismissed_coachmarks),
+            save_requested: &mut self.save_requested,
             panels: &mut self.panels,
             kinds: &kinds,
             saved: &mut self.state.panels,
@@ -659,6 +792,8 @@ impl Workbench {
         self.shortcut_window(ui.ctx());
         self.workspace_dialogs(ui.ctx());
         ime_follows_caret(ui.ctx());
+        ime_undo_after(ui.ctx());
+        self.focus_before = KeyFocus::of(ui.ctx());
         std::mem::take(&mut self.requests.invocations)
     }
 
@@ -759,18 +894,30 @@ impl Workbench {
     fn collect_shortcuts(&mut self, ctx: &Context) {
         let focus = KeyFocus::of(ctx);
         let typing = focus == KeyFocus::Text;
+        // An open menu or popup closes on Esc before Esc is a shortcut; so
+        // does a field or widget that had the focus (egui let go of it as this
+        // frame began).
+        let popup = egui::Popup::is_any_open(ctx);
+        let esc_focus = self.focus_before;
         let focused = self.dock.focused_panel().map(|p| p.kind().to_owned());
         let keymap = &self.keymap;
         let mut hits = Vec::new();
-        ctx.input_mut(|input| {
+        let held = ctx.input_mut(|input| {
             // egui-winit turns every Cmd/Ctrl+C / X / V into Copy / Cut / Paste,
             // with Shift or Alt held too (and sends no key event): those chords
             // are other shortcuts (Ctrl+Shift+C Pre-compose, Ctrl+Alt+Shift+C New
             // Camera, Ctrl+Shift+X Trim Comp to Work Area …), #220.
-            let mods = input.modifiers;
-            let other_chord = mods.command && (mods.shift || mods.alt);
+            // The modifiers as of each event: fast input brings modifiers down,
+            // the key and modifiers up in one frame (#279).
+            let mut mods = self.held;
             input.events.retain(|event| match event {
-                Event::Copy | Event::Cut | Event::Paste(_) if other_chord && !typing => {
+                Event::ModifiersChanged(m) => {
+                    mods = *m;
+                    true
+                }
+                Event::Copy | Event::Cut | Event::Paste(_)
+                    if mods.command && (mods.shift || mods.alt) && !typing =>
+                {
                     let key = match event {
                         Event::Copy => Key::C,
                         Event::Cut => Key::X,
@@ -796,7 +943,10 @@ impl Workbench {
                     else {
                         return true;
                     };
-                    if focus.reserves(&binding.chord) {
+                    let esc = *key == Key::Escape && modifiers.is_none();
+                    if focus.reserves(&binding.chord)
+                        || (esc && (popup || esc_focus.reserves(&binding.chord)))
+                    {
                         return true;
                     }
                     hits.push(binding.invocation());
@@ -820,7 +970,9 @@ impl Workbench {
                 }
                 _ => true,
             });
+            mods
         });
+        self.held = held;
         self.requests.invocations.extend(hits);
     }
 
@@ -833,10 +985,47 @@ impl Workbench {
         }
     }
 
-    /// Open (or bring to front) a panel.
+    /// Open (or bring to front) a panel: back where it was, else where the
+    /// active workspace puts it, else in AE's group for its kind.
     pub fn open_panel(&mut self, id: PanelId) {
-        self.dock.open(id.clone());
+        let near = self.home_of(&id);
+        self.dock.open_near(id.clone(), &near);
         self.dock.focus_panel(&id);
+    }
+
+    /// Panels whose frame a closed panel `id` opens into (in order): the tabs
+    /// beside it in the active workspace's layout, then AE's usual group for
+    /// its kind (the Render Queue with the Timeline, viewers with the
+    /// Composition viewer, small panels in the stack at the right).
+    fn home_of(&self, id: &PanelId) -> Vec<PanelId> {
+        let mut near: Vec<PanelId> = Vec::new();
+        if let Some((_, preset)) = self.workspaces.iter().find(|(w, _)| *w == self.active) {
+            let mut frames = Vec::new();
+            preset.layout.root.collect_frames(&mut frames);
+            frames.extend(preset.layout.floating.iter().map(|f| &f.frame));
+            if let Some(f) = frames.iter().find(|f| f.tabs.contains(id)) {
+                near.extend(f.tabs.iter().filter(|t| *t != id).cloned());
+            }
+        }
+        // AE 26's Default workspace reopens these there (its frames' ReanimTabs).
+        let group: &[&str] = match id.kind() {
+            "render_queue" => &["timeline"],
+            "flowchart" | "media_browser" | "metadata" | "footage" | "layer" | "lumetri_scopes"
+            | "essential_graphics" => &["composition"],
+            "project" | "effect_controls" => &["project", "effect_controls"],
+            "composition" | "timeline" => &[],
+            _ => &[
+                "effects",
+                "properties",
+                "align",
+                "audio",
+                "info",
+                "preview",
+                "character",
+            ],
+        };
+        near.extend(group.iter().map(|k| PanelId::new(*k)));
+        near
     }
 
     /// Close a panel, letting it save its view state first.
@@ -960,19 +1149,106 @@ impl Workbench {
                 if let Some(title) = inv.params.get("title").and_then(|v| v.as_str()) {
                     self.save_as_new_workspace(title);
                 } else {
-                    self.dialogs.edit_open = true;
+                    self.dialogs.start_naming();
+                }
+                true
+            }
+            ids::ASSIGN_WORKSPACE_SHORTCUT => {
+                if let Some(key) = inv.params["slot"]
+                    .as_u64()
+                    .and_then(|slot| usize::try_from(slot).ok())
+                    .and_then(|slot| crate::presets::WORKSPACE_KEYS.get(slot))
+                {
+                    let id = self.keymap_id();
+                    let mut overrides = self.keymap_overrides(&id);
+                    overrides.bind(
+                        crate::keymap::Binding::new(key, ids::SWITCH_WORKSPACE)
+                            .params(serde_json::json!({"id":self.active})),
+                    );
+                    self.set_keymap_overrides(&id, overrides);
+                    self.save_requested = true;
                 }
                 true
             }
             ids::KEYBOARD_SHORTCUTS => {
-                if !self.editor.open {
-                    self.editor.open = true;
-                    self.editor.focus_search = true;
-                }
+                self.open_shortcut_editor();
                 true
             }
             _ => false,
         }
+    }
+}
+
+/// The undo history of the focused text field while an input method composes
+/// (#222): egui's `TextEdit` records undo points of the composition text
+/// (pinyin `w'q'g't` that was never entered), so Cmd/Ctrl+Z could bring it
+/// back. [`ime_undo_before`] keeps the history from before the composition,
+/// [`ime_undo_after`] puts it back after every frame of the composition, so
+/// undo only returns to text that was really entered. Every text field of the
+/// workbench (search, rename, dialog names) gets this.
+#[derive(Clone)]
+struct ImeUndoGuard {
+    field: egui::Id,
+    undoer: egui::util::undoer::Undoer<(egui::text::CCursorRange, String)>,
+}
+
+fn ime_guard_id() -> egui::Id {
+    egui::Id::new("bae.ime_undo_guard")
+}
+
+/// Whether this frame's input carries composition text (a non-empty preedit),
+/// and whether it ends a composition (commit, or an empty preedit).
+fn ime_events(ctx: &Context) -> (bool, bool) {
+    ctx.input(|i| {
+        let mut composing = false;
+        let mut ends = false;
+        for e in &i.events {
+            if let Event::Ime(ime) = e {
+                match ime {
+                    egui::ImeEvent::Preedit { text, .. } if !text.is_empty() => composing = true,
+                    egui::ImeEvent::Preedit { .. } | egui::ImeEvent::Commit(_) => ends = true,
+                    _ => {}
+                }
+            }
+        }
+        (composing, ends)
+    })
+}
+
+/// Before the panels draw: when a composition starts in the focused text field,
+/// remember its undo history.
+fn ime_undo_before(ctx: &Context) {
+    let (composing, _) = ime_events(ctx);
+    let guarded = ctx.data(|d| d.get_temp::<ImeUndoGuard>(ime_guard_id()).is_some());
+    if !composing || guarded {
+        return;
+    }
+    let Some(field) = ctx.memory(|m| m.focused()) else {
+        return;
+    };
+    if let Some(state) = egui::TextEdit::load_state(ctx, field) {
+        let guard = ImeUndoGuard {
+            field,
+            undoer: state.undoer(),
+        };
+        ctx.data_mut(|d| d.insert_temp(ime_guard_id(), guard));
+    }
+}
+
+/// After the panels drew: while composing (and on the frame that commits), put
+/// the remembered history back, dropping the undo points of composition text.
+fn ime_undo_after(ctx: &Context) {
+    let Some(guard) = ctx.data(|d| d.get_temp::<ImeUndoGuard>(ime_guard_id())) else {
+        return;
+    };
+    let (_, ends) = ime_events(ctx);
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, guard.field) {
+        state.set_undoer(guard.undoer.clone());
+        state.store(ctx, guard.field);
+    }
+    let left = ctx.memory(|m| m.focused()) != Some(guard.field);
+    if ends || left {
+        ctx.data_mut(|d| d.remove::<ImeUndoGuard>(ime_guard_id()));
     }
 }
 
@@ -1055,6 +1331,7 @@ fn reserved_while_typing(chord: &Chord) -> bool {
             | Delete
             | Enter
             | Tab
+            | Escape
     );
     let text_command = chord.command && !chord.alt && matches!(chord.key, Z | Y | A | C | V | X);
     editing || text_command
@@ -1062,6 +1339,8 @@ fn reserved_while_typing(chord: &Chord) -> bool {
 
 /// Adapts registered panels to the dock.
 struct Host<'a, 'c> {
+    dismissed_coachmarks: Option<&'a mut BTreeSet<String>>,
+    save_requested: &'a mut bool,
     panels: &'a mut HashMap<PanelId, Box<dyn Panel>>,
     kinds: &'a RegistrySnapshot<PanelKind>,
     saved: &'a mut BTreeMap<String, serde_json::Value>,
@@ -1109,6 +1388,7 @@ impl Host<'_, '_> {
             self.requests,
         );
         cx.focused = focused;
+        cx.focused_panel = self.focused.as_ref();
         f(panel.as_mut(), &mut cx)
     }
 }
@@ -1122,11 +1402,42 @@ impl PanelHost for Host<'_, '_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, panel: &PanelId) {
+        let anchor = ui.max_rect().left_top() + vec2(8.0, 8.0);
         self.with_panel(panel, |p, cx| p.ui(ui, cx));
+        let Some(dismissed) = self.dismissed_coachmarks.as_deref_mut() else {
+            return;
+        };
+        if self.focused.as_ref() != Some(panel) || dismissed.contains(panel.kind()) {
+            return;
+        }
+        let tip = match panel.kind() {
+            "project" => "Drop files here to import footage.",
+            "composition" => "Hold Space and drag to pan the composition.",
+            "timeline" => "Drag the time indicator to preview a frame.",
+            _ => return,
+        };
+        egui::Area::new(egui::Id::new(("panel-coachmark", panel)))
+            .fixed_pos(anchor)
+            .movable(false)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(220.0);
+                    ui.label(tr(tip));
+                    if ui.button(tr("Got it")).clicked() {
+                        dismissed.insert(panel.kind().to_owned());
+                        *self.save_requested = true;
+                    }
+                });
+            });
     }
 
     fn menu(&mut self, ui: &mut Ui, panel: &PanelId) {
         self.with_panel(panel, |p, cx| p.menu(ui, cx));
+    }
+
+    fn related_tabs_menu(&mut self, ui: &mut Ui, panel: &PanelId) -> bool {
+        self.with_panel(panel, |p, cx| p.related_tabs_menu(ui, cx))
     }
 
     fn on_close(&mut self, panel: &PanelId) {
@@ -1266,6 +1577,17 @@ mod tests {
         modifiers: Modifiers,
         events: Vec<Event>,
     ) -> Vec<Invocation> {
+        frame_full(ctx, wb, modifiers, None, events)
+    }
+
+    /// [`frame_mods`] at an input time (seconds).
+    fn frame_full(
+        ctx: &Context,
+        wb: &mut Workbench,
+        modifiers: Modifiers,
+        time: Option<f64>,
+        events: Vec<Event>,
+    ) -> Vec<Invocation> {
         let stage = Stage::new();
         let author = AuthorId::system();
         let resources = Resources::new();
@@ -1281,6 +1603,7 @@ mod tests {
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
             events: all,
+            time,
             ..Default::default()
         };
         let mut out = Vec::new();
@@ -1326,6 +1649,92 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    /// #222: Cmd/Ctrl+Z in a text field never brings back an input method's
+    /// composition text (pinyin `w'q'g't`), even when the composition lasted long
+    /// enough for egui to take an undo point; it returns to text really entered.
+    #[test]
+    fn undo_in_a_text_field_skips_ime_composition() {
+        use egui::ImeEvent;
+        let text = Arc::new(std::sync::Mutex::new(String::new()));
+        let focus = Arc::new(std::sync::Mutex::new(Some("field")));
+        let (kinds, presets, keymaps, actions) = registries();
+        let (t, f) = (text.clone(), focus.clone());
+        let clicks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        kinds
+            .replace(
+                Owner::module("test"),
+                "a",
+                Arc::new(PanelKind::new("A", move |_| {
+                    Box::new(Focusable {
+                        clicks: clicks.clone(),
+                        text: t.clone(),
+                        focus: f.clone(),
+                    })
+                })),
+            )
+            .unwrap();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = crate::testing::ctx_with_fonts();
+        let none = Modifiers::NONE;
+        let mut time = 0.0;
+        let mut step = |wb: &mut Workbench, dt: f64, events: Vec<Event>| {
+            time += dt;
+            frame_full(&ctx, wb, none, Some(time), events);
+        };
+        step(&mut wb, 0.1, vec![]);
+        step(&mut wb, 0.1, vec![]);
+        step(&mut wb, 0.1, vec![]);
+        // Composing for two seconds: longer than egui's 1 s undo-point delay.
+        let preedit = |s: &str| {
+            Event::Ime(ImeEvent::Preedit {
+                text: s.to_owned(),
+                active_range_chars: None,
+            })
+        };
+        step(&mut wb, 0.1, vec![preedit("w")]);
+        step(&mut wb, 0.1, vec![preedit("w'q'g't")]);
+        for _ in 0..20 {
+            step(&mut wb, 0.1, vec![]);
+        }
+        assert_eq!(text.lock().unwrap().as_str(), "w'q'g't");
+        step(
+            &mut wb,
+            0.1,
+            vec![Event::Ime(ImeEvent::Commit("wqgt".into()))],
+        );
+        assert_eq!(text.lock().unwrap().as_str(), "wqgt");
+        for _ in 0..20 {
+            step(&mut wb, 0.1, vec![]);
+        }
+        // Replace the text, then undo until nothing changes: never the pinyin.
+        step(&mut wb, 0.1, vec![Event::Text("X".into())]);
+        for _ in 0..20 {
+            step(&mut wb, 0.1, vec![]);
+        }
+        let undo = Event::Key {
+            key: Key::Z,
+            physical_key: Some(Key::Z),
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::COMMAND,
+        };
+        let mut seen = vec![text.lock().unwrap().clone()];
+        for _ in 0..4 {
+            time += 0.1;
+            frame_full(
+                &ctx,
+                &mut wb,
+                Modifiers::COMMAND,
+                Some(time),
+                vec![undo.clone()],
+            );
+            seen.push(text.lock().unwrap().clone());
+        }
+        assert!(seen.iter().all(|s| s != "w'q'g't" && s != "w"), "{seen:?}");
+        assert!(seen.iter().any(|s| s == "wqgt"), "{seen:?}");
     }
 
     /// A toolbar that counts frames, remembers its state and sees the keymap.
@@ -1528,6 +1937,19 @@ mod tests {
             frame_mods(&ctx, &mut wb, cmd, vec![Event::Copy]),
             vec![Invocation::new("edit.copy")]
         );
+        // Fast input (#279): modifiers down, Copy, modifiers up in one frame.
+        assert_eq!(
+            frame_in(
+                &ctx,
+                &mut wb,
+                vec![
+                    Event::ModifiersChanged(cmd | Modifiers::SHIFT),
+                    Event::Copy,
+                    Event::ModifiersChanged(Modifiers::NONE),
+                ]
+            ),
+            vec![Invocation::new("motion.layer.pre_compose")]
+        );
         assert_eq!(
             frame_mods(&ctx, &mut wb, cmd, vec![Event::Paste("x".into())]),
             vec![Invocation::with_params(
@@ -1643,54 +2065,6 @@ mod tests {
         wb.set_keymap_overrides("km", ov);
         let rest = frame(&mut wb, vec![key(Key::U, Modifiers::NONE)]);
         assert_eq!(rest, vec![Invocation::new("custom.thing")]);
-    }
-
-    #[test]
-    fn shortcut_editor_records_and_asks_before_replacing() {
-        let (kinds, presets, keymaps, actions) = registries();
-        let mut wb =
-            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        wb.set_extra_commands(vec![("prim.create".into(), "Create Prim".into())]);
-        let rows = wb.shortcut_commands();
-        assert!(rows.iter().any(|r| r.id == ids::UNDO));
-        assert!(rows.iter().any(|r| r.id == "prim.create"));
-        assert_eq!(
-            wb.command_title(ids::SWITCH_WORKSPACE, &serde_json::json!({"id": "two"})),
-            "workspace.switch: Two"
-        );
-
-        // Record `U` for prim.create: it collides with layer.reveal_keyframes.
-        let entry = rows.iter().find(|r| r.id == "prim.create").unwrap().clone();
-        wb.editor.open = true;
-        wb.editor.recording = Some(entry.clone());
-        frame(&mut wb, vec![key(Key::U, Modifiers::NONE)]);
-        assert!(wb.editor.confirm.is_some(), "conflict must be confirmed");
-        let (binding, other) = wb.editor.confirm.take().unwrap();
-        assert_eq!(other, "layer.reveal_keyframes");
-        wb.bind(binding);
-        assert_eq!(
-            wb.keymap()
-                .lookup(&Chord::parse("U").unwrap(), None)
-                .unwrap()
-                .action,
-            "prim.create"
-        );
-        assert!(wb.keymap().conflicts().is_empty());
-
-        // A free chord binds immediately; Esc cancels recording.
-        wb.editor.recording = Some(entry.clone());
-        frame(
-            &mut wb,
-            vec![key(Key::K, Modifiers::COMMAND | Modifiers::SHIFT)],
-        );
-        assert!(wb.editor.confirm.is_none());
-        assert_eq!(wb.keymap().chords_for("prim.create").count(), 2);
-        wb.editor.recording = Some(entry);
-        frame(&mut wb, vec![key(Key::Escape, Modifiers::NONE)]);
-        assert!(wb.editor.recording.is_none());
-        assert_eq!(wb.keymap().chords_for("prim.create").count(), 2);
-        // Customizations persist.
-        assert!(!wb.state().keymaps.get("km").unwrap().is_empty());
     }
 
     #[test]

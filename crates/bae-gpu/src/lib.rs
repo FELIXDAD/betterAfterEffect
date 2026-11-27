@@ -23,6 +23,7 @@
 //! `wgpu` is re-exported so dependants use exactly the pinned version.
 
 pub mod caps;
+pub mod channels;
 mod context;
 mod module;
 pub mod native;
@@ -31,6 +32,7 @@ pub mod testing;
 pub mod timer;
 pub mod transfer;
 pub mod viewport;
+pub mod warm_up;
 
 pub use caps::{GpuCapabilities, GpuReport, optional_features};
 pub use context::{
@@ -46,4 +48,5 @@ pub use surface::{
     WindowSurface,
 };
 pub use viewport::{ViewportTextureId, ViewportTextureRegistry};
+pub use warm_up::WarmUp;
 pub use wgpu;

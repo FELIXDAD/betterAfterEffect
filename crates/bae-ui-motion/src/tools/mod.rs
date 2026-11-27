@@ -152,6 +152,13 @@ impl Group {
 }
 
 impl Tool {
+    pub(crate) fn is_layer_paint(self) -> bool {
+        matches!(
+            self,
+            Self::Brush | Self::CloneStamp | Self::Eraser | Self::RotoBrush | Self::RefineEdge
+        )
+    }
+
     pub fn group(self) -> Group {
         Group::ALL
             .into_iter()
@@ -275,6 +282,7 @@ impl Tool {
             Group::Selection | Group::Hand | Group::Zoom | Group::Rotation | Group::PanBehind
         ) || self.is_shape()
             || self.is_pen()
+            || self.is_camera()
             // Vertical type needs a text direction in the model (not yet).
             || self == Tool::TypeHorizontal
     }
@@ -322,6 +330,9 @@ pub mod ids {
     /// screen pixels at the viewer's magnification (AE `NudgeUp` …, id from the
     /// command catalog).
     pub const NUDGE: &str = "motion.layer.nudge_position";
+    /// View > Resolution ▸ Full / Half / Third / Quarter (`{factor}`): the active
+    /// comp's resolution (Cmd/Ctrl+J, Cmd/Ctrl+Shift+J, Cmd/Ctrl+Alt+Shift+J).
+    pub const RESOLUTION: &str = "motion.view.resolution";
     /// Layer > Mask and Shape Path > Free Transform Points (catalog id).
     pub const FREE_TRANSFORM: &str = "motion.layer.free_transform_points";
 }
@@ -507,6 +518,20 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// Whether a mask or shape path is selected: vertices in the Composition
+/// viewer, or its path property in the Timeline.
+fn path_selected(cx: &PanelContext<'_>) -> bool {
+    let session = crate::common::session(cx.resources);
+    let s = session.lock();
+    s.vertex_path.is_some()
+        || s.selected_props.iter().any(|(p, attr)| {
+            attr == "path"
+                && cx.stage.prim(p).is_some_and(|v| {
+                    v.is_a(&bae_model::PrimType::MASK) || v.is_a(&bae_model::PrimType::PATH)
+                })
+        })
+}
+
 /// `(id, English title)` of the tool actions, for the shortcut editor.
 pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
     SHORTCUTS
@@ -514,19 +539,97 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         .map(|(id, title, ..)| (*id, *title))
         .chain([
             (ids::NUDGE, "Nudge Layer Position"),
+            (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
+            (crate::viewer::ZOOM_100, "Zoom to 100%"),
+            (crate::viewer::FIT_UP_TO_100, "Fit up to 100%"),
         ])
+        .chain(crate::viewer::view3d::ACTIONS.iter().copied())
+        .chain(crate::viewer::view_options::ACTIONS.iter().copied())
+        .chain(crate::viewer::guides::ACTIONS.iter().copied())
+        .chain([
+            (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::FAST_PREVIEWS, "Fast Previews"),
+            (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
+            (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
+            (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
+        ])
+        .chain(GIZMOS.iter().map(|(id, title, ..)| (*id, *title)))
+        .chain(crate::viewer::look_at_actions())
 }
 
-/// The variants of the nudge action (one row per arrow in the shortcut editor).
+/// AE's resolution shortcuts: `(params, English title)` (AE's names).
+const RESOLUTIONS: &[(&str, &str)] = &[
+    (r#"{"factor":1}"#, "Set Composition Resolution to High"),
+    (r#"{"factor":2}"#, "Set Composition Resolution to Half"),
+    (r#"{"factor":4}"#, "Set Composition Resolution to Low"),
+    (
+        r#"{"factor":1,"nested":true}"#,
+        "Set Composition Resolution to High for the Focused and Nested Comps",
+    ),
+    (
+        r#"{"factor":2,"nested":true}"#,
+        "Set Composition Resolution to Half for the Focused and Nested Comps",
+    ),
+    (
+        r#"{"factor":4,"nested":true}"#,
+        "Set Composition Resolution to Low for the Focused and Nested Comps",
+    ),
+];
+
+/// The variants of the nudge and resolution actions (one row per shortcut in the
+/// shortcut editor).
 pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
-    NUDGES
+    let nudges = NUDGES
         .iter()
-        .map(|(_, dx, dy, title)| {
-            let params = nudge_params(*dx, *dy);
+        .map(|(_, dx, dy, title)| (ids::NUDGE, nudge_params(*dx, *dy), *title));
+    let resolutions = RESOLUTIONS.iter().map(|(p, title)| {
+        let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+        (ids::RESOLUTION, params, *title)
+    });
+    let channels = crate::viewer::display::CHANNEL_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::SHOW_CHANNEL, params, *title)
+        });
+    let fast = crate::viewer::display::FAST_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::FAST_PREVIEWS, params, *title)
+        });
+    let views = crate::viewer::view3d::SHORTCUT_NAMES
+        .iter()
+        .map(|(slot, title)| {
             (
-                format!("{}/{params}", ids::NUDGE),
-                bae_ui::CommandVariant::new(ids::NUDGE, params, (*title).to_owned()),
+                crate::viewer::view3d::ids::SHORTCUT,
+                serde_json::json!({ "slot": slot }),
+                *title,
+            )
+        });
+    let custom = crate::viewer::view_options::VARIANTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (
+                crate::viewer::view_options::ids::CUSTOM_RESOLUTION,
+                params,
+                *title,
+            )
+        });
+    nudges
+        .chain(resolutions)
+        .chain(views)
+        .chain(custom)
+        .chain(channels)
+        .chain(fast)
+        .map(|(id, params, title)| (id, params, title.to_owned()))
+        .chain(crate::viewer::display::snapshot_names())
+        .map(|(id, params, title)| {
+            (
+                format!("{id}/{params}"),
+                bae_ui::CommandVariant::new(id, params, title),
             )
         })
         .collect()
@@ -540,6 +643,11 @@ pub fn bindings() -> Vec<Binding> {
         .chain(NUDGES.iter().map(|(chord, dx, dy, _)| {
             Binding::new(chord, ids::NUDGE).params(nudge_params(*dx, *dy))
         }))
+        // Esc is Switch to Last 3D View whichever panel has focus (AE). Text
+        // fields and open menus keep their Esc (the workbench); the viewer
+        // passes it on to a drag or text it is editing.
+        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
+        .chain(GIZMOS.iter().map(|(id, _, chord, _)| Binding::new(chord, id)))
         .collect()
 }
 
@@ -547,6 +655,49 @@ pub fn bindings() -> Vec<Binding> {
 pub fn keymap_bindings() -> KeymapBindings {
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, bindings())
         .for_workspace(crate::menus::WORKSPACE)
+}
+
+/// Keep the Motion keymap and the Keyboard Shortcuts editor on the same factory
+/// bindings. The workbench applies the user's own shortcuts over these.
+pub fn configure_camera_keys(app: &bae_app::App, prefs: &bae_prefs::PrefsStore) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const KEY: &str = "3d.override_123456_for_gizmos";
+    let Some(registry) = app.get_registry::<KeymapBindings>() else {
+        return;
+    };
+    let snapshot = registry.snapshot();
+    let Some(entry) = snapshot.entry("motion.tools") else {
+        return;
+    };
+    let owner = entry.owner().clone();
+    let apply = move |camera: bool| {
+        let mut map = keymap_bindings();
+        if !camera {
+            for number in 1..=6 {
+                for (prefix, action) in [
+                    ("", crate::actions::ids::GO_TO_COMP_MARKER),
+                    ("Shift+", crate::actions::ids::SET_COMP_MARKER),
+                ] {
+                    let marker = Binding::new(&format!("{prefix}{number}"), action)
+                        .params(serde_json::json!({"number":number}));
+                    map.bindings.retain(|b| b.chord != marker.chord);
+                    map.bindings.push(marker);
+                }
+            }
+        }
+        let _ = registry.replace(owner.clone(), "motion.tools", Arc::new(map));
+    };
+    let initial = prefs.current().bool(KEY);
+    if !initial {
+        apply(initial);
+    }
+    let previous = AtomicBool::new(initial);
+    prefs.subscribe(move |p| {
+        let enabled = p.bool(KEY);
+        if previous.swap(enabled, Ordering::Relaxed) != enabled {
+            apply(enabled);
+        }
+    });
 }
 
 /// A tool switched on while its key is held (AE: hold a tool's key to use it,
@@ -613,6 +764,172 @@ pub enum AxisMode {
     View,
 }
 
+/// Paint and Brushes panel settings for the next stroke (AE-UI-104); each
+/// stroke keeps its own copy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PaintOptions {
+    pub foreground: [f64; 3],
+    pub background: [f64; 3],
+    /// Percent.
+    pub opacity: f64,
+    pub flow: f64,
+    /// A layer blend mode token.
+    pub mode: String,
+    /// `rgba`, `rgb` or `alpha`.
+    pub channels: String,
+    /// `constant`, `write_on`, `single_frame` or `custom`.
+    pub duration: String,
+    /// Custom duration in frames.
+    pub frames: u32,
+    /// Eraser: `layer_and_paint`, `paint` or `last_stroke`.
+    pub erase: String,
+    /// Clone Stamp: the source layer (none: the layer painted on).
+    pub clone_source: Option<bae_model::PrimPath>,
+    pub aligned: bool,
+    pub lock_source_time: bool,
+    /// Clone Stamp: source point minus the stroke's start (pixels).
+    pub clone_offset: [f64; 2],
+    /// Clone Stamp: source time shift in seconds.
+    pub clone_time_shift: f64,
+    /// Clone Stamp, Lock Source Time: the source time in seconds.
+    pub clone_source_time: f64,
+    /// Brush tip (Brushes panel): pixels, degrees, percents.
+    pub diameter: f64,
+    pub angle: f64,
+    pub roundness: f64,
+    pub hardness: f64,
+    pub spacing: f64,
+    /// Brush Dynamics of Size, Angle, Roundness, Opacity, Flow: 0 Off, 1 Pen
+    /// Pressure, 2 Pen Tilt, 3 Stylus Wheel.
+    pub dynamics: [u8; 5],
+    pub minimum_size: f64,
+    /// Clone Source Overlay (the source shown over the layer while cloning)
+    /// and its opacity in percent.
+    pub clone_overlay: bool,
+    pub overlay_opacity: f64,
+    /// The Paint panel's five Clone presets and the one in use.
+    pub clone_presets: [ClonePreset; 5],
+    pub clone_preset: usize,
+}
+
+/// One of the Paint panel's Clone presets: the Clone Options it recalls.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClonePreset {
+    pub source: Option<bae_model::PrimPath>,
+    pub aligned: bool,
+    pub lock_source_time: bool,
+    pub offset: [f64; 2],
+    pub time_shift: f64,
+}
+
+impl Default for ClonePreset {
+    fn default() -> Self {
+        ClonePreset {
+            source: None,
+            aligned: true,
+            lock_source_time: false,
+            offset: [0.0, 0.0],
+            time_shift: 0.0,
+        }
+    }
+}
+
+impl PaintOptions {
+    /// Recalls Clone preset `i`, keeping the current options in the one in
+    /// use first (AE: changes go to the selected preset).
+    pub fn choose_clone_preset(&mut self, i: usize) {
+        let i = i.min(4);
+        self.clone_presets[self.clone_preset.min(4)] = ClonePreset {
+            source: self.clone_source.clone(),
+            aligned: self.aligned,
+            lock_source_time: self.lock_source_time,
+            offset: self.clone_offset,
+            time_shift: self.clone_time_shift,
+        };
+        let p = self.clone_presets[i].clone();
+        self.clone_source = p.source;
+        self.aligned = p.aligned;
+        self.lock_source_time = p.lock_source_time;
+        self.clone_offset = p.offset;
+        self.clone_time_shift = p.time_shift;
+        self.clone_preset = i;
+    }
+}
+
+impl Default for PaintOptions {
+    fn default() -> Self {
+        PaintOptions {
+            foreground: [0.0, 0.0, 0.0],
+            background: [1.0, 1.0, 1.0],
+            opacity: 100.0,
+            flow: 100.0,
+            mode: "normal".to_owned(),
+            channels: "rgba".to_owned(),
+            duration: "constant".to_owned(),
+            frames: 1,
+            erase: "layer_and_paint".to_owned(),
+            clone_source: None,
+            aligned: true,
+            lock_source_time: false,
+            clone_offset: [0.0, 0.0],
+            clone_time_shift: 0.0,
+            clone_source_time: 0.0,
+            diameter: 21.0,
+            angle: 0.0,
+            roundness: 100.0,
+            hardness: 100.0,
+            spacing: 25.0,
+            dynamics: [1, 0, 0, 0, 0],
+            minimum_size: 1.0,
+            clone_overlay: false,
+            overlay_opacity: 50.0,
+            clone_presets: Default::default(),
+            clone_preset: 0,
+        }
+    }
+}
+
+/// What the Selection tool's 3D gizmo does (AE's 3D Gizmo modes).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GizmoMode {
+    #[default]
+    Position,
+    Scale,
+    Rotation,
+}
+
+/// AE's 3D Gizmo shortcuts: `(action id, English title, chord, mode)`; `None`
+/// goes to the next mode.
+const GIZMOS: &[(&str, &str, &str, Option<GizmoMode>)] = &[
+    (
+        "motion.tool.gizmo_position",
+        "3D Gizmo: Position",
+        "4",
+        Some(GizmoMode::Position),
+    ),
+    (
+        "motion.tool.gizmo_scale",
+        "3D Gizmo: Scale",
+        "5",
+        Some(GizmoMode::Scale),
+    ),
+    (
+        "motion.tool.gizmo_rotate",
+        "3D Gizmo: Rotation",
+        "6",
+        Some(GizmoMode::Rotation),
+    ),
+    (
+        "motion.tool.gizmo_toggle",
+        "Toggle 3D Gizmo Mode",
+        "Shift+V",
+        None,
+    ),
+];
+
 /// Options of the tools, shown right of the tool buttons. First-run values follow
 /// the spec's best understanding of AE's (AE-SHP-057, 待核).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -630,15 +947,23 @@ pub struct ToolOptions {
     pub creates_mask: bool,
     /// Snapping (Selection, Rotation, Pan Behind, shape and pen tools).
     pub snapping: bool,
+    /// Snap to edges extended beyond layer bounds (AE, off by default).
+    pub snap_edges: bool,
+    /// Snap to features inside collapsed compositions and text layers (AE,
+    /// on by default).
+    pub snap_features: bool,
     /// Type and paint tools: open the Character / Paragraph (Paint / Brushes) panels.
     pub auto_open_panels: bool,
     pub axis_mode: AxisMode,
+    pub gizmo: GizmoMode,
     /// Rotation tool on 3D layers: set Orientation (true) or Rotation.
     pub rotation_sets_orientation: bool,
     /// Rounded Rectangle tool: last roundness in pixels.
     pub roundness: f64,
     /// Polygon and Star tools: last number of points.
     pub points: f64,
+    /// Paint and Brushes panels.
+    pub paint: PaintOptions,
     /// Puppet tools: show the mesh, expansion and density.
     pub puppet_show_mesh: bool,
     pub puppet_expansion: f64,
@@ -658,11 +983,15 @@ impl Default for ToolOptions {
             roto_bezier: false,
             creates_mask: false,
             snapping: false,
+            snap_edges: false,
+            snap_features: true,
             auto_open_panels: true,
             axis_mode: AxisMode::Local,
+            gizmo: GizmoMode::Position,
             rotation_sets_orientation: true,
             roundness: 10.0,
             points: 5.0,
+            paint: PaintOptions::default(),
             puppet_show_mesh: false,
             puppet_expansion: 3.0,
             puppet_density: 10.0,
@@ -678,6 +1007,8 @@ pub enum ViewRequest {
     Center,
     /// Double-click Zoom: magnification 100%.
     Actual,
+    /// View ▸ Fit up to 100% (Alt/Option+/).
+    FitUpTo100,
 }
 
 /// A double-click on a shape tool button (AE-SHP-054), applied by the viewer.
@@ -696,6 +1027,7 @@ pub struct ToolState {
     last: HashMap<Group, Tool>,
     momentary: Option<Momentary>,
     pub options: ToolOptions,
+    pub(crate) brushes: crate::paint_panels::BrushLibrary,
     /// For the viewer (see [`ViewRequest`]).
     pub view_request: Option<ViewRequest>,
     /// A shape tool button was double-clicked: the viewer adds a layer- or
@@ -720,6 +1052,7 @@ impl Default for ToolState {
             last: HashMap::new(),
             momentary: None,
             options: ToolOptions::default(),
+            brushes: Default::default(),
             view_request: None,
             fill_request: None,
             center_anchor_request: false,
@@ -737,6 +1070,7 @@ struct Saved {
     tool: Option<Tool>,
     last: Vec<Tool>,
     options: ToolOptions,
+    brushes: crate::paint_panels::BrushLibrary,
 }
 
 impl ToolState {
@@ -771,12 +1105,17 @@ impl ToolState {
         }
     }
 
-    fn apply(&self, shortcut: Shortcut) -> Tool {
+    fn apply(&self, shortcut: Shortcut, toggle_pen: bool) -> Tool {
         match shortcut {
             Shortcut::Tool(t) => t,
             Shortcut::Group { group, cycle } => {
                 if cycle && self.current.group() == group {
-                    self.next_in_group(group, false)
+                    self.next_in_group(group, group == Group::Pen && !toggle_pen)
+                } else if group == Group::Pen
+                    && toggle_pen
+                    && !group.cycle().contains(&self.shown(group))
+                {
+                    Tool::Pen
                 } else {
                     self.shown(group)
                 }
@@ -804,7 +1143,7 @@ impl ToolState {
     }
 
     /// Run a tool shortcut (`motion.tool.*`). Returns false for other actions.
-    pub fn shortcut(&mut self, action: &str) -> bool {
+    pub fn shortcut(&mut self, action: &str, toggle_pen: bool) -> bool {
         let Some((_, _, _, what)) = SHORTCUTS.iter().find(|(id, ..)| *id == action) else {
             return false;
         };
@@ -817,7 +1156,7 @@ impl ToolState {
             return true;
         }
         let previous = self.momentary.as_ref().map_or(self.current, |m| m.previous);
-        let tool = self.apply(*what);
+        let tool = self.apply(*what, toggle_pen);
         self.set(tool);
         self.momentary = Some(Momentary {
             action: action.to_owned(),
@@ -861,6 +1200,7 @@ impl ToolState {
             tool: Some(self.current),
             last: self.last.values().copied().collect(),
             options: self.options.clone(),
+            brushes: self.brushes.clone(),
         };
         serde_json::to_value(saved).unwrap_or_default()
     }
@@ -876,6 +1216,7 @@ impl ToolState {
             self.set(t);
         }
         self.options = saved.options;
+        self.brushes = saved.brushes;
     }
 }
 
@@ -913,12 +1254,62 @@ impl ActionHandler for ToolActions {
     }
 
     fn handle(&self, inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
+        if inv.id == ids::RESOLUTION {
+            let factor = inv
+                .params
+                .get("factor")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1);
+            let session = crate::common::session(cx.resources);
+            let nested = inv.params.get("nested").and_then(|v| v.as_bool()) == Some(true);
+            let f = factor.max(1) as u32;
+            crate::viewer::set_resolution(cx, &session, [f, f], nested);
+            return true;
+        }
         if inv.id == ids::NUDGE {
             // Another panel has focus (the viewer handles it itself).
             let p = |k: &str| inv.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
             let mag = f64::from(shared(cx.resources).lock().magnification);
             let session = crate::common::session(cx.resources);
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
+        }
+        if crate::viewer::view3d::handle(inv, cx) || crate::viewer::guides::handle(inv, cx) {
+            return true;
+        }
+        if let Some((.., mode)) = GIZMOS.iter().find(|(id, ..)| *id == inv.id) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            let o = &mut t.options;
+            o.gizmo = mode.unwrap_or(match o.gizmo {
+                GizmoMode::Position => GizmoMode::Scale,
+                GizmoMode::Scale => GizmoMode::Rotation,
+                GizmoMode::Rotation => GizmoMode::Position,
+            });
+            t.set(Tool::Selection);
+            return true;
+        }
+        if crate::viewer::look_at(inv, cx) {
+            return true;
+        }
+        if inv.id == crate::viewer::ZOOM_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
+            return true;
+        }
+        if inv.id == crate::viewer::FIT_UP_TO_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::FitUpTo100);
+            return true;
+        }
+        if crate::viewer::view_options::handle(inv, cx) {
+            return true;
+        }
+        // Ctrl+T with a mask or shape path selected: Free Transform Points,
+        // else the Type tools (AE).
+        if inv.id == ids::TYPE && path_selected(cx) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            t.set(Tool::Selection);
+            t.free_transform_request = true;
+            return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
@@ -927,13 +1318,37 @@ impl ActionHandler for ToolActions {
             t.free_transform_request = true;
             return true;
         }
-        shared(cx.resources).lock().shortcut(&inv.id)
+        let toggle_pen = !matches!(inv.id.as_str(), ids::PEN | ids::PEN_CYCLE)
+            || crate::prefs::current(cx.resources)
+                .bool("composition.pen_shortcut_toggles_mask_feather");
+        shared(cx.resources).lock().shortcut(&inv.id, toggle_pen)
     }
 }
 
 /// Chinese names of the tools and tool options (`docs/glossary.md`; names marked
 /// 待核 in the PR are best effort until R1 checks AE 26's Chinese UI).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // The shape tools' Add menu (AE's ShapeLayer/AddMenu).
+    ("Add Shape Item", "添加形状项"),
+    ("Group (empty)", "组（空）"),
+    ("Polystar", "多边星形"),
+    ("Gradient Fill", "渐变填充"),
+    ("Gradient Stroke", "渐变描边"),
+    ("Merge Paths", "合并路径"),
+    ("Offset Paths", "位移路径"),
+    ("Pucker & Bloat", "收缩和膨胀"),
+    ("Repeater", "中继器"),
+    ("Round Corners", "圆角"),
+    ("Trim Paths", "修剪路径"),
+    ("Twist", "扭转"),
+    ("Wiggle Paths", "摆动路径"),
+    ("Wiggle Transform", "摆动变换"),
+    ("Zig Zag", "Z 字形"),
+    ("Zoom to 100%", "缩放到 100%"),
+    ("3D Gizmo: Position", "3D 位置 Gizmo"),
+    ("3D Gizmo: Scale", "三维缩放 Gizmo"),
+    ("3D Gizmo: Rotation", "三维旋转 Gizmo"),
+    ("Toggle 3D Gizmo Mode", "向前循环 3D Gizmo 模式"),
     ("Orbit Around Scene Tool", "绕场景旋转工具"),
     ("Orbit Around Camera POI Tool", "绕摄像机目标点旋转工具"),
     ("Pan Camera POI Tool", "平移摄像机目标点工具"),
@@ -995,6 +1410,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Bezier Path", "贝塞尔曲线路径"),
     ("RotoBezier", "RotoBezier"),
     ("Snapping", "对齐"),
+    (
+        "Snap to edges extended beyond layer bounds",
+        "沿扩展到图层边界以外的边缘对齐",
+    ),
+    (
+        "Snap to features inside collapsed compositions and text layers",
+        "对齐并显示折叠合成和文本图层内的特性",
+    ),
     ("Auto-Open Panels", "自动打开面板"),
     ("Local Axis Mode", "本地轴模式"),
     ("World Axis Mode", "世界轴模式"),
@@ -1018,6 +1441,22 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Mixed", "混合"),
     // Arrow-key nudges.
     ("Nudge Layer Position", "微移图层位置"),
+    // AE's names of the resolution shortcuts.
+    ("Set Composition Resolution to High", "将合成分辨率设为高"),
+    ("Set Composition Resolution to Half", "将合成分辨率设为一半"),
+    ("Set Composition Resolution to Low", "将合成分辨率设为低"),
+    (
+        "Set Composition Resolution to High for the Focused and Nested Comps",
+        "将“合成分辨率”设置为“高”，以便对嵌套在其中的焦点合成和预合成进行处理",
+    ),
+    (
+        "Set Composition Resolution to Half for the Focused and Nested Comps",
+        "将“合成分辨率”设置为“一半”，以便对嵌套在其中的焦点合成和预合成进行处理",
+    ),
+    (
+        "Set Composition Resolution to Low for the Focused and Nested Comps",
+        "将“合成分辨率”设置为“低”，以便对嵌套在其中的焦点合成和预合成进行处理",
+    ),
     ("Free Transform Points", "自由变换点"),
     ("Nudge Up", "向上微移"),
     ("Nudge Down", "向下微移"),

@@ -22,9 +22,8 @@
 //!
 //! `string` and `asset` are reserved until the document model has those
 //! parameter kinds. Relative point defaults (a fraction of the layer size)
-//! cannot be expressed as a static `EffectDef` default; they are `None` there
-//! and resolved by the effect implementation against the layer bounds
-//! ([`relative_point_default`]).
+//! keep the fraction as the `EffectDef` default with
+//! `ParamFlags::relative_default`; the model resolves the coordinates for the target layer.
 
 use bae_model::{EffectDef, EffectParamDef, ParamFlags, ParamKind, PluginRef, Value};
 
@@ -39,23 +38,23 @@ use crate::manifest::{
 /// manifests only (invalid values are mapped best-effort).
 pub fn effect_def(plugin: &PluginInfo, effect: &EffectDecl) -> EffectDef {
     let mut params = Vec::with_capacity(effect.params.len() + 2);
-    let mut open_group: Option<(&str, u32)> = None;
+    let mut groups = Vec::<(&str, u32)>::new();
     for p in &effect.params {
         // Close the open group when this param is not one of its members.
-        if let Some((key, end_id)) = open_group
+        while let Some(&(key, end_id)) = groups.last()
             && p.group.as_deref() != Some(key)
         {
             params.push(group_end(end_id));
-            open_group = None;
+            groups.pop();
         }
         if let Some(def) = param_def(p) {
             params.push(def);
         }
         if p.ty == ParamType::Group {
-            open_group = Some((&p.key, p.end_id.unwrap_or(0)));
+            groups.push((&p.key, p.end_id.unwrap_or(0)));
         }
     }
-    if let Some((_, end_id)) = open_group {
+    for (_, end_id) in groups.into_iter().rev() {
         params.push(group_end(end_id));
     }
     let wgsl = effect.implementation == EffectImplementation::Wgsl;
@@ -125,13 +124,10 @@ pub fn param_def(p: &ParamDecl) -> Option<EffectParamDef> {
             ParamKind::Color,
             Some(Value::Color([nums[0], nums[1], nums[2], nums[3]])),
         ),
-        ParamType::Point => (
-            ParamKind::Point,
-            (!p.is_relative_point()).then(|| Value::Vec2([nums[0], nums[1]])),
-        ),
+        ParamType::Point => (ParamKind::Point, Some(Value::Vec2([nums[0], nums[1]]))),
         ParamType::Point3d => (
             ParamKind::Point3d,
-            (!p.is_relative_point()).then(|| Value::Vec3([nums[0], nums[1], nums[2]])),
+            Some(Value::Vec3([nums[0], nums[1], nums[2]])),
         ),
         ParamType::Popup => (
             ParamKind::Popup {
@@ -160,15 +156,8 @@ pub fn param_def(p: &ParamDecl) -> Option<EffectParamDef> {
             cannot_time_vary: p.has_flag(ParamFlag::CannotTimeVary),
             collapsed: p.has_flag(ParamFlag::StartCollapsed) || p.collapsed == Some(true),
             custom_ui: false,
+            relative_default: p.is_relative_point(),
+            reference_point_default: false,
         },
     })
-}
-
-/// The default of a relative point param for a layer of `layer_size` pixels.
-pub fn relative_point_default(p: &ParamDecl, layer_size: [f64; 2]) -> Value {
-    let n = p.default_numbers();
-    match p.ty {
-        ParamType::Point3d => Value::Vec3([n[0] * layer_size[0], n[1] * layer_size[1], n[2]]),
-        _ => Value::Vec2([n[0] * layer_size[0], n[1] * layer_size[1]]),
-    }
 }

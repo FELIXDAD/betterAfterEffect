@@ -1,0 +1,7 @@
+{
+  "width": 192, "height": 96, "font": "ArialMT", "size": 40, "text": "HHHH",
+  "cases": [
+    {"name": "plain"},
+    {"name": "square_half", "start": 12.5, "end": 62.5, "offset": 0, "position": [0, 20], "opacity": 20}
+  ]
+}

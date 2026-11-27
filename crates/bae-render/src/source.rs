@@ -14,9 +14,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, wgpu};
-use bae_model::Time;
+use bae_model::{PrimPath, Time};
 use rustc_hash::FxHashMap;
 
+use crate::effect::{LayerDependency, MaskSelect};
 use crate::error::RenderError;
 use crate::geom::IRect;
 use crate::input::CustomContent;
@@ -43,6 +44,10 @@ pub enum ImageAlpha {
 /// bucketed); only those texels are defined.
 #[derive(Clone, Debug)]
 pub struct GpuImage {
+    /// Content identity of the producing render node, independent of the texture pool.
+    pub(crate) content_key: Option<u64>,
+    /// Original channel planes of a decoded footage source.
+    pub channels: Option<Arc<bae_gpu::channels::FootageChannels>>,
     /// The texture (needs `TEXTURE_BINDING`).
     pub texture: wgpu::Texture,
     /// A view of the texture.
@@ -75,11 +80,13 @@ impl GpuImage {
     ) -> Self {
         Self {
             texture,
+            content_key: None,
             view,
             rect,
             alpha,
             pixel_scale,
             lease: None,
+            channels: None,
         }
     }
 
@@ -100,6 +107,23 @@ impl GpuImage {
     /// True when the texture belongs to the renderer's pool.
     pub fn is_pooled(&self) -> bool {
         self.lease.is_some()
+    }
+
+    /// Stable identity for derived surfaces. Untracked external textures have no key.
+    pub fn content_key(&self) -> Option<u64> {
+        use std::hash::BuildHasher;
+        Some(rustc_hash::FxBuildHasher.hash_one((
+            self.content_key?,
+            self.rect,
+            self.pixel_scale.to_bits(),
+            self.alpha,
+        )))
+    }
+
+    /// Identify a derived image by the operation, its input content and all parameters.
+    pub fn with_content_key(mut self, key: u64) -> Self {
+        self.content_key = Some(key);
+        self
     }
 
     /// Texels that hold the image: `rect` divided by `pixel_scale`, rounded up.
@@ -155,16 +179,67 @@ pub struct EncodeContext<'a> {
     /// Working texture format.
     pub format: wgpu::TextureFormat,
     pub(crate) allocator: &'a mut dyn ImageAllocator,
+    pub(crate) intermediates: Option<crate::cache::IntermediateImages<'a>>,
+    pub(crate) effect_inputs: &'a [(LayerDependency, GpuImage)],
+    pub(crate) effect_masks: &'a [(MaskSelect, GpuImage)],
 }
 
 impl EncodeContext<'_> {
+    /// Reads a derived GPU surface previously encoded for these inputs.
+    pub fn cached_image(&mut self, key: crate::FrameKey) -> Option<GpuImage> {
+        self.intermediates.as_mut()?.get(key)
+    }
+
+    /// Publishes the surface only if this frame is complete and submitted.
+    pub fn remember_image(&mut self, key: crate::FrameKey, image: GpuImage) {
+        if let Some(cache) = &mut self.intermediates {
+            cache.store(key, image);
+        }
+    }
+    /// The first image of `layer` the current effect requested
+    /// ([`crate::Effect::layer_dependencies`]). `None` when the layer has no
+    /// pixels then (outside its in / out points, missing footage).
+    pub fn effect_input(&self, layer: &PrimPath) -> Option<&GpuImage> {
+        self.effect_inputs
+            .iter()
+            .find(|(d, _)| d.layer == *layer)
+            .map(|(_, image)| image)
+    }
+
+    /// The image of exactly `dependency` (layer, time and stage).
+    pub fn effect_layer(&self, dependency: &LayerDependency) -> Option<&GpuImage> {
+        self.effect_inputs
+            .iter()
+            .find(|(d, _)| d == dependency)
+            .map(|(_, image)| image)
+    }
+
+    /// The coverage image (alpha) of `masks` of the effect's layer
+    /// ([`crate::Effect::mask_dependencies`]).
+    pub fn effect_mask(&self, masks: &MaskSelect) -> Option<&GpuImage> {
+        self.effect_masks
+            .iter()
+            .find(|(m, _)| m == masks)
+            .map(|(_, image)| image)
+    }
+
     /// A working-format image covering `rect` (pixels of its space) at
     /// `pixel_scale` pixels per texel, usable as a render attachment and storage
     /// texture. Its contents are undefined (clear
     /// or overwrite all of `rect`). The texture comes from the renderer's pool
     /// and returns there when every clone of the image is dropped.
     pub fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
-        self.allocator.allocate(rect, pixel_scale)
+        self.allocate_format(rect, pixel_scale, self.format)
+    }
+
+    /// A pooled intermediate with the attachment format required by the effect.
+    pub fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
+        self.allocator.allocate(rect, pixel_scale, format)
     }
 }
 
@@ -178,7 +253,12 @@ impl fmt::Debug for EncodeContext<'_> {
 
 /// Hands out pooled working images (implemented by the renderer).
 pub(crate) trait ImageAllocator {
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError>;
+    fn allocate(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError>;
 }
 
 /// Pixels of a layer (footage, shapes, text, generators).
@@ -197,6 +277,12 @@ pub trait LayerSource: Send + Sync {
 
     /// Hash of everything that affects the pixels at `time` (cache key part).
     fn content_hash(&self, time: Time) -> u64;
+
+    /// Frame rate of a time-based source (footage), for frame blending; `None`
+    /// for stills and generated content.
+    fn frame_rate(&self) -> Option<bae_model::FrameRate> {
+        None
+    }
 
     /// Produces an image covering at least `request.roi`. Implementations either
     /// return a texture they own (decoded footage: zero copy) or draw into an

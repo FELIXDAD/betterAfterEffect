@@ -145,13 +145,14 @@ impl VideoCodec {
     pub fn supports_alpha(self) -> bool {
         match self {
             Self::H264 => false,
-            Self::Hevc | Self::Png | Self::Exr(_) | Self::Tiff(_) => true,
+            Self::Hevc => cfg!(target_vendor = "apple"),
+            Self::Png | Self::Exr(_) | Self::Tiff(_) => true,
             Self::ProRes(profile) => profile.supports_alpha(),
         }
     }
 }
 
-/// Audio in an export (reserved: muxing audio lands with the audio PR).
+/// Audio output format negotiated by the native movie encoder.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioEncodeSettings {
     /// Samples per second (48 000 by default).
@@ -160,6 +161,32 @@ pub struct AudioEncodeSettings {
     pub channels: u16,
     /// Codec name (`"aac"`, `"pcm_s24le"` …).
     pub codec: String,
+}
+
+impl AudioEncodeSettings {
+    pub fn aac_stereo() -> Self {
+        Self {
+            sample_rate: 48_000,
+            channels: 2,
+            codec: "aac".into(),
+        }
+    }
+
+    /// Native AAC-LC encoders accept float stereo from the composition mixer.
+    pub fn validate_input(&self, pcm: &AudioBuffer) -> Result<(), MediaError> {
+        if self.sample_rate != pcm.sample_rate
+            || self.channels != pcm.channels
+            || !pcm
+                .samples
+                .len()
+                .is_multiple_of(usize::from(self.channels.max(1)))
+        {
+            return Err(MediaError::Unsupported(
+                "audio buffer does not match the encoder".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Everything an encoder needs to know (AE's Output Module settings).
@@ -199,7 +226,7 @@ pub struct EncodeSettings {
     pub start_number: i64,
     /// Start timecode written to movies / EXR headers.
     pub start_timecode: Option<Timecode>,
-    /// Audio (reserved).
+    /// Optional native AAC track for movie exports.
     pub audio: Option<AudioEncodeSettings>,
     /// PNG compression effort (PNG only).
     #[serde(default)]
@@ -300,6 +327,25 @@ impl EncodeSettings {
         if !depth_ok {
             return bad(format!("{} bit {:?}", self.bit_depth, self.codec));
         }
+        if let Some(audio) = &self.audio
+            && (!(audio.codec == "aac"
+                || (audio.codec == "pcm_s24le"
+                    && cfg!(target_os = "macos")
+                    && self
+                        .path
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("mov"))))
+                || !matches!(audio.sample_rate, 44_100 | 48_000)
+                || !(1..=2).contains(&audio.channels)
+                || !matches!(
+                    self.codec,
+                    VideoCodec::H264 | VideoCodec::Hevc | VideoCodec::ProRes(_)
+                ))
+        {
+            return bad(
+                "Unsupported movie audio codec, container, sample rate or channel count".into(),
+            );
+        }
         // 4:2:0 / 4:2:2 chroma subsampling needs even sizes.
         if matches!(
             self.codec,
@@ -366,10 +412,29 @@ pub trait Encoder: Send {
         self.push_frame(&frame)
     }
 
-    /// Appends audio (reserved).
+    /// Consume borrowed GPU readback rows before the staging buffer is unmapped.
+    /// Return false without consuming a frame if conversion or ownership is needed.
+    fn push_mapped_rows(
+        &mut self,
+        _format: PixelFormat,
+        _alpha: AlphaMode,
+        _size: [u32; 2],
+        _stride: usize,
+        _bytes: &[u8],
+    ) -> Result<bool, MediaError> {
+        Ok(false)
+    }
+
+    /// Appends interleaved PCM to a configured audio track.
     fn push_audio(&mut self, audio: &AudioBuffer) -> Result<(), MediaError> {
         let _ = audio;
         Err(MediaError::Unsupported("audio in this encoder".into()))
+    }
+
+    /// No more audio follows (the movie's frames may still come): an
+    /// interleaving writer stops waiting for audio past its end.
+    fn end_audio(&mut self) -> Result<(), MediaError> {
+        Ok(())
     }
 
     /// Frames written so far.

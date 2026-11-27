@@ -193,6 +193,7 @@ fn title_batch() -> Json {
             {"command": "prim.create", "params": {"path": title, "prim_type": "Layer"}},
             {"command": "attr.set", "params": {"path": title, "attr": "kind",
                 "value": {"type": "enum", "value": "text"}}},
+            {"command": "text_create_animator", "params": {"layer": title, "name": "rise"}},
             {"command": "key.set", "params": {"path": title, "attr": "transform:opacity",
                 "time": {"frame": 0}, "keyframe": {"value": {"type": "float", "value": 0.0}}}},
             {"command": "key.set", "params": {"path": title, "attr": "transform:opacity",
@@ -236,6 +237,7 @@ async fn agent_builds_animates_renders_and_proposes() {
         "history_undo",
         "attr_set",
         "key_set",
+        "text_create_animator",
         "sublayer_merge",
         "proposal_accept",
     ] {

@@ -108,8 +108,8 @@ fn rich() -> Ui {
     h
 }
 
-const TIMELINE: (&str, egui::Vec2) = ("Layer Name", egui::vec2(700.0, 120.0));
-const VIEWER: (&str, egui::Vec2) = ("Fit", egui::vec2(300.0, -250.0));
+const TIMELINE: (&str, egui::Vec2) = ("Source Name", egui::vec2(700.0, 120.0));
+const VIEWER: (&str, egui::Vec2) = (FITTED, egui::vec2(300.0, -250.0));
 
 /// Enabled menu items that do nothing in the state of [`rich`] (a layer
 /// selected, no keyframe selected), with their issue. Remove when fixed.
@@ -118,7 +118,7 @@ const KNOWN_NOOPS: &[(&str, &str)] = &[];
 /// Clicks an empty part of the panel whose header shows `anchor`.
 fn focus(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
     let at =
-        find_text(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
+        find_anchor(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
     click_at(h, at.center() + offset);
 }
 
@@ -130,6 +130,17 @@ fn egui_modifiers(c: &bae_ui::keymap::Chord) -> Modifiers {
         mac_cmd: c.command,
         command: c.command,
     }
+}
+
+/// The panel every AE shortcut of `action` is bound in, when they all are in
+/// the same one (`None`: application-wide).
+fn panel_only_scope(action: &str) -> Option<&'static str> {
+    let mut scopes = bae_ui_motion::catalog::keys()
+        .iter()
+        .filter(|k| k.action == action)
+        .map(|k| k.scope());
+    let first = scopes.next()??;
+    scopes.all(|s| s == Some(first)).then_some(first)
 }
 
 #[test]
@@ -144,7 +155,14 @@ fn every_implemented_ae_shortcut_runs_its_command_once() {
         // Panels the harness can focus; the others are covered by their own tests.
         // Viewer actions work in the viewer (AE binds them to its viewer
         // contexts only); the rest with the Timeline focused.
-        let target = match row.scope.as_str() {
+        // A menu row whose AE shortcut works in one panel only (File ▸ New ▸
+        // New Folder: the Project panel, where View ▸ Split with New Locked
+        // Viewer has the same chord in the viewer) takes that panel's scope.
+        let scope = match row.scope.as_str() {
+            "" => panel_only_scope(&row.action).unwrap_or(""),
+            s => s,
+        };
+        let target = match scope {
             _ if row.action.starts_with("viewer.") => VIEWER,
             "" | "timeline" => TIMELINE,
             "composition" => VIEWER,
@@ -234,6 +252,14 @@ fn menus_show_the_ae_shortcuts() {
 /// (the document answers "unknown"), and none may panic.
 #[test]
 fn every_enabled_menu_item_does_something() {
+    // Last Effect remembers effects applied across projects in the same process.
+    // Start this fresh-launch menu check without another test's effect history.
+    if !in_child(
+        "acceptance::release_001::every_enabled_menu_item_does_something",
+        &[],
+    ) {
+        return;
+    }
     let items = rich().state().menu_items();
     let mut problems = Vec::new();
     let mut ran = 0;
@@ -261,17 +287,20 @@ fn every_enabled_menu_item_does_something() {
         }
     }
     println!("enabled menu items run: {ran} of {}", items.len());
-    // 0.0.1 has no effects: the Effect menu is greyed as a whole.
+    // The layer has no effects: the Effect menu greys what needs one (Last
+    // Effect, Remove All). Effect Controls opens the panel and Manage
+    // Effects… its window, enabled in AE as well.
     let effect = bae_ui::tr("Effect");
     for item in items
         .iter()
         .filter(|i| i.path.first().is_some_and(|p| p == "Effect" || p == effect))
     {
-        // Effect ▸ Effect Controls opens the panel (enabled in AE as well).
-        if item.enabled && item.invocation.id != "window.panel" {
+        let always = ["window.panel", "motion.effect.manage_effects"];
+        if item.enabled && !always.contains(&item.invocation.id.as_str()) {
             problems.push(format!(
-                "Effect menu item enabled: {}",
-                item.path.join(" ▸ ")
+                "Effect menu item enabled: {} ({})",
+                item.path.join(" ▸ "),
+                item.invocation.id
             ));
         }
     }
@@ -503,8 +532,7 @@ fn type_into(h: &mut Ui, label: &str, text: &str) {
     key(h, Modifiers::NONE, Key::Tab);
 }
 
-/// Cmd+N, `field` set to `text`, Enter straight from the field (OK): the new
-/// comp's settings (Tab then Enter: `enter_is_ok_after_tab_to_a_swatch`).
+/// Edit a numeric field, commit it, then accept the composition settings.
 fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::CompInfo {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
@@ -517,6 +545,8 @@ fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::Comp
     } else {
         type_text(h, text);
     }
+    key(h, Modifiers::NONE, Key::Enter);
+    assert!(dialog_open(h), "{field} should commit before closing");
     key(h, Modifiers::NONE, Key::Enter);
     assert!(
         !dialog_open(h),
@@ -647,13 +677,20 @@ const SETTINGS_PAGES: &[&str] = &[
 
 fn new_ui_in_one_language(zh: bool) {
     crate::i18n::init_from_env();
-    let (mut h, extra_ok) = super::i18n_retest::gui_with_status();
+    let mut h = super::i18n_retest::gui_with_status();
     comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
     let solid = h.state().layers()[1].clone();
     let mut problems = Vec::new();
     let mut scan = |h: &mut Ui, step: &str| {
         settle(h);
-        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok) {
+        // AE's zh_CN Preferences uses these exact labels on these two pages
+        // (docs/reference/ae/ui/preferences-dialog.json).
+        let expected_zh_label = match step {
+            "settings project" => Some("New Project"),
+            "settings scripting_expressions" => Some("px"),
+            _ => None,
+        };
+        for p in super::i18n_retest::wrong_language(h, zh, expected_zh_label) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -715,7 +752,7 @@ fn new_ui_in_one_language(zh: bool) {
             .collect();
     // Keyframe dialogs are Timeline actions: focus it (the click clears the
     // selection, so select the keys afterwards).
-    focus(&mut h, bae_ui::tr("Layer Name"), TIMELINE.1);
+    focus(&mut h, bae_ui::tr("Source Name"), TIMELINE.1);
     for (step, m, k) in [
         (
             "keyframe interpolation",
@@ -826,7 +863,8 @@ fn new_layer_properties_survive_save_as_bae_and_baez() {
             continue;
         }
         settle(&mut h);
-        if dialog_open(&h) {
+        // A dialog, or Preferences (Edit ▸ Label ▸ Edit Label Colors…).
+        if dialog_open(&h) || h.state().workspace.modal_open(h.state().app.resources()) {
             key(&mut h, Modifiers::NONE, Key::Escape);
         }
         ran.push(format!("{} ▸ {}", item.path.join(" ▸ "), item.title));
@@ -1254,9 +1292,11 @@ fn close_project_leaves_no_old_comp_name_in_the_panels() {
 fn render_queue_output_defaults_to_movies_on_macos() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = h.state().render_queue();
-    let output = queue.lock().items().last().unwrap().output.clone();
+    let output = queue.lock().items().last().unwrap().outputs[0]
+        .output
+        .clone();
     let movies = bae_platform::dirs::home_dir().unwrap().join("Movies");
     assert!(
         std::path::Path::new(&output).starts_with(&movies),
@@ -1311,4 +1351,138 @@ fn cmd_modifier_c_and_v_run_their_commands_on_macos() {
         "the text paste pasted layers"
     );
     no_failures(&h, "#220");
+}
+
+// ---------------------------------------------------------------------------
+// #222 retest: Cmd+Z in a text field never brings back IME composition text.
+
+/// An IME composition as egui-winit passes macOS's on (Preedit steps, an empty
+/// Preedit, Commit), each step held for ~1.25 s of frames: egui's TextEdit
+/// takes an undo snapshot when an edit has lasted 1 s.
+fn compose_slowly(h: &mut Ui, preedit: &[&str], commit: &str) {
+    for p in preedit {
+        send(
+            h,
+            Event::Ime(egui::ImeEvent::Preedit {
+                text: (*p).to_owned(),
+                active_range_chars: Some(0..p.chars().count()),
+            }),
+        );
+        for _ in 0..75 {
+            frame(h);
+        }
+    }
+    send(
+        h,
+        Event::Ime(egui::ImeEvent::Preedit {
+            text: String::new(),
+            active_range_chars: None,
+        }),
+    );
+    send(h, Event::Ime(egui::ImeEvent::Commit(commit.to_owned())));
+    settle(h);
+}
+
+/// The value of the focused text field (accessibility tree).
+fn focused_text(h: &Ui) -> Option<String> {
+    use egui_kittest::kittest::{AccessKitNode, NodeT as _};
+    fn walk(n: AccessKitNode<'_>) -> Option<String> {
+        if n.is_focused()
+            && matches!(
+                n.role(),
+                egui::accesskit::Role::TextInput | egui::accesskit::Role::MultilineTextInput
+            )
+        {
+            return Some(n.value().unwrap_or_default());
+        }
+        n.children().find_map(walk)
+    }
+    walk(h.root().accesskit_node())
+}
+
+/// In the focused field: “wqgt” composed slowly (preedit w'q'g't) and committed,
+/// replaced by a pasted “Dark”, then 你好 composed (preedit ni'hao) and “X”
+/// typed; Cmd+Z six times. Returns the problems.
+fn ime_undo_in_focused_field(h: &mut Ui, field: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    let undo_before = h.state().doc.undo_state().0;
+    key(h, Modifiers::COMMAND, Key::A);
+    key(h, Modifiers::NONE, Key::Backspace);
+    compose_slowly(h, &["w", "w'q", "w'q'g't"], "wqgt");
+    let committed = focused_text(h);
+    if committed.as_deref() != Some("wqgt") {
+        problems.push(format!(
+            "{field}: after the commit the field is {committed:?}"
+        ));
+    }
+    // A user pauses between steps (egui groups edits within 1 s into one undo step).
+    let pause = |h: &mut Ui| {
+        for _ in 0..75 {
+            frame(h);
+        }
+    };
+    pause(h);
+    key(h, Modifiers::COMMAND, Key::A);
+    send(h, Event::Paste("Dark".into()));
+    settle(h);
+    pause(h);
+    compose_slowly(h, &["n", "ni'h", "ni'hao"], "你好");
+    type_text(h, "X");
+    let mut seen = vec![focused_text(h).unwrap_or_default()];
+    for _ in 0..6 {
+        key(h, Modifiers::COMMAND, Key::Z);
+        seen.push(focused_text(h).unwrap_or_default());
+    }
+    println!("{field}: {seen:?}");
+    if seen.iter().any(|v| v.contains('\'')) {
+        problems.push(format!(
+            "{field}: Cmd+Z brought back composition text: {seen:?}"
+        ));
+    }
+    if !seen.iter().any(|v| v == "wqgt") {
+        problems.push(format!("{field}: Cmd+Z never got back to “wqgt”: {seen:?}"));
+    }
+    if h.state().doc.undo_state().0 != undo_before {
+        problems.push(format!("{field}: the project's undo changed"));
+    }
+    problems
+}
+
+#[test]
+fn undo_in_text_fields_skips_ime_composition() {
+    use egui_kittest::kittest::Queryable as _;
+    let mut problems = Vec::new();
+    // Project panel search.
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let search = h
+        .root()
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .expect("project search field")
+        .rect();
+    click_at(&mut h, search.center());
+    problems.extend(ime_undo_in_focused_field(&mut h, "project search"));
+    // Layer rename (Enter on the selected layer).
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    focus(&mut h, TIMELINE.0, TIMELINE.1);
+    let layer = h.state().layers()[0].clone();
+    select(&h, std::slice::from_ref(&layer));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(h.ctx.text_edit_focused(), "Enter did not start renaming");
+    problems.extend(ime_undo_in_focused_field(&mut h, "layer rename"));
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    // Type tool: click in the viewer, then the text being typed.
+    let mut h = gui();
+    comp_with(&mut h, &[]);
+    key(&mut h, Modifiers::COMMAND, Key::T);
+    let c = canvas(&h);
+    click_at(&mut h, c.center());
+    if h.ctx.text_edit_focused() {
+        problems.extend(ime_undo_in_focused_field(&mut h, "type tool"));
+    } else {
+        problems.push("type tool: no focused text field after the click".into());
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }

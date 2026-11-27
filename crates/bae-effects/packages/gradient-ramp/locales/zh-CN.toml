@@ -1,0 +1,17 @@
+[effect.gradient-ramp]
+name = "梯度渐变"
+keywords = ["梯度渐变"]
+
+[effect.gradient-ramp.params]
+start_of_ramp = "渐变起点"
+start_color = "起始颜色"
+end_of_ramp = "渐变终点"
+end_color = "结束颜色"
+ramp_shape = "渐变形状"
+ramp_scatter = "渐变散射"
+blend_with_original = "与原始图像混合"
+swap_colors = ""
+
+[effect.gradient-ramp.choices.ramp_shape]
+1 = "线性渐变"
+2 = "径向渐变"

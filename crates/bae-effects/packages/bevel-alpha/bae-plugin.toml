@@ -1,0 +1,58 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "bevel-alpha"
+name = "Bevel Alpha"
+category = "Perspective"
+implementation = "wgsl"
+ae_match_names = ["ADBE Bevel Alpha"]
+keywords = ["bevel alpha"]
+shader = "shaders/bevel_alpha.wgsl"
+identity_when = "params.thickness == 0 || params.intensity == 0"
+
+[effect.roi]
+read = "params.thickness"
+
+[[effect.pass]]
+entry = "bevel_alpha"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "thickness"
+type = "float"
+name = "Edge Thickness"
+default = 2
+range = [0, 200]
+
+[[effect.param]]
+id = 2
+key = "angle"
+type = "angle"
+name = "Light Angle"
+default = -60
+
+[[effect.param]]
+id = 3
+key = "light"
+type = "color"
+name = "Light Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 4
+key = "intensity"
+type = "float"
+name = "Light Intensity"
+default = 0.399994
+range = [0, 1]

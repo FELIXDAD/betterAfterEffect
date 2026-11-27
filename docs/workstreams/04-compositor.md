@@ -43,6 +43,8 @@
 
 ## 进度
 
+**2026-11-25 · macOS 平台**：M4 实测 4K 千层合成从 47.31 降至 27.98 ms。Metal 普通仿射图层使用后台预热的管线，相同形状共享栅格，连续同纹理图层按绘制顺序合批。60 Hz 播放时钟交付的新帧由 19.62 提至 30.01 fps，分段数据见 [性能记录](../perf.md#apple-m4-上的-4k-千层合成)。
+
 **2026-11-20**
 
 - PR 1 [interface]：`crates/bae-render` 公共接口。渲染输入 `RenderComp`/`RenderLayer`（纯数据，03 合并前用 `MockEvaluator` 按 schema v1 从 Stage 求值）、AE 全部 38 种混合模式 token、轨道遮罩/遮罩模式、`RenderRequest`（分辨率、ROI、位深、RGBA16F/32F、色彩上下文占位）、`LayerSource`/`SourceProvider`（05/08/插件的图层源接口）、`Effect`/`EffectLibrary`（参数定义复用 `bae_model::EffectDef`）、渲染图节点模型与 ROI 协商（合成、纯色、图层源、效果、轨道遮罩；剔除；缓存键）、`FrameCache`（内存预算 LRU + StageEvent 精确失效）、`fixture::SceneBuilder`（用命令搭测试/基准工程）。
@@ -63,9 +65,36 @@
 - 蒙版（分支 `render/masks`，[interface]，由 F 代做）：`RenderLayer.masks` 开始渲染。路径用 kurbo 展平（与 05 同一个库，不新增依赖；bae-vector 依赖 bae-render，反过来依赖会成环），GPU 上按精确面积累加绕数（非零环绕），扩展是圆角描边轮廓的并 / 差，X/Y 分开的高斯羽化（σ = 0.38 × 羽化，大羽化按轴降采样），7 种模式按 AE-CMP-038 的公式用固定管线混合合成，反转、蒙版不透明度；蒙版在图层空间、效果之前（有效果时先合成一张带蒙版的图层图像，没有效果时图层绘制直接采样蒙版）；一帧所有蒙版共用图集（每页 3 个 pass）；蒙版的支撑范围缩小图层边界。新公共接口：`graph::NodeKind::Mask`、`LayerOp.mask`、`bae_render::mask`、`fixture::{SceneBuilder::mask, rect_path, ellipse_path}`、`TexturePool::acquire_texels`。14 个 GPU 像素测试（`tests/masks.rs`），8 个 AE 对照用例等装了 AE 的机器出 golden（`tests/ae/README.md`）。基准：1080p 50 个图层、60 个每帧都变的羽化蒙版 247 fps（M1 Pro，`docs/perf.md`）。还没有：可变宽度羽化（P1）、羽化衰减"线性"、蒙版运动模糊。
 - 下一步：效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
 
+**2026-11-24**
+
+- 3D 图层与运动模糊（分支 `render/3d-motion-blur`，[interface]）：
+  - 新公共模块 `camera`（AE 摄像机模型：默认摄像机、单/双节点、方向和 X/Y/Z 旋转、`project` / `unproject` / `plane_homography`、镜头换算和预设）、`three_d`（3D 组划分、射影映射、BSP 深度排序与相交切分）、`light`（灯光和材质选项，只有数据）、`motion`（采样数据、AE 的自适应样本数）。`RenderLayer::matrix_3d` / `motion_samples` / `material`，`RenderComp::camera` / `lights` / `motion_blur`；`AnimEvaluator` 从 03 的结果填这些（活动摄像机、启用的灯光、在 03 给的采样时间上求值）。
+  - GPU：3D 图层一次 draw，齐次坐标 + 近平面裁剪，逐像素逆射影映射；相交切块带图层空间半平面，切口抗锯齿；运动模糊在合成着色器里逐像素累加所有样本（单独的 `fs_motion` 管线），不加 pass、不回读。
+  - 与 AE 26.2.1 对照：新增 17 个用例（`tests/ae/`），3D 多数最大差 ≤ 4，2D 运动模糊 ≤ 1–5。实测确认并改正了规格里的几处推测：样本时间是 `t_open + dur·k/N`（改了 03 的 `MotionBlur::sample_times`，一行）、2D 自适应样本数 `floor(d/step)+1`（32 像素以下 step 1.3，以上 1.9）、相交平局 1 像素深度归上层、未折叠的 3D 预合成与其他 3D 图层一起排序。
+  - 基准 `benches/three_d.rs`（M4）：3D 579 fps、2D 运动模糊 24.5 fps（50 个大图层 × 约 27 样本）、B1 不回退（960 fps）。
+  - 还没有：灯光着色与阴影、景深、折叠变换、形状/文字/蒙版动画的逐样本重渲染、帧混合；`threed_floor`（极度透视的斜边抗锯齿比 AE 宽，最大差 25）和 `mb_camera`（15）的剩余差。
+  - 给 09fe9cc0 的查看器（摄像机视图、3D 坐标轴手柄）：接口说明见 `crates/bae-render/README.md`「3D 与摄像机」。
+- 请求 03：运动模糊现在在每个采样时间把整个合成求值一遍（含嵌套合成）。希望 `bae-anim` 提供只求变换（含父级和摄像机）的逐样本接口，例如 `EvaluatedLayer` 带每个采样时间的世界矩阵（AE-ANI-105 的实现提示）。
+
+**2026-11-25**
+
+- 正交视图、灯光着色、自适应采样限制（分支 `render/3d-ortho-lights`，[interface]）：
+  - `camera::OrthoView` + `Camera::orthographic(view, centre, scale)`：AE 的正面、左侧、顶部、背面、右侧、底部，给查看器的 3D 视图菜单（A）。没有透视、不按深度裁剪，深度排序照常。
+  - 灯光着色：点光、聚光、平行光、环境光（强度、颜色、衰减、锥形和羽化）照 3D 图层，用材质选项（接受灯光、环境、漫射、镜面强度、反光度、金属质感）。模型先在 AE 里逐项标定（漫射 Lambert、镜面 Blinn-Phong 指数 = 反光度 %、聚光在余弦上 smoothstep、平滑衰减是 smoothstep、反向平方），8 个 AE 对照用例最大差 1–4。`light::shade` 是 CPU 参考；打光的图层用单独的 `fs_lit` 管线（B1 不受影响）。规格 AE-CMP-432/433/435/436 按实测改了。材质的反射系数进了模型 schema。
+  - 合成的 `motion_blur_adaptive_limit`（16–256，默认 128）进 schema，bae-anim 读它；合成设置命令和对话框的范围从 64–256 改成 AE 的 16–256。
+  - 修了 #288 的一个 3D 问题：切开的图层在切口处有半透明的缝；现在先画的一块越过切口、后画的一块做抗锯齿，屏幕上不重叠的图层不再互相切。
+  - 阴影（投射 / 接受、阴影深度和扩散、透光率）拆到下一个 PR。
+- 阴影（分支 `render/3d-shadows`，叠在 `render/3d-ortho-lights` 上）：灯光「投影」、图层「投影」/「接受阴影」、阴影深度、阴影扩散、透光率，同一 3D 组内。先用 18 个标定合成在 AE 里拟合（扩散 = 方形面光源、透光 = 投射图层自身颜色、深度和不透明度线性），7 个 AE 对照用例最大差 1–33（差都在阴影边缘，AE 阴影图的过滤）。纯色投射图层解析，带图像的经每个合成的阴影图集（`exec/shadow.rs`）；CPU 上剔除不可能投影的投射图层。M1 的 3D（2.5D）到此齐了；还没有「仅」模式和阴影图分辨率选项。
+
+**2026-11-25（时间类）**
+
+- 时间重映射 / 时间伸缩 / 冻结帧（分支 `anim/time-features`）：求值早已支持（`bae-anim` 的图层时间和时间重映射、`bae-media` 的向下取整选帧），这次补了命令和素材：`bae-motion` 新增 `layer.time_remap`（开：源开头和结尾两个线性关键帧；关：删关键帧）、`layer.time_stretch`（伸缩百分比或新持续时间，入点 / 当前帧 / 出点原位定格）、`layer.time_reverse`、`layer.freeze_frame`、`layer.freeze_on_last_frame`，关键帧布局在 AE 里读回核对过（冻结帧两侧定格；在最后一帧上冻结的末键在源时长前一个**合成帧**）。渲染器之前把图像序列当成单张图片打开，现在按素材的帧速率作为序列打开（`FootageRef::sequence`）。6 个 AE 对照用例全部 0 差。对话框和菜单由 09fe9cc0 那组接。
+
+- 帧混合（分支 `anim/frame-blending`，叠在上面那个 PR 上）：图层开关 `frame_blending`（off / frame_mix / pixel_motion，用 `layer.set_attr` 设）和合成开关 `frame_blending`（`attr.set`）都开时，`bae-anim` 给素材图层算出"一个合成帧跨过多少源时间"（时间重映射取前后半帧之差，否则按伸缩），渲染器按 AE 帧混合的权重（在 AE 里量过：帐篷核，慢放时半宽 0.74 帧，快放时 0.93×速度；帧对齐也会混 89/5.5/5.5%）把相邻源帧用 Alpha 相加叠成一张，最多 64 帧。预合成不混（和 AE 一样）。像素运动暂时按帧混合画并给警告，光流在时间效果批次里做（和像素运动模糊、时间扭曲共用）。
+
 - [x] 渲染图与纹理池
 - [ ] 混合模式、遮罩、轨道遮罩
-- [ ] 3D 与运动模糊
+- [x] 3D 与运动模糊（灯光着色、景深除外）
 - [ ] 效果框架与参考效果
 - [ ] 缓存与预览
 - [x] bae render 命令行（PNG）

@@ -1578,7 +1578,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** Turns on Time Remap and creates its default keyframes.
 - **Exact semantics:** Layer > Time > Enable Time Remapping, Ctrl+Alt+T / Cmd+Opt+T.
-  - Creates two Linear keys: at the layer's source start (layer time 0 → value 0) and at the source end (layer time = sourceDuration → value = sourceDuration), i.e. identity mapping (UNVERIFIED: keys sit at the source start/end, not at trimmed In/Out points; the end key is at the time just after the last frame, so the last key's value equals the duration and shows the last frame by clamping).
+  - Creates two Linear keys: at the layer's source start (layer time 0 → value 0) and at the source end (layer time = sourceDuration → value = sourceDuration), i.e. identity mapping. Measured in AE 26.2.1 by 04 (2 s footage: keys 0→0 and 2→2, linear).
   - While enabled the layer's Out point can be extended beyond the source duration (the last value holds).
   - Disabling deletes the Time Remap keys and returns to `t_source = layerTime`.
   - Time stretch is unavailable/ignored while Time Remapping is enabled? UNVERIFIED: AE allows stretch values but the stretch column is greyed for remapped layers.
@@ -1590,8 +1590,8 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** One-step commands that use Time Remap to hold a frame.
 - **Exact semantics:**
-  - Freeze Frame (Layer > Time > Freeze Frame): enables Time Remap (deleting any existing Time Remap keys) and places a single Hold key at the CTI with value = the source time currently shown; the whole layer shows that frame.
-  - Freeze On Last Frame (在最后一帧上冻结): sets Time Remap keys so the layer plays normally and then holds its last frame, and extends the layer Out point to the comp end (AE help). UNVERIFIED key layout: keys at source start (0) and at the last frame time `(lastFrame)/fps` with Hold out.
+  - Freeze Frame (Layer > Time > Freeze Frame): enables Time Remap (deleting any existing Time Remap keys) and places a single key at the CTI, Hold on both sides, with value = the source time currently shown; the whole layer shows that frame. Stretch and Out point are unchanged (measured in AE 26.2.1 by 04).
+  - Freeze On Last Frame (在最后一帧上冻结): keys at source start (0 → 0, linear) and at `sourceDuration − one comp frame` (value equal, linear in / Hold out); the Out point extends to the comp end. Measured in AE 26.2.1 by 04 (2 s of 10 fps footage in a 30 fps comp: last key 1.9667 s).
 - **Priority:** P1
 - **Owner:** bae-motion (+ bae-anim)
 - **Notes:** zh-CN terms 冻结帧 / 在最后一帧上冻结 from the cn help page (Time stretching and time remapping). UNVERIFIED version: a community answer dates Freeze On Last Frame to AE CC 2017 (14.x); Freeze Frame is older.
@@ -1773,7 +1773,9 @@ Conventions used in this file (apply to every item unless an item says otherwise
   dur    = (shutterAngle / 360) * T
   interval = [t_open, t_open + dur]
   // default 180 / -90: interval = [t - T/4, t + T/4], centred on the frame time
-  // N samples (AE-ANI-104):  t_k = t_open + dur * (k + 0.5) / N,  k = 0..N-1     // UNVERIFIED AE distribution
+  // N samples (AE-ANI-104):  t_k = t_open + dur * k / N,  k = 0..N-1
+  // (measured in AE 26.2.1 by 04: first sample at shutter open, last dur/N before it closes;
+  //  crates/bae-render/tests/ae/README.md)
   ```
 
   - Angle 0 → no blur. Phase = −angle/2 centres the blur on the unblurred position (AE help).
@@ -1792,7 +1794,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Samples Per Frame (每帧样本) | int | 16 | 2 – 64 | minimum; the fixed count for Classic 3D layers, shape layers and certain effects |
   | Adaptive Sample Limit (自适应采样限制) | int | 128 | 16 – 256 | maximum for 2D layer motion |
 
-  - 2D AV layers: N adapts per layer per frame to the layer's motion: `N = clamp(ceil(maxDisplacementPx / step), samplesPerFrame, adaptiveSampleLimit)` where `maxDisplacementPx` is the largest screen-space movement of the layer's corners over the shutter interval; UNVERIFIED step (believed ≈ 1 px, i.e. one sample per pixel of travel).
+  - 2D AV layers: N adapts per layer per frame to the layer's motion: `N = clamp(floor(d / step) + 1, samplesPerFrame, adaptiveSampleLimit)` where `d` is the largest screen-space movement of the layer's corners over the whole shutter interval, `step = 1.3 px` when `d < 32 px` and `1.9 px` otherwise. Measured in AE 26.2.1 by 04 (30 solids translating 3–300 px with Samples Per Frame 2 and limit 256, each fitted exactly; independent of layer size and direction; the limit applies). UNVERIFIED: how rotation/scale travel is measured (corner arc length is consistent with a rotation case within 5/255).
   - 3D layers (Classic 3D), shape layers, text layers? (UNVERIFIED) and effects that use the comp shutter: fixed N = Samples Per Frame.
   - When AE cannot determine an adaptive rate (non-affine motion), it uses Samples Per Frame.
 - **Priority:** P0

@@ -218,9 +218,26 @@ pub fn run(
     roi: IRect,
     scale: f64,
 ) -> Pixels {
+    run_depth(gpu, format, fx, params, input, roi, scale, true)
+}
+
+/// [`run`] with explicit depth semantics: `float` = 32 bpc (no clamping),
+/// `false` = 8 / 16 bpc (AE's default project).
+#[allow(clippy::too_many_arguments)]
+pub fn run_depth(
+    gpu: &Arc<GpuContext>,
+    format: wgpu::TextureFormat,
+    fx: &Builtin,
+    params: Vec<(u32, Value)>,
+    input: &Pixels,
+    roi: IRect,
+    scale: f64,
+    float: bool,
+) -> Pixels {
     let inst = instance(&fx.info.match_name, params);
     let p = EffectParams {
         scale,
+        float,
         ..EffectParams::new(&inst)
     };
     let mut target = Standalone::new(gpu.clone(), format);

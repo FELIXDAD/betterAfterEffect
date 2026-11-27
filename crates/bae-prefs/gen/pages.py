@@ -28,6 +28,17 @@ DYNAMIC_DEFAULT = {"max_disk_cache_size_gb": 100, "ram_reserved_for_other_apps_g
 DYNAMIC_MAX = 1024
 # English labels R1 recorded without Chinese text.
 EXTRA_ZH = {"Setup...": "设置..."}
+# BAE's own items (not in AE), first on their page: the UI language, switched
+# without a restart. The label names the setting in both languages so it can be
+# found whatever the current one is; languages are named in themselves.
+BAE_ITEMS = {
+    "appearance": (
+        'Item::P(choice("appearance.language", "Language / 语言", '
+        '&[Opt::new("system", "Follow System"), Opt::new("zh-CN", "简体中文"), Opt::new("en", "English")], '
+        '"system", Style::Dropdown))',
+        {"Language / 语言": "语言 / Language", "Follow System": "跟随系统", "简体中文": "简体中文", "English": "English"},
+    ),
+}
 
 zh = {}
 same = set()
@@ -75,6 +86,14 @@ def opts(options):
     return "&[" + ", ".join(out) + "]"
 
 
+# Settings BAE shows but does not do yet: the dialog draws them greyed.
+UNSUPPORTED = {"project.dynamic_link_highest_number", "export.preview_output_during_render_queue"}
+UNSUPPORTED_GROUPS = {"Mercury Transmit"}
+# Labels naming AE's apps, in BAE's words (with their Chinese).
+LABELS = {"RAM Available for [AE/Pr/AME/Au]:": ("RAM Available for BAE:", "BAE 可用的 RAM:")}
+GROUP = None
+
+
 def pref(page, c):
     """Rust expression for a stored control, or None."""
     t = c["type"]
@@ -106,6 +125,8 @@ def pref(page, c):
     elif t in ("dropdown", "radio_group", "theme_picker"):
         if c.get("optionsRef") == "labelPalette17":
             e = f"label({s(key)}, {s(label)}, {int(c.get('default', 0))})"
+        elif key == "audio.audio_default_output":
+            e = f"audio_output({s(key)}, {s(label)}, {s(c['default'])})"
         else:
             options = c.get("options") or [{"value": c.get("default"), "labelEn": "System Default", "labelZh": "系统默认值"}]
             style = {"dropdown": "Style::Dropdown", "radio_group": "Style::Radio", "theme_picker": "Style::Theme"}[t]
@@ -125,10 +146,15 @@ def pref(page, c):
         e += f".unit({s(unit)})"
     if "enabledWhen" in c:
         e += f".when({when(c['enabledWhen'], page)})"
+    elif ":" in c.get("inlineWith", ""):
+        parent, value = c["inlineWith"].split(":", 1)
+        e += f".when(When::Is({s(page + '.' + parent)}, {s(value)}))"
     if c.get("indented"):
         e += ".indent()"
     if c.get("inlineWith") or t == "radio_group":
         e += ".quiet()"
+    if key in UNSUPPORTED or GROUP in UNSUPPORTED_GROUPS:
+        e += ".unsupported()"
     pk = c.get("preferencesKey")
     if pk:
         e += f".ae({s(pk['section'] + '/' + pk['key'])})"
@@ -163,6 +189,9 @@ def item(page, c):
         return b
     if t == "readonly_text":
         value = str(c.get("default", ""))
+        if label in LABELS:
+            label, cn = LABELS[label]
+            tr(label, cn)
         return f"Item::Info({s(label)}, {s(value)})"
     if t == "table":
         cols = []
@@ -184,6 +213,8 @@ def item(page, c):
 
 
 def group_items(page, g):
+    global GROUP
+    GROUP = g["titleEn"]
     controls = g["controls"]
     rendered = {c["id"]: item(page, c) for c in controls}
     # Inline controls go on the line of the control they follow.
@@ -223,7 +254,7 @@ def group_items(page, g):
 
 
 def main():
-    data = json.loads(SRC.read_text())
+    data = json.loads(SRC.read_text(encoding="utf-8"))
     tr(data["dialog"]["titleEn"], data["dialog"]["titleZh"])
     for b in data["dialog"]["buttons"]:
         tr(b["labelEn"], b["labelZh"])
@@ -235,9 +266,18 @@ def main():
             for o in pal:
                 tr(o["labelEn"], o["labelZh"])
         items = []
+        if pid in BAE_ITEMS:
+            extra, strings = BAE_ITEMS[pid]
+            items.append(extra)
+            for en, cn in strings.items():
+                tr(en, cn)
         for g in p["groups"]:
             tr(g["titleEn"], g["titleZh"])
             inner = group_items(pid, g)
+            if pid == "memory_cpu" and g["titleEn"] == "Memory":
+                label = "GPU Preview Cache (MB)"
+                tr(label, "显存预览缓存（MB）")
+                inner.append(f'Item::P(int("memory_cpu.preview_cache_mib", {s(label)}, 1024, 0, 32768))')
             sub = [c for c in g["controls"] if c.get("subgroupEn")]
             for c in sub:
                 tr(c["subgroupEn"], c.get("subgroupZh", ""))
@@ -271,7 +311,7 @@ def main():
         "];",
         "",
     ]
-    OUT.write_text("\n".join(rs))
+    OUT.write_text("\n".join(rs), encoding="utf-8", newline="\n")
     for en, a, b in conflicts:
         print(f"note: {en!r} is {a!r} and also {b!r}; kept the first", file=sys.stderr)
     print(f"wrote {OUT.relative_to(ROOT)}: {len(pages)} pages, {len(zh)} strings")

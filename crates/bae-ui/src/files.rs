@@ -22,10 +22,63 @@ pub struct OpenRequest {
     pub folders: bool,
 }
 
+/// What a save panel asks for.
+#[derive(Clone, Debug, Default)]
+pub struct SaveRequest {
+    /// Panel title (translated).
+    pub title: String,
+    /// File type filters: label and extensions without dots.
+    pub filters: Vec<(String, Vec<String>)>,
+    /// Folder the panel starts in.
+    pub directory: Option<PathBuf>,
+    /// Suggested file name.
+    pub file_name: String,
+}
+
+/// Files and footage options confirmed together in the import panel.
+pub struct ImportSelection {
+    pub paths: Vec<PathBuf>,
+    pub sequences: bool,
+    pub alphabetical: bool,
+    pub create_comp: bool,
+    pub photoshop_kind: bae_model::psd::ImportKind,
+}
+
 /// A native open panel.
 pub trait FilePicker: Send + Sync {
     /// The chosen files (and folders, when allowed); empty when cancelled.
     fn open(&self, request: &OpenRequest) -> Vec<PathBuf>;
+
+    fn import(&self, request: &OpenRequest) -> ImportSelection {
+        ImportSelection {
+            paths: self.open(request),
+            sequences: true,
+            alphabetical: false,
+            create_comp: false,
+            photoshop_kind: Default::default(),
+        }
+    }
+
+    /// A native save panel: the chosen path, `None` when cancelled (or when
+    /// the picker has none).
+    fn save(&self, _request: &SaveRequest) -> Option<PathBuf> {
+        None
+    }
+}
+
+/// Where the open project is saved (`None`: not saved yet), as an app
+/// resource the shell keeps up to date (Reveal Project in Finder).
+#[derive(Clone, Debug, Default)]
+pub struct ProjectFile(Arc<std::sync::Mutex<Option<PathBuf>>>);
+
+impl ProjectFile {
+    pub fn get(&self) -> Option<PathBuf> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set(&self, path: Option<PathBuf>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = path;
+    }
 }
 
 /// The file picker as an app resource.
@@ -43,6 +96,12 @@ impl SharedFilePicker {
             .get::<SharedFilePicker>()
             .map(|p| p.0.open(request))
             .unwrap_or_default()
+    }
+
+    /// Choose where to save with the app's picker; `None` when cancelled or
+    /// there is none.
+    pub fn save(resources: &bae_app::Resources, request: &SaveRequest) -> Option<PathBuf> {
+        resources.get::<SharedFilePicker>()?.0.save(request)
     }
 }
 

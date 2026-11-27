@@ -19,9 +19,12 @@ pub mod comp {
     pub const DURATION: &str = "duration";
     pub const BG_COLOR: &str = "bg_color";
     pub const MOTION_BLUR: &str = "motion_blur";
+    pub const FRAME_BLENDING: &str = "frame_blending";
     pub const SHUTTER_ANGLE: &str = "shutter_angle";
     pub const SHUTTER_PHASE: &str = "shutter_phase";
     pub const MOTION_BLUR_SAMPLES: &str = "motion_blur_samples";
+    /// Adaptive Sample Limit: the most samples a 2D layer gets (16–256).
+    pub const MOTION_BLUR_ADAPTIVE_LIMIT: &str = "motion_blur_adaptive_limit";
     pub const PRESERVE_FRAME_RATE: &str = "preserve_frame_rate";
     /// Child folder holding the layers; first child = AE layer 1 (top).
     pub const LAYERS: &str = "layers";
@@ -38,6 +41,7 @@ pub mod layer {
     pub const START_TIME: &str = "start_time";
     pub const STRETCH: &str = "stretch";
     pub const ENABLED: &str = "enabled";
+    pub const EFFECTS_ENABLED: &str = "effects_enabled";
     pub const SOLO: &str = "solo";
     pub const SHY: &str = "shy";
     pub const GUIDE: &str = "guide";
@@ -48,13 +52,20 @@ pub mod layer {
     pub const TRACK_MATTE: &str = "track_matte";
     pub const TRACK_MATTE_LAYER: &str = "track_matte_layer";
     pub const MOTION_BLUR: &str = "motion_blur";
+    pub const FRAME_BLENDING: &str = "frame_blending";
     pub const COLLAPSE_TRANSFORMATION: &str = "collapse_transformation";
     pub const QUALITY: &str = "quality";
     pub const TIME_REMAP_ENABLED: &str = "time_remap_enabled";
     pub const TIME_REMAP: &str = "time_remap";
+    pub const AUDIO_LEVELS: &str = "audio:levels";
     pub const PRESERVE_TRANSPARENCY: &str = "preserve_transparency";
     pub const TEXT_SOURCE: &str = "text:source";
     pub const TEXT_PATH: &str = "text:path";
+    pub const TEXT_REVERSE_PATH: &str = "text:reverse_path";
+    pub const TEXT_PERPENDICULAR_TO_PATH: &str = "text:perpendicular_to_path";
+    pub const TEXT_FORCE_ALIGNMENT: &str = "text:force_alignment";
+    pub const TEXT_FIRST_MARGIN: &str = "text:first_margin";
+    pub const TEXT_LAST_MARGIN: &str = "text:last_margin";
     /// Child folders.
     pub const MASKS: &str = "masks";
     pub const EFFECTS: &str = "effects";
@@ -71,6 +82,8 @@ pub mod asset {
     pub const FRAME_RATE: &str = "frame_rate";
     pub const DURATION: &str = "duration";
     pub const SOLID_COLOR: &str = "solid_color";
+    pub const HAS_VIDEO: &str = "has_video";
+    pub const HAS_AUDIO: &str = "has_audio";
 }
 
 /// Layer transform group.
@@ -98,6 +111,14 @@ pub mod camera {
     pub const FOCUS_DISTANCE: &str = "camera:focus_distance";
     pub const APERTURE: &str = "camera:aperture";
     pub const BLUR_LEVEL: &str = "camera:blur_level";
+    pub const IRIS_SHAPE: &str = "camera:iris_shape";
+    pub const IRIS_ROTATION: &str = "camera:iris_rotation";
+    pub const IRIS_ROUNDNESS: &str = "camera:iris_roundness";
+    pub const IRIS_ASPECT_RATIO: &str = "camera:iris_aspect_ratio";
+    pub const IRIS_DIFFRACTION_FRINGE: &str = "camera:iris_diffraction_fringe";
+    pub const HIGHLIGHT_GAIN: &str = "camera:highlight_gain";
+    pub const HIGHLIGHT_THRESHOLD: &str = "camera:highlight_threshold";
+    pub const HIGHLIGHT_SATURATION: &str = "camera:highlight_saturation";
 }
 
 /// Light layer options.
@@ -130,6 +151,7 @@ pub mod effect {
     pub const MATCH_NAME: &str = "match_name";
     pub const NAME: &str = "name";
     pub const ENABLED: &str = "enabled";
+    pub const EFFECTS_ENABLED: &str = "effects_enabled";
     pub const PARAM_PREFIX: &str = "param:";
 }
 
@@ -198,9 +220,11 @@ mod tests {
                 c::DURATION,
                 c::BG_COLOR,
                 c::MOTION_BLUR,
+                c::FRAME_BLENDING,
                 c::SHUTTER_ANGLE,
                 c::SHUTTER_PHASE,
                 c::MOTION_BLUR_SAMPLES,
+                c::MOTION_BLUR_ADAPTIVE_LIMIT,
                 c::PRESERVE_FRAME_RATE,
             ],
         );
@@ -228,6 +252,7 @@ mod tests {
                 l::TRACK_MATTE,
                 l::TRACK_MATTE_LAYER,
                 l::MOTION_BLUR,
+                l::FRAME_BLENDING,
                 l::COLLAPSE_TRANSFORMATION,
                 l::QUALITY,
                 l::TIME_REMAP_ENABLED,

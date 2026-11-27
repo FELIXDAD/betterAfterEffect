@@ -34,6 +34,8 @@
 //! | `key.move` | dragging keyframes |
 //! | `key.delete` | deleting keyframes |
 //! | `key.reverse` | Keyframe Assistant > Time-Reverse Keyframes |
+//! | `key.exponential_scale` | Keyframe Assistant > Exponential Scale |
+//! | `layer.sequence` | Keyframe Assistant > Sequence Layers |
 //! | `key.paste` | pasting keyframes |
 //! | `key.edit` | Graph Editor drags (key time / value, Bezier handles, transform box), keyframe dialogs |
 //! | `transform.separate_dimensions` | Animation > Separate Dimensions (Position → X / Y / Z Position) |
@@ -44,6 +46,18 @@
 //! | `path.delete_vertex` | Delete Vertex tool (every keyframe) |
 //! | `text.create` | typing new point or paragraph text with the Type tool |
 //! | `text.set_text` | editing a text layer's characters with the Type tool |
+//! | `text.set_style` | Character / Paragraph panel settings on text layers |
+//! | `effect.apply` | Effect menu; double-click or drag in Effects & Presets |
+//! | `effect.remove`, `effect.remove_all` | Delete with effects selected; Effect > Remove All |
+//! | `effect.reorder` | dragging effects in Effect Controls or the timeline |
+//! | `effect.set_enabled` | an effect's fx switch |
+//! | `effect.reset` | Reset in Effect Controls |
+//! | `effect.duplicate` | Edit > Duplicate with effects selected |
+//! | `layer.time_remap` | Layer > Time > Enable Time Remapping (Cmd/Ctrl+Alt+T) |
+//! | `layer.time_stretch` | Layer > Time > Time Stretch (stretch or new duration, hold in point / current frame / out point) |
+//! | `layer.time_reverse` | Layer > Time > Time-Reverse Layer (Cmd/Ctrl+Alt+R) |
+//! | `layer.freeze_frame` | Layer > Time > Freeze Frame |
+//! | `layer.freeze_on_last_frame` | Layer > Time > Freeze On Last Frame |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -56,17 +70,33 @@
 
 pub mod camera;
 pub mod comp;
+pub mod comp_from_items;
+pub mod content;
 pub mod dimensions;
+pub mod effect;
+pub mod expressions;
 pub mod import;
+pub mod interpret;
 pub mod keys;
 pub mod layer;
+pub mod layer_styles;
+pub mod markers;
+pub mod matte;
 pub mod names;
+pub mod orient;
+pub mod paint;
 pub mod path;
+pub mod photoshop;
 pub mod precompose;
+pub mod project_settings;
 pub mod query;
 pub mod shape;
 pub mod solid;
 pub mod text;
+pub mod text_animators;
+pub mod text_path;
+pub mod time;
+pub mod tracker;
 mod util;
 
 use std::sync::Arc;
@@ -79,35 +109,59 @@ pub use comp::{
     CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
     TrimCompToWorkArea,
 };
+pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
 pub use dimensions::SeparateDimensions;
-pub use import::{ImportFile, ImportItems, ImportOutput};
+pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
+pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
+pub use interpret::InterpretFootage;
 pub use keys::{
-    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
-    PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
-    apply_key_edits, set_default_spatial_linear,
+    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
+    KeysOutput, MoveKeys, PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany,
+    ValueEdit, apply_key_edits, set_default_spatial_linear,
 };
 pub use layer::{
     CopiedLayer, CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS,
-    LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SetLayerAttr, SetParent, ShapePreset,
-    ShiftLayers, SplitLayers, TrimLayers, copy_layers,
+    LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SequenceLayers, SequenceTransition,
+    SetLayerAttr, SetParent, ShapePreset, ShiftLayers, SlipLayers, SplitLayers, TrimLayers,
+    copy_layers,
 };
+pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
+pub use matte::SetTrackMatte;
+pub use orient::AutoOrient;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
-pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
+pub use project_settings::SetProjectSettings;
+pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
-pub use text::{CreateText, SetText};
+pub use text::{CreateText, SetText, SetTextStyle, TextStyleChange};
+pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
+pub use text_path::SetTextPath;
+pub use time::{
+    FreezeFrame, FreezeOnLastFrame, SetTimeRemap, StretchHold, TimeReverse, TimeStretch,
+};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(comp_from_items::CompFromItems),
+        r.register(paint::AddStroke),
+        r.register(paint::ExtendStroke),
+        r.register(tracker::CreateTracker),
+        r.register(tracker::AddPoint),
+        r.register(tracker::ConfigureTracker),
+        r.register(tracker::RecordTrack),
+        r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(photoshop::ImportPhotoshop),
+        r.register(ReplaceFile),
         r.register(CreateLayer),
         r.register(Precompose),
+        r.register(precompose::ReplaceWithPrecomp),
         r.register(SetSolidSettings),
         r.register(SetCameraSettings),
         r.register(SetLightSettings),
@@ -117,10 +171,14 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SplitLayers),
         r.register(TrimLayers),
         r.register(ShiftLayers),
+        r.register(SlipLayers),
+        r.register(SequenceLayers),
+        r.register(SetTrackMatte),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),
         r.register(SetLayerAttr),
+        r.register(layer_styles::EditStyles),
         r.register(SetAnimated),
         r.register(SetAt),
         r.register(SetMany),
@@ -129,16 +187,40 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(MoveKeys),
         r.register(DeleteKeys),
         r.register(ReverseKeys),
+        r.register(ExponentialScale),
         r.register(PasteKeys),
         r.register(EditKeys),
         r.register(SeparateDimensions),
+        r.register(AddMarker),
+        r.register(EditMarker),
+        r.register(MoveMarkers),
+        r.register(DeleteMarkers),
         r.register(AddShape),
+        r.register(AddShapeItem),
         r.register(CreateMask),
         r.register(SetVertices),
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(InterpretFootage),
+        r.register(AutoOrient),
+        r.register(SetProjectSettings),
         r.register(SetText),
+        r.register(SetTextStyle),
+        r.register(SetExpressions),
+        r.register(DuplicateContent),
+        r.register(PasteContent),
+        r.register(DeleteContent),
+        r.register(BakeExpression),
+        r.register(AnimateText),
+        r.register(AddTextSelector),
+        r.register(RemoveTextAnimators),
+        r.register(SetTextPath),
+        r.register(SetTimeRemap),
+        r.register(TimeStretch),
+        r.register(TimeReverse),
+        r.register(FreezeFrame),
+        r.register(FreezeOnLastFrame),
     ];
     for res in results {
         res.expect("motion command IDs are unique");
@@ -164,9 +246,10 @@ impl AppModule for MotionModule {
 
     fn build(&self, app: &mut AppBuilder) {
         let owner = app.current_owner();
+        let defs = app.registry::<bae_model::EffectDef>();
         let registry = app.registry::<dyn DynCommand>();
         registry.batch(|tx| {
-            for cmd in commands() {
+            for cmd in commands().into_iter().chain(effect::effect_commands(defs)) {
                 let id = cmd.info().id.clone();
                 if !tx.contains(&id) {
                     let _ = tx.register_arc(owner.clone(), id, cmd);

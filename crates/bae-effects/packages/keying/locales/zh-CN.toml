@@ -1,0 +1,110 @@
+[effect.color-difference-key]
+name = "颜色差值键"
+keywords = ["颜色差值键"]
+
+[effect.color-difference-key.params]
+preview = "预览"
+view = "视图"
+key_color = "主色"
+color_matching_accuracy = "颜色匹配准确度"
+black_in_part_a = "黑色区域的 A 部分"
+white_in_part_a = "白色区域的 A 部分"
+gamma_part_a = "A 部分的灰度系数"
+black_out_part_a = "黑色区域外的 A 部分"
+white_out_part_a = "白色区域外的 A 部分"
+black_in_part_b = "黑色的部分 B"
+white_in_part_b = "白色区域中的 B 部分"
+gamma_part_b = "B 部分的灰度系数"
+black_out_part_b = "黑色区域外的 B 部分"
+white_out_part_b = "白色区域外的 B 部分"
+black_in_matte = "黑色遮罩"
+white_in_matte = "白色遮罩"
+gamma_matte = "遮罩灰度系数"
+
+[effect.color-difference-key.choices]
+view = ["源", "未校正遮罩部分 A", "已校正遮罩部分 A", "未校正遮罩部分 B", "已校正遮罩部分 B", "未校正遮罩", "已校正遮罩", "最终输出", "(-", "已校正[A，B，遮罩]，最终"]
+color_matching_accuracy = ["更快", "更准确"]
+
+[effect.color-range]
+name = "颜色范围"
+keywords = ["颜色范围"]
+
+[effect.color-range.params]
+preview = "预览"
+fuzziness = "模糊"
+color_space = "色彩空间"
+min_l_y_r = "最小值 (L, Y, R)"
+max_l_y_r = "最大值 (L, Y, R)"
+min_a_u_g = "最小值 (a, U, G)"
+max_a_u_g = "最大值 (a, U, G)"
+min_b_v_b = "最小值 (b, V, B)"
+max_b_v_b = "最大值 (b, V, B)"
+
+[effect.color-range.choices]
+color_space = ["Lab", "YUV", "RGB"]
+
+[effect.linear-color-key]
+name = "线性颜色键"
+keywords = ["线性颜色键"]
+
+[effect.linear-color-key.params]
+preview = "预览"
+view = "视图"
+key_color = "主色"
+match_colors = "匹配颜色"
+matching_tolerance = "匹配容差"
+matching_softness = "匹配柔和度"
+key_operation = "主要操作"
+
+[effect.linear-color-key.choices]
+view = ["最终输出", "仅限源", "仅限遮罩"]
+match_colors = ["使用 RGB", "使用色相", "使用色度"]
+key_operation = ["主色", "保持颜色"]
+
+[effect.advanced-spill-suppressor]
+name = "Advanced Spill Suppressor"
+keywords = ["高级溢出抑制器"]
+
+[effect.advanced-spill-suppressor.params]
+method = "方法"
+suppression = "抑制"
+ultra_settings = "极致设置"
+key_color = "抠像颜色"
+tolerance = "容差"
+desaturation = "降低饱和度"
+range = "溢出范围"
+spill_color_correction = "溢出颜色校正"
+luma_correction = "亮度校正"
+
+[effect.advanced-spill-suppressor.choices]
+method = ["标准", "极致"]
+
+[effect.extract]
+name = "提取"
+keywords = ["抠像"]
+
+[effect.extract.params]
+histogram = "直方图"
+channel = "通道"
+black_point = "黑场"
+white_point = "白场"
+black_softness = "黑色柔和度"
+white_softness = "白色柔和度"
+invert = "反转"
+
+[effect.extract.choices]
+channel = ["明亮度", "红色", "绿色", "蓝色", "Alpha"]
+
+[effect.unmult]
+name = "Unmult"
+keywords = ["抠像"]
+
+[effect.unmult.params]
+background_color = "背景颜色"
+black_level = "黑色阶"
+softness = "柔和度"
+remove_color_matting = "移除颜色遮罩"
+clip_hdr_result = "剪切 HDR 结果"
+
+[effect.unmult.choices]
+background_color = ["黑色", "白色"]

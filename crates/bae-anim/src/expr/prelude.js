@@ -3,13 +3,12 @@
 // Host functions (implemented in Rust, see expr/mod.rs) live on `__h`:
 //   __h.prop(c, l, prim, attr, t, pre) -> number[]   property value at comp time t
 //   __h.vel(c, l, prim, attr, t, pre) -> number[]    AE velocity (see velocityAtTime)
-//   __h.keys(c, l, prim, attr) -> number[]           [t0, v0..., t1, v1..., ...] (comp time)
-//   __h.dims(c, l, prim, attr) -> number             value dimensions
+//   __h.keys(c, l, prim, attr) -> {time, value}[]   in composition-time order
 //   __h.layerIndex(c, nameOrIndex) -> number         0-based layer index or -1
 //   __h.layerInfo(c, l) -> object                    name, inPoint, outPoint, ...
 //   __h.compInfo(c) -> object                        name, width, height, ...
 //   __h.compByName(name) -> number                   comp id or -1
-//   __h.effect(c, l, nameOrIndex) -> string|null     effect prim path
+//   __h.effect(c, l, nameOrIndex) -> object|null     effect path, active and layerControl
 //   __h.param(c, l, effectPath, nameOrIndex) -> string|null   param attr name
 //   __h.mask(c, l, nameOrIndex) -> string|null       mask prim path
 //   __h.xform(c, l, t, kind, point) -> number[]      0 toComp 1 fromComp 2 toCompVec 3 fromCompVec
@@ -24,7 +23,10 @@ var __now = 0;
 // Property objects stand for their value in arithmetic and library calls (AE).
 function __val(a) {
   if (a === undefined) throw new Error("Undefined value used in expression (could be an out of range array subscript?)");
-  return a instanceof Property ? a.value : a;
+  if (a instanceof Property) return a.value;
+  // `text.sourceText` (a String carrying the property's methods) is its text.
+  if (a instanceof String) return a.valueOf();
+  return a;
 }
 function __isArr(a) { return Array.isArray(a); }
 function __isNum(a) { return typeof a === "number" || typeof a === "boolean"; }
@@ -45,7 +47,7 @@ function $bm_sub(a, b) {
   a = __val(a); b = __val(b);
   if (__isNum(a) && __isNum(b)) return a - b;
   if (__isArr(a) && __isNum(b)) { a = a.slice(0); a[0] -= b; return a; }
-  if (__isNum(a) && __isArr(b)) { b = b.slice(0); b[0] = a - b[0]; return b; }
+  if (__isNum(a) && __isArr(b)) { return b.map(function (x, i) { return (i === 0 ? a : 0) - x; }); }
   if (__isArr(a) && __isArr(b)) {
     var n = Math.max(a.length, b.length), out = new Array(n);
     for (var i = 0; i < n; i++) out[i] = (i < a.length ? a[i] : 0) - (i < b.length ? b[i] : 0);
@@ -95,13 +97,13 @@ function mul(a, b) { return $bm_mul(a, b); }
 function div(a, b) { return $bm_div(a, b); }
 function clamp(v, lo, hi) {
   v = __val(v); lo = __val(lo); hi = __val(hi);
-  if (__isArr(v)) {
-    return v.map(function (x, i) {
-      var l = __isArr(lo) ? lo[i] : lo, h = __isArr(hi) ? hi[i] : hi;
-      return Math.min(Math.max(x, Math.min(l, h)), Math.max(l, h));
-    });
-  }
-  return Math.min(Math.max(v, Math.min(lo, hi)), Math.max(lo, hi));
+  function bound(x, l, h) { return Math.min(Math.max(x, Math.min(l, h)), Math.max(l, h)); }
+  if (!__isArr(v) && !__isArr(lo) && !__isArr(hi)) return bound(v, lo, hi);
+  var n = Math.max(__isArr(v) ? v.length : 0, __isArr(lo) ? lo.length : 0, __isArr(hi) ? hi.length : 0);
+  function at(a, i) { return __isArr(a) ? (i < a.length ? a[i] : 0) : a; }
+  var out = new Array(n);
+  for (var i = 0; i < n; i++) out[i] = bound(at(v, i), at(lo, i), at(hi, i));
+  return out;
 }
 function dot(a, b) {
   a = __val(a); b = __val(b);
@@ -111,7 +113,8 @@ function dot(a, b) {
 }
 function cross(a, b) {
   a = __val(a); b = __val(b);
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  var az = a.length > 2 ? a[2] : 0, bz = b.length > 2 ? b[2] : 0;
+  return [a[1] * bz - az * b[1], az * b[0] - a[0] * bz, a[0] * b[1] - a[1] * b[0]];
 }
 function length(a, b) {
   a = __val(a);
@@ -129,8 +132,11 @@ function normalize(a) {
 function lookAt(from, to) {
   from = __val(from); to = __val(to);
   var d = normalize($bm_sub(to, from));
-  var yaw = Math.atan2(d[0], d[2]), pitch = Math.atan2(-d[1], Math.sqrt(d[0] * d[0] + d[2] * d[2]));
-  return [radiansToDegrees(pitch), radiansToDegrees(yaw), 0];
+  // Decompose the upright look direction in AE's X-Y-Z Orientation order.
+  var x = d[0], y = d[1], z = d[2], horizontal = Math.hypot(x, z);
+  if (horizontal === 0) return [y === 0 ? 0 : (y > 0 ? -90 : 90), 0, 0];
+  return [radiansToDegrees(Math.atan2(-y, z)), radiansToDegrees(Math.asin(clamp(x, -1, 1))),
+          radiansToDegrees(Math.atan2(x * y, z))];
 }
 function degreesToRadians(d) { return d * Math.PI / 180; }
 function radiansToDegrees(r) { return r * 180 / Math.PI; }
@@ -141,7 +147,7 @@ function __interp(shape, args) {
   if (args.length <= 3) { t = args[0]; tMin = 0; tMax = 1; v1 = args[1]; v2 = args[2]; }
   else { t = args[0]; tMin = args[1]; tMax = args[2]; v1 = args[3]; v2 = args[4]; }
   t = __val(t); tMin = __val(tMin); tMax = __val(tMax); v1 = __val(v1); v2 = __val(v2);
-  if (tMin > tMax) { var x = tMin; tMin = tMax; tMax = x; x = v1; v1 = v2; v2 = x; }
+  if (tMin > tMax) { var x = tMin; tMin = tMax; tMax = x; }
   var f = tMax === tMin ? (t < tMin ? 0 : 1) : (t - tMin) / (tMax - tMin);
   f = Math.min(Math.max(f, 0), 1);
   var p = shape(f);
@@ -191,50 +197,58 @@ function hexToRgb(hex) {
 }
 
 // ---- deterministic random (per property, AE-like API; numbers differ from AE) ----
-function __Rng(seed) { this.s = (seed >>> 0) || 0x9e3779b9; }
+function __Rng(seed) { this.s = seed >>> 0; }
 __Rng.prototype.next = function () {
-  // mulberry32
-  var t = (this.s += 0x6d2b79f5);
-  t = Math.imul(t ^ (t >>> 15), t | 1);
-  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  // AE 26 uniform draws are successive unsigned LCG states divided by UINT32_MAX.
+  this.s = (Math.imul(this.s, 1664525) + 1013904223) >>> 0;
+  return this.s / 4294967295;
 };
 function __hash(a, b) {
   var h = (a | 0) ^ Math.imul((b | 0) + 0x9e3779b9, 0x85ebca6b);
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
   return (h ^ (h >>> 16)) >>> 0;
 }
-var __rng = new __Rng(1), __rngBase = 1, __timeless = false;
-function __resetRandom(seed) { __rngBase = seed >>> 0; __timeless = false; __reseed(); }
+// The generator is seeded on the first random() of an evaluation (most
+// expressions draw none): null until then.
+var __rng = null, __rngBase = 1, __offset = 0, __timeless = false;
+var __seedBits = new DataView(new ArrayBuffer(8));
+function __numberSeed(x) {
+  if ((x | 0) === x) return x;
+  __seedBits.setFloat64(0, x);
+  return __hash(__seedBits.getUint32(0), __seedBits.getUint32(4));
+}
+function __offsetSeed(seed) { return __offset === 0 ? seed >>> 0 : __hash(seed, __offset); }
+function __resetRandom(seed) { __rngBase = seed >>> 0; __offset = 0; __timeless = false; __rng = null; }
+function __R() { if (__rng === null) __reseed(); return __rng; }
 function __reseed() {
-  var tick = __timeless ? 0 : Math.floor(__now * 1000 + 1e-6);
-  __rng = new __Rng(__hash(__rngBase, tick));
+  var tick = __timeless ? 0 : __numberSeed(__now);
+  __rng = new __Rng(__hash(__offsetSeed(__rngBase), tick));
 }
 function seedRandom(seed, timeless) {
-  __rngBase = __hash(__rngBase, Math.floor(seed));
+  __offset = __numberSeed(Number(__val(seed)));
   __timeless = !!timeless;
   __reseed();
 }
-function random(a, b) {
-  var r = __rng.next();
-  if (a === undefined) return r;
-  if (b === undefined) {
-    if (__isArr(a)) return a.map(function (x) { return __rng.next() * x; });
-    return r * a;
+function __drawRange(draw, a, b) {
+  if (a === undefined) return draw();
+  a = __val(a);
+  if (b === undefined) { b = a; a = 0; } else b = __val(b);
+  function component(v, i) { return __isArr(v) ? (i < v.length ? v[i] : 0) : v; }
+  if (!__isArr(a) && !__isArr(b)) return a + draw() * (b - a);
+  var result = new Array(Math.max(__isArr(a) ? a.length : 0, __isArr(b) ? b.length : 0));
+  for (var i = 0; i < result.length; i++) {
+    var lo = component(a, i);
+    result[i] = lo + draw() * (component(b, i) - lo);
   }
-  if (__isArr(a)) return a.map(function (x, i) { return x + __rng.next() * (b[i] - x); });
-  return a + r * (b - a);
+  return result;
 }
-function gaussRandom(a, b) {
-  function g() {
-    var u = 1 - __rng.next(), v = __rng.next();
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) / 6 + 0.5;
-  }
-  if (a === undefined) return g();
-  if (b === undefined) return __isArr(a) ? a.map(function (x) { return g() * x; }) : g() * a;
-  if (__isArr(a)) return a.map(function (x, i) { return x + g() * (b[i] - x); });
-  return a + g() * (b - a);
+function __uniform() { return __R().next(); }
+function __gaussian() {
+  // The central 90% of a standard normal lies within 1.64485 standard deviations.
+  return 0.5 + Math.sqrt(-2 * Math.log((__R().next() * 4294967295 + 1) / 4294967296)) * Math.cos(2 * Math.PI * __uniform()) / 3.2897072539;
 }
+function random(a, b) { return __drawRange(__uniform, a, b); }
+function gaussRandom(a, b) { return __drawRange(__gaussian, a, b); }
 // 1-D gradient noise in [-1, 1].
 function __grad(seed, i) { return (__hash(seed, i) / 4294967296) * 2 - 1; }
 function __noise1(seed, x) {
@@ -243,66 +257,133 @@ function __noise1(seed, x) {
   return (a + (b - a) * u) * 2;
 }
 function noise(v) {
-  var x = __isArr(v) ? v[0] + 31.7 * (v[1] || 0) + 57.3 * (v[2] || 0) : v;
-  return __noise1(12345, x);
+  v = __val(v);
+  if (!__isArr(v)) return __noise1(12345, v);
+  if (v.length === 1) return __noise1(12345, v[0]);
+  if (v.length === 4) v = v.slice(0, 3);
+  // Interpolate the gradient at each lattice corner along each input axis.
+  var dims = v.length, cell = v.map(Math.floor);
+  if (dims !== 2 && dims !== 3) throw new Error("noise expects a number or an array of one to four components");
+  var f = v.map(function (x, i) { return x - cell[i]; });
+  var u = f.map(function (x) { return x * x * x * (x * (x * 6 - 15) + 10); });
+  var sum = 0;
+  for (var corner = 0; corner < (1 << dims); corner++) {
+    var h = 12345, weight = 1;
+    for (var i = 0; i < dims; i++) {
+      var high = (corner >> i) & 1;
+      h = __hash(h, cell[i] + high);
+      weight *= high ? u[i] : 1 - u[i];
+    }
+    var axis = (h >>> 1) % dims;
+    sum += weight * (h & 1 ? -1 : 1) * (f[axis] - ((corner >> axis) & 1));
+  }
+  return 2 * sum;
 }
 
 // ---- time ----
 function __compId() { return __env_c; }
 var __env_c = 0;
 function timeToFrames(t, fps, isDuration) {
-  var c = __h.compInfo(__env_c);
-  if (t === undefined) t = __now + c.displayStartTime;
-  if (fps === undefined) fps = 1 / c.frameDuration;
-  var f = t * fps;
-  return isDuration ? Math.round(f) : Math.floor(f + 1e-9);
+  if (t === undefined || fps === undefined) {
+    var c = __h.compInfo(__env_c);
+    if (t === undefined) t = __now + c.displayStartTime;
+    if (fps === undefined) fps = 1 / c.frameDuration;
+  }
+  var f = __val(t) * __val(fps);
+  var near = Math.round(f);
+  if (Math.abs(f - near) <= 4 * Number.EPSILON * Math.max(1, Math.abs(f))) f = near;
+  return isDuration && f > 0 ? Math.ceil(f) : Math.floor(f);
 }
 function framesToTime(frames, fps) {
   if (fps === undefined) fps = 1 / __h.compInfo(__env_c).frameDuration;
-  return frames / fps;
+  return __val(frames) / __val(fps);
 }
 function __pad(n, w) { var s = String(Math.floor(Math.abs(n))); while (s.length < w) s = "0" + s; return s; }
-function timeToTimecode(t, timecodeBase, isDuration) {
-  if (t === undefined) t = __now + __h.compInfo(__env_c).displayStartTime;
-  if (timecodeBase === undefined) timecodeBase = 30;
-  var neg = t < 0, total = Math.floor(Math.abs(t) * timecodeBase + 1e-9);
-  var fr = total % timecodeBase, s = Math.floor(total / timecodeBase);
-  return (neg ? "-" : "") + __pad(Math.floor(s / 3600), 1) + ":" + __pad(Math.floor(s / 60) % 60, 2) + ":" +
-    __pad(s % 60, 2) + ":" + __pad(fr, String(timecodeBase - 1).length);
+function __timecode(frames, base, drop, hourDigits) {
+  var total = Math.abs(frames);
+  // Skip two frame labels per minute at 29.97, four at 59.94, except each tenth minute.
+  var skip = drop && (base === 30 || base === 60) ? base / 15 : 0;
+  if (skip) {
+    var minute = 60 * base - skip, ten = 600 * base - 9 * skip;
+    total += 9 * skip * Math.floor(total / ten) + skip * Math.max(0, Math.floor((total % ten - skip) / minute));
+  }
+  var sep = skip ? ";" : ":", seconds = Math.floor(total / base);
+  return (frames < 0 ? "-" : "") + __pad(Math.floor(seconds / 3600), hourDigits) + sep + __pad(Math.floor(seconds / 60) % 60, 2) +
+    sep + __pad(seconds % 60, 2) + sep + __pad(total % base, Math.max(2, String(base - 1).length));
 }
-function timeToCurrentFormat(t, fps, isDuration) { return timeToTimecode(t, fps, isDuration); }
+function timeToTimecode(t, timecodeBase, isDuration) {
+  if (timecodeBase === undefined) timecodeBase = 30;
+  return __timecode(timeToFrames(t, timecodeBase, isDuration), timecodeBase, false, 2);
+}
+function timeToCurrentFormat(t, fps, isDuration, ntscDropFrame) {
+  if (fps === undefined || ntscDropFrame === undefined) {
+    var c = __h.compInfo(__env_c);
+    if (fps === undefined) fps = 1 / c.frameDuration;
+    if (ntscDropFrame === undefined) ntscDropFrame = c.ntscDropFrame;
+  }
+  var frames = timeToFrames(t, fps, isDuration);
+  if (__h.projectInfo().displayFrames) return String(frames);
+  var ntsc = Math.abs(fps - 29.97) < 0.01 || Math.abs(fps - 59.94) < 0.01;
+  return __timecode(frames, Math.round(fps), ntsc && ntscDropFrame, 1);
+}
+function timeToNTSCTimecode(t, ntscDropFrame, isDuration) {
+  return __timecode(timeToFrames(t, 30000 / 1001, isDuration), 30, ntscDropFrame, 2);
+}
+function timeToFeetAndFrames(t, fps, framesPerFoot, isDuration) {
+  if (framesPerFoot === undefined) framesPerFoot = 16;
+  var total = timeToFrames(t, fps, isDuration);
+  var magnitude = Math.abs(total);
+  return (total < 0 ? "-" : "") + __pad(Math.floor(magnitude / framesPerFoot), 4) + "+" +
+    __pad(magnitude % framesPerFoot, String(framesPerFoot - 1).length);
+}
+
+// ---- project and footage (AE: thisProject, colorDepth, footage(name)) ----
+function __project() {
+  var p = __h.projectInfo();
+  return { fullPath: p.fullPath, bitsPerChannel: p.bitsPerChannel, linearBlending: p.linearBlending };
+}
+function Footage(f) {
+  this.name = f.name; this.width = f.width; this.height = f.height; this.duration = f.duration;
+  this.frameDuration = f.frameDuration; this.pixelAspect = f.pixelAspect; this.ntscDropFrame = f.ntscDropFrame;
+}
+Footage.prototype = {
+  // Data-driven footage (JSON / CSV) is not imported yet.
+  get sourceText() { throw new Error("Footage is not a text or data file"); },
+  get sourceData() { throw new Error("Footage is not a data file"); },
+  dataValue: function () { throw new Error("Footage is not a data file"); },
+  dataKeyCount: function () { throw new Error("Footage is not a data file"); },
+  dataKeyTimes: function () { throw new Error("Footage is not a data file"); },
+  dataKeyValues: function () { throw new Error("Footage is not a data file"); },
+};
+function footage(name) {
+  var f = __h.footage(String(name));
+  if (!f) throw new Error("Footage " + JSON.stringify(name) + " does not exist");
+  return new Footage(f);
+}
 
 // ---- evaluation entry (called from Rust) ----
 function __call(fn, c, l, prim, attr, t, seed) {
-  var saveNow = __now, saveC = __env_c, saveRng = __rng, saveBase = __rngBase, saveTl = __timeless;
+  var saveNow = __now, saveC = __env_c, saveRng = __rng, saveBase = __rngBase, saveOffset = __offset, saveTl = __timeless;
   __now = t;
   __env_c = c;
   __resetRandom(seed);
   try {
-    var env = { thisComp: new Comp(c), thisLayer: new Layer(c, l), thisProperty: __prop(c, l, prim, attr), time: t };
-    return __val(fn(env));
+    var r = fn(c, l, prim, attr, t);
+    // A Source Text expression may end with a text style (AE 17.0+).
+    if (r instanceof TextStyle) return { __style: true, changes: r.__edits };
+    return __val(r);
   } finally {
-    __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __timeless = saveTl;
+    __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __offset = saveOffset; __timeless = saveTl;
   }
 }
 
 // ---- object model ----
 function Property(c, l, p, a) { this.__c = c; this.__l = l; this.__p = p; this.__a = a; }
-// `transform.position[0]` and `.length` read the value, as in AE.
-var __propHandler = {
-  get: function (target, key, receiver) {
-    if (typeof key === "string" && (key === "length" || /^[0-9]+$/.test(key))) {
-      var v = target.value;
-      return __isArr(v) ? v[key] : (key === "length" ? 1 : undefined);
-    }
-    return Reflect.get(target, key, receiver);
-  },
-};
-function __prop(c, l, p, a) { return new Proxy(new Property(c, l, p, a), __propHandler); }
+function __prop(c, l, p, a) { return new Property(c, l, p, a); }
 // Time grid of AE's valueAtTime: 1/1024 of a frame (measured in AE 26 at 30 fps).
 function __tick() { return __h.compInfo(__env_c).frameDuration / 1024; }
 function __q(t) { var k = __tick(); return Math.round(t / k) * k; }
-function __unwrap(r) { return r.length === 1 ? r[0] : r; }
+function __unwrap(r) { return typeof r === "string" || r.length !== 1 ? r : r[0]; }
 Property.prototype = {
   get value() { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, __now, false)); },
   valueAtTime: function (t) { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, t, false)); },
@@ -317,16 +398,12 @@ Property.prototype = {
   get speed() { return this.speedAtTime(__now); },
   get numKeys() { return this.__keys().length; },
   __keys: function () {
-    var raw = __h.keys(this.__c, this.__l, this.__p, this.__a), d = __h.dims(this.__c, this.__l, this.__p, this.__a);
-    var out = [];
-    for (var i = 0; i + d < raw.length; i += d + 1) {
-      out.push({ time: raw[i], value: d === 1 ? raw[i + 1] : raw.slice(i + 1, i + 1 + d) });
-    }
-    return out;
+    return __h.keys(this.__c, this.__l, this.__p, this.__a);
   },
   key: function (i) {
+    i = __val(i);
     var ks = this.__keys();
-    if (i < 1 || i > ks.length) throw new Error("Key index " + i + " out of range");
+    if (!Number.isInteger(i) || i < 1 || i > ks.length) throw new Error("Key index " + i + " out of range");
     var k = ks[i - 1];
     k.index = i;
     return k;
@@ -347,23 +424,17 @@ Property.prototype = {
     if (ampMult === undefined) ampMult = 0.5;
     if (t === undefined) t = __now;
     var v = this.valueAtTime(t), seed = __h.seed(this.__c, this.__l, this.__p, this.__a);
-    function w(dim) {
-      var s = 0, a = 1, f = freq, norm = 0;
-      for (var o = 0; o < Math.max(1, Math.floor(octaves)); o++) {
-        s += __noise1(__hash(seed, dim * 131 + o), t * f) * a;
-        norm += a;
-        a *= ampMult;
-        f *= 2;
-      }
-      return s * amp;
-    }
+    // Unary + turns a property (effect("Oct")("Slider")) into a number for the host.
+    function w(dim) { return __h.wiggleNoise(__offsetSeed(seed), dim, t * freq, +octaves, +ampMult) * amp; }
     if (__isArr(v)) return v.map(function (x, i) { return x + w(i); });
     return v + w(0);
   },
   temporalWiggle: function (freq, amp, octaves, ampMult, t) {
     if (t === undefined) t = __now;
-    var seed = __h.seed(this.__c, this.__l, this.__p, this.__a);
-    return this.valueAtTime(t + __noise1(seed, t * freq) * amp);
+    var seed = __offsetSeed(__h.seed(this.__c, this.__l, this.__p, this.__a));
+    var delta = __h.wiggleNoise(seed, 0, t * freq, octaves === undefined ? 1 : +octaves,
+                                ampMult === undefined ? 0.5 : +ampMult);
+    return this.valueAtTime(t + delta * amp);
   },
   smooth: function (width, samples, t) {
     if (width === undefined) width = 0.2;
@@ -382,14 +453,16 @@ Property.prototype = {
     var ks = this.__keys(), t = __now;
     if (ks.length < 2) return this.__pre(t);
     var first, last;
+    var bounds = duration === 0 ? __h.layerInfo(this.__c, this.__l) : null;
+    if (["cycle", "pingpong", "offset", "continue"].indexOf(type) < 0) throw new Error("Unknown loop type " + type);
     if (out) {
       last = ks[ks.length - 1].time;
-      first = duration !== undefined && duration > 0 ? last - duration
+      first = bounds ? Math.min(bounds.inPoint, bounds.outPoint) : duration > 0 ? last - duration
         : ks[numKeyframes > 0 && numKeyframes < ks.length ? ks.length - 1 - numKeyframes : 0].time;
       if (t <= last) return this.__pre(t);
     } else {
       first = ks[0].time;
-      last = duration !== undefined && duration > 0 ? first + duration
+      last = bounds ? Math.max(bounds.inPoint, bounds.outPoint) : duration > 0 ? first + duration
         : ks[numKeyframes > 0 && numKeyframes < ks.length ? numKeyframes : ks.length - 1].time;
       if (t >= first) return this.__pre(t);
     }
@@ -424,8 +497,209 @@ Property.prototype = {
   loopIn: function (type, numKeyframes) { return this.__loop(false, type, numKeyframes || 0); },
   loopOutDuration: function (type, duration) { return this.__loop(true, type, 0, duration || 0); },
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
-  get propertyIndex() { return 1; },
+  get propertyIndex() { return this.__chain().index; },
 };
+// ---- property names and groups (AE: thisProperty.name, propertyGroup(n)) ----
+Property.prototype.__chain = function () {
+  if (!this.__ch) this.__ch = __h.propertyChain(this.__c, this.__l, this.__p, this.__a);
+  return this.__ch;
+};
+Object.defineProperty(Property.prototype, "name", { get: function () { return this.__chain().name; } });
+Object.defineProperty(Property.prototype, "active", { get: function () { return true; } });
+Object.defineProperty(Property.prototype, "enabled", { get: function () { return true; } });
+Property.prototype.propertyGroup = function (countUp) {
+  var n = countUp === undefined ? 1 : countUp;
+  if (n === 0) return this;
+  var g = this.__chain().groups[n - 1];
+  if (!g) throw new Error("Property group " + n + " is out of range");
+  var c = this.__c, l = this.__l, layer = new Layer(c, l);
+  switch (g.kind) {
+    case "layer": return layer;
+    case "transform": var t = layer.transform; t.name = g.name; return t;
+    case "mask": var m = layer.mask(g.index); m.name = g.name; m.propertyIndex = g.index; return m;
+    case "effect": return layer.effect(g.index);
+    case "cameraOption": return layer.cameraOption;
+    case "lightOption": return layer.lightOption;
+    case "materialOption": return layer.materialOption;
+    case "shape":
+      if (typeof __ShapeItem === "function") {
+        return new __ShapeItem(c, l, { path: g.path, type: g.type, op: g.op, name: g.name, index: g.index });
+      }
+      return { name: g.name };
+    default: return { name: g.name };
+  }
+};
+
+// ---- shape layer contents (AE: content("Shape 1").content("Path 1").path) ----
+function __content(c, l, parent, which) {
+  var info = __h.content(c, l, parent, which);
+  if (info === null || info === undefined) {
+    throw new Error("Property " + JSON.stringify(which) + " is missing or does not exist");
+  }
+  return new __ShapeItem(c, l, info);
+}
+function __ShapeItem(c, l, info) {
+  this.__c = c; this.__l = l; this.__p = info.path; this.__t = info.type; this.__o = info.op;
+  this.name = info.name; this.propertyIndex = info.index;
+}
+__ShapeItem.prototype = {
+  content: function (which) { return __content(this.__c, this.__l, this.__p, which); },
+  get transform() {
+    if (this.__t !== "ShapeGroup") return undefined;
+    var c = this.__c, l = this.__l, p = this.__p;
+    var t = {};
+    [["anchorPoint", "anchor_point"], ["position", "position"], ["scale", "scale"], ["skew", "skew"],
+     ["skewAxis", "skew_axis"], ["rotation", "rotation"], ["opacity", "opacity"]].forEach(function (n) {
+      Object.defineProperty(t, n[0], { get: function () { return __prop(c, l, p, "transform:" + n[1]); } });
+    });
+    return t;
+  },
+};
+// AE's property names by item type (and by operator).
+var __SHAPE_PROPS = {
+  Rect: { size: "size", position: "position", roundness: "roundness" },
+  Ellipse: { size: "size", position: "position" },
+  Star: { points: "points", position: "position", rotation: "rotation", innerRadius: "inner_radius",
+          outerRadius: "outer_radius", innerRoundness: "inner_roundness", outerRoundness: "outer_roundness" },
+  Path: { path: "path" },
+  Fill: { color: "color", opacity: "opacity" },
+  Stroke: { color: "color", opacity: "opacity", strokeWidth: "width", miterLimit: "miter_limit" },
+  GradientFill: { startPoint: "start_point", endPoint: "end_point", highlightLength: "highlight_length",
+                  highlightAngle: "highlight_angle", opacity: "opacity" },
+  GradientStroke: { startPoint: "start_point", endPoint: "end_point", highlightLength: "highlight_length",
+                    highlightAngle: "highlight_angle", opacity: "opacity", strokeWidth: "width",
+                    miterLimit: "miter_limit" },
+};
+var __OPERATOR_PROPS = {
+  trim: { start: "trim:start", end: "trim:end", offset: "trim:offset" },
+  repeater: { copies: "repeater:copies", offset: "repeater:offset" },
+};
+(function () {
+  var names = {};
+  [__SHAPE_PROPS, __OPERATOR_PROPS].forEach(function (group) {
+    for (var t in group) for (var n in group[t]) names[n] = true;
+  });
+  Object.keys(names).forEach(function (n) {
+    Object.defineProperty(__ShapeItem.prototype, n, {
+      get: function () {
+        var map = this.__t === "ShapeOperator" ? __OPERATOR_PROPS[this.__o] : __SHAPE_PROPS[this.__t];
+        var attr = map && map[n];
+        return attr ? __prop(this.__c, this.__l, this.__p, attr) : undefined;
+      },
+    });
+  });
+})();
+
+// ---- paths (AE: mask paths, shape paths) ----
+Property.prototype.__path = function (t) {
+  var p = __h.prop(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t, false);
+  if (!p || !p.__path) throw new Error("Property is not a path");
+  return p;
+};
+Property.prototype.points = function (t) { return this.__path(t).points; };
+Property.prototype.inTangents = function (t) { return this.__path(t).inTangents; };
+Property.prototype.outTangents = function (t) { return this.__path(t).outTangents; };
+Property.prototype.isClosed = function () { return this.__path(__now).closed; };
+[["pointOnPath", 0], ["tangentOnPath", 1], ["normalOnPath", 2]].forEach(function (m) {
+  Property.prototype[m[0]] = function (percentage, t) {
+    return __h.pathAt(this.__c, this.__l, this.__p, this.__a,
+      [percentage === undefined ? 0.5 : percentage, t === undefined ? __now : t, m[1]]);
+  };
+});
+// createPath(points = [[0,0], [100,0], [100,100], [0,100]], inTangents = [],
+// outTangents = [], is_closed = true): a path a path expression can return.
+Property.prototype.createPath = function (points, inTangents, outTangents, isClosed) {
+  if (points === undefined) points = [[0, 0], [100, 0], [100, 100], [0, 100]];
+  points = __val(points);
+  if (!__isArr(points) || points.length < 1) throw new Error("createPath needs at least one point");
+  function tangents(v) {
+    v = v === undefined ? [] : __val(v);
+    if (v.length !== 0 && v.length !== points.length) {
+      throw new Error("Tangent array length must equal the number of points");
+    }
+    return v.length ? v : points.map(function () { return [0, 0]; });
+  }
+  return { __path: true, points: points, inTangents: tangents(inTangents),
+           outTangents: tangents(outTangents), closed: isClosed === undefined ? true : !!isClosed };
+};
+
+// ---- text (AE: thisLayer.text.sourceText and the 17.0+ style API) ----
+Property.prototype.getStyleAt = function (charIndex, t) {
+  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t, charIndex || 0), {}, [], charIndex || 0);
+};
+Property.prototype.createStyle = function () { return this.getStyleAt(0, __now); };
+Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, __now); } });
+
+function __TextGroup(c, l) { this.__c = c; this.__l = l; }
+__TextGroup.prototype = {
+  // The text as a string (string methods, concatenation, length) that also has
+  // the property's methods, as AE's sourceText behaves.
+  get sourceText() {
+    var p = __prop(this.__c, this.__l, "", "text:source");
+    var s = new String(p.value);
+    ["valueAtTime", "velocityAtTime", "key", "nearestKey", "getStyleAt", "createStyle"].forEach(function (k) {
+      s[k] = function () { return p[k].apply(p, arguments); };
+    });
+    ["value", "style", "numKeys"].forEach(function (k) {
+      Object.defineProperty(s, k, { get: function () { return p[k]; } });
+    });
+    return s;
+  },
+};
+
+// A text style: what the text uses (`__f`, from the host) plus the `set…`
+// calls made on it (`__c`), each returning a new style.
+function TextStyle(fields, changes, edits, index) {
+  this.__f = fields;
+  this.__c = changes;
+  this.__edits = edits;
+  this.__index = index;
+}
+TextStyle.prototype = {
+  get horizontalScale() { return "horizontalScale" in this.__c ? this.__c.horizontalScale : 100; },
+  get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
+};
+[
+  ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
+  ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
+  ["baselineOption", "baselineOption"], ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
+  ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
+].forEach(function (p) {
+  Object.defineProperty(TextStyle.prototype, p[0], {
+    get: function () { return p[1] in this.__c ? this.__c[p[1]] : this.__f[p[1]]; },
+  });
+});
+[
+  ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
+  ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
+  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineOption", "baselineOption"], ["setBaselineShift", "baselineShift"],
+  ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
+  ["setSmallCaps", "smallCaps"], ["setApplyFill", "applyFill"], ["setApplyStroke", "applyStroke"],
+  ["setHorizontalScale", "horizontalScale"], ["setVerticalScale", "verticalScale"],
+].forEach(function (p) {
+  TextStyle.prototype[p[0]] = function (v, start, count) {
+    var c = {};
+    for (var k in this.__c) c[k] = this.__c[k];
+    start = Math.max(0, Math.trunc(start || 0));
+    count = count === undefined ? undefined : Math.max(0, Math.trunc(count));
+    var change = {start: start, count: count};
+    change[p[1]] = __val(v);
+    if (this.__index >= start && (count === undefined || this.__index < start + count)) c[p[1]] = change[p[1]];
+    return new TextStyle(this.__f, c, this.__edits.concat([change]), this.__index);
+  };
+});
+
+// `transform.position[0]` and `.length` read the value, as in AE: getters on
+// the prototype (a Proxy would trap every method and field access).
+(function () {
+  function index(i) {
+    return function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v[i] : undefined; };
+  }
+  for (var i = 0; i < 16; i++) Object.defineProperty(Property.prototype, String(i), { get: index(i) });
+  Object.defineProperty(Property.prototype, "length", {
+    get: function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v.length : 1; },
+  });
+})();
 
 var __TRANSFORM = {
   anchorPoint: "transform:anchor_point", position: "transform:position", scale: "transform:scale",
@@ -465,13 +739,17 @@ Layer.prototype = {
   },
   get enabled() { return this.__info.enabled; },
   get active() { return this.__info.enabled && __now >= Math.min(this.inPoint, this.outPoint) && __now < Math.max(this.inPoint, this.outPoint); },
-  get hasVideo() { return true; },
-  get hasAudio() { return false; },
+  get hasVideo() { return this.__info.hasVideo; },
+  get hasAudio() { return this.__info.hasAudio; },
+  get audioActive() { return this.hasAudio && this.active; },
   get width() { return this.__info.width; },
   get height() { return this.__info.height; },
+  // A precomp's comp, else the footage item (solids, footage).
   get source() {
-    if (this.__info.sourceComp < 0) throw new Error("Layer source is not a composition");
-    return new Comp(this.__info.sourceComp);
+    if (this.__info.sourceComp >= 0) return new Comp(this.__info.sourceComp);
+    var f = __h.layerFootage(this.__c, this.__l);
+    if (!f) throw new Error("Layer has no source");
+    return new Footage(f);
   },
   get transform() { return new __Transform(this); },
   get anchorPoint() { return this.transform.anchorPoint; },
@@ -485,21 +763,52 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
   get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
+  get marker() { return new MarkerProperty(this.__c, this.__l); },
+  get text() { return new __TextGroup(this.__c, this.__l); },
+  sourceRectAtTime: function (t, includeExtents) {
+    var r = __h.sourceRect(this.__c, this.__l, t === undefined ? __now : t, !!includeExtents);
+    return { top: r[1], left: r[0], width: r[2], height: r[3] };
+  },
+  content: function (which) { return __content(this.__c, this.__l, "", which); },
+  get rotationX() { return this.transform.xRotation; },
+  get rotationY() { return this.transform.yRotation; },
+  get rotationZ() { return this.transform.rotation; },
+  get cameraOption() { return __optionGroup(this, "Camera Options", __CAMERA_OPTIONS); },
+  get lightOption() { return __optionGroup(this, "Light Options", __LIGHT_OPTIONS); },
+  get materialOption() { return __optionGroup(this, "Material Options", __MATERIAL_OPTIONS); },
+  get audioLevels() {
+    if (!this.hasAudio) {
+      throw new Error("property or method named 'audioLevels' in Class 'Layer' is missing or does not exist. " +
+        "It may have been renamed, moved, deleted, or the name may have been mistyped.");
+    }
+    return __prop(this.__c, this.__l, "", "audio:levels");
+  },
+  sampleImage: function (point, radius, postEffect, t) {
+    var p = __val(point), r = radius === undefined ? [0.5, 0.5] : __val(radius);
+    return __h.sampleImage(this.__c, this.__l, [p[0], p[1], r[0], r[1],
+      postEffect === undefined || postEffect ? 1 : 0, t === undefined ? __now : t]);
+  },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
   },
   effect: function (nameOrIndex) {
-    var p = __h.effect(this.__c, this.__l, nameOrIndex);
-    if (p === null) throw new Error("Effect " + JSON.stringify(nameOrIndex) + " is missing or does not exist");
-    var c = this.__c, l = this.__l;
+    var effect = __h.effect(this.__c, this.__l, nameOrIndex);
+    if (effect === null) throw new Error("Effect " + JSON.stringify(nameOrIndex) + " is missing or does not exist");
+    var c = this.__c, l = this.__l, p = effect.path;
     var fx = function (param) {
       var a = __h.param(c, l, p, param);
       if (a === null) throw new Error("Effect parameter " + JSON.stringify(param) + " does not exist");
+      if (effect.layerControl) {
+        var index = __h.effectLayer(c, l, p, a, __now);
+        return index < 0 ? null : new Layer(c, index);
+      }
       return __prop(c, l, p, a);
     };
     fx.param = fx;
-    fx.active = true;
+    Object.defineProperty(fx, "name", { value: effect.name });
+    fx.propertyIndex = effect.index;
+    fx.active = effect.active;
     return fx;
   },
   mask: function (nameOrIndex) {
@@ -514,11 +823,7 @@ Layer.prototype = {
     };
   },
   __xf: function (kind, point, t) {
-    if (t === undefined) t = __now;
-    var p = point.slice(0);
-    while (p.length < 3) p.push(0);
-    var r = __h.xform(this.__c, this.__l, t, kind, p);
-    return point.length === 2 ? [r[0], r[1]] : r;
+    return __h.xform(this.__c, this.__l, t === undefined ? __now : __val(t), kind, __val(point));
   },
   toComp: function (p, t) { return this.__xf(0, p, t); },
   fromComp: function (p, t) { return this.__xf(1, p, t); },
@@ -527,11 +832,105 @@ Layer.prototype = {
   toCompVec: function (p, t) { return this.__xf(2, p, t); },
   fromCompVec: function (p, t) { return this.__xf(3, p, t); },
   toWorldVec: function (p, t) { return this.__xf(6, p, t); },
+  fromCompToSurface: function (p, t) { return this.__xf(8, p, t); },
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
+// ---- camera, light and material options (AE: layer.zoom, cameraOption.zoom …) ----
+var __CAMERA_OPTIONS = {
+  zoom: "camera:zoom", depthOfField: "camera:depth_of_field", focusDistance: "camera:focus_distance",
+  aperture: "camera:aperture", blurLevel: "camera:blur_level",
+  irisShape: "camera:iris_shape", irisRotation: "camera:iris_rotation",
+  irisRoundness: "camera:iris_roundness", irisAspectRatio: "camera:iris_aspect_ratio",
+  irisDiffractionFringe: "camera:iris_diffraction_fringe", highlightGain: "camera:highlight_gain",
+  highlightThreshold: "camera:highlight_threshold", highlightSaturation: "camera:highlight_saturation",
+};
+var __LIGHT_OPTIONS = {
+  intensity: "light:intensity", color: "light:color", coneAngle: "light:cone_angle",
+  coneFeather: "light:cone_feather", radius: "light:radius", falloffDistance: "light:falloff_distance",
+  shadowDarkness: "light:shadow_darkness", shadowDiffusion: "light:shadow_diffusion",
+  castsShadows: "light:casts_shadows",
+};
+var __MATERIAL_OPTIONS = {
+  castsShadows: "material:casts_shadows", lightTransmission: "material:light_transmission",
+  acceptsShadows: "material:accepts_shadows", acceptsLights: "material:accepts_lights",
+  ambient: "material:ambient", diffuse: "material:diffuse", specular: "material:specular_intensity",
+  specularIntensity: "material:specular_intensity", shininess: "material:specular_shininess",
+  specularShininess: "material:specular_shininess", metal: "material:metal",
+};
+function __optionGroup(layer, name, options) {
+  var g = { name: name };
+  for (var k in options) {
+    (function (attr) {
+      Object.defineProperty(g, k, { get: function () { return __prop(layer.__c, layer.__l, "", attr); } });
+    })(options[k]);
+  }
+  return g;
+}
+// The same on the layer itself (AE: thisComp.layer("Camera 1").zoom).
+(function () {
+  function define(name, get) {
+    if (!(name in Layer.prototype)) Object.defineProperty(Layer.prototype, name, { get: get });
+  }
+  function attrGetter(attr) { return function () { return __prop(this.__c, this.__l, "", attr); }; }
+  [__CAMERA_OPTIONS, __LIGHT_OPTIONS, __MATERIAL_OPTIONS].forEach(function (options) {
+    for (var k in options) if (k !== "castsShadows") define(k, attrGetter(options[k]));
+  });
+  // A light's own Casts Shadows; any other layer's Material Option.
+  define("castsShadows", function () {
+    return __prop(this.__c, this.__l, "", this.__info.kind === "light" ? "light:casts_shadows" : "material:casts_shadows");
+  });
+})();
+
+// ---- markers (AE: thisLayer.marker, thisComp.marker, MarkerKey) ----
+function MarkerProperty(c, l) { this.__c = c; this.__l = l; this.__m = null; }
+MarkerProperty.prototype = {
+  get __keys() {
+    if (this.__m === null) {
+      this.__m = __h.markers(this.__c, this.__l).map(function (m, i) { return new MarkerKey(m, i + 1); });
+    }
+    return this.__m;
+  },
+  get numKeys() { return this.__keys.length; },
+  // key(index) or key(comment), as AE.
+  key: function (k) {
+    var ks = this.__keys;
+    if (typeof k === "string") {
+      for (var i = 0; i < ks.length; i++) if (ks[i].comment === k) return ks[i];
+      throw new Error("Marker key " + JSON.stringify(k) + " does not exist");
+    }
+    k = __val(k);
+    if (k < 1 || k > ks.length) throw new Error("Key index " + k + " out of range");
+    return ks[k - 1];
+  },
+  nearestKey: function (t) {
+    var ks = this.__keys, best = -1, bd = Infinity;
+    for (var i = 0; i < ks.length; i++) {
+      var d = Math.abs(ks[i].time - t);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) throw new Error("property has no keyframes");
+    return ks[best];
+  },
+};
+function MarkerKey(m, index) {
+  this.time = m.time;
+  this.index = index;
+  this.duration = m.duration;
+  this.comment = m.comment;
+  this.value = m.comment;
+  this.chapter = m.chapter;
+  this.url = m.url;
+  this.frameTarget = m.frameTarget;
+  this.eventCuePoint = false;
+  this.cuePointName = m.cuePointName;
+  this.parameters = {};
+  this.protectedRegion = m.protectedRegion;
+}
+
 function Comp(c) { this.__c = c; this.__i = null; }
 Comp.prototype = {
+  get marker() { return new MarkerProperty(this.__c, -1); },
   get __info() { return this.__i || (this.__i = __h.compInfo(this.__c)); },
   get name() { return this.__info.name; },
   get width() { return this.__info.width; },
@@ -540,6 +939,7 @@ Comp.prototype = {
   get frameDuration() { return this.__info.frameDuration; },
   get pixelAspect() { return this.__info.pixelAspect; },
   get numLayers() { return this.__info.numLayers; },
+  get ntscDropFrame() { return this.__info.ntscDropFrame; },
   get displayStartTime() { return this.__info.displayStartTime; },
   get bgColor() { return this.__info.bgColor; },
   get shutterAngle() { return this.__info.shutterAngle; },

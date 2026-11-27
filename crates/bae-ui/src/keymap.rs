@@ -67,7 +67,13 @@ impl Chord {
     /// Whether a key event (logical key, physical key, modifiers) triggers this chord.
     /// The physical key is checked too, so `Shift+[` matches even though the
     /// logical key is `{`, and shortcuts keep working with non-Latin layouts.
+    /// A navigation key is only itself: Windows reports Home / End / Page Up /
+    /// Page Down / arrows / Insert / Delete from the numpad (NumLock off, or
+    /// sent with the numpad scan code) as the numpad digits and point
+    /// physically, and those are other shortcuts (the timeline's Go to Comp
+    /// Marker 1–9, #468).
     pub fn matches(&self, key: Key, physical: Option<Key>, modifiers: Modifiers) -> bool {
+        let physical = physical.filter(|_| !is_navigation(key));
         (key == self.key || physical == Some(self.key)) && self.matches_modifiers(modifiers)
     }
 
@@ -87,7 +93,9 @@ impl Chord {
                 None => ("", s),
             },
         };
-        let key = Key::from_name(key).ok_or_else(|| ChordError(s.to_owned()))?;
+        let key = numpad_key(key)
+            .or_else(|| Key::from_name(key))
+            .ok_or_else(|| ChordError(s.to_owned()))?;
         let mut chord = Chord::key(key);
         for m in mods.split('+').filter(|m| !m.is_empty()) {
             match m.to_ascii_lowercase().as_str() {
@@ -151,6 +159,9 @@ impl Chord {
 
 fn is_navigation_key(key: Key) -> bool {
     use Key::*;
+    if cfg!(target_os = "macos") && matches!(key, F13 | F14 | F15 | F16 | F17 | F18 | F19 | F20) {
+        return true;
+    }
     matches!(
         key,
         Escape
@@ -173,9 +184,45 @@ fn is_navigation_key(key: Key) -> bool {
     )
 }
 
+/// AE's numpad keys (`PadMultiply`, `Pad0` …): egui has no numpad keys, so the
+/// shell turns numpad presses into these otherwise unused function keys. Name,
+/// key, label.
+pub const NUMPAD: &[(&str, Key, &str)] = &[
+    // Apple maps the extended keypad Clear to NumLock. Winit's macOS backend
+    // never emits BrowserBack, leaving all physical F1–F20 bindings distinct.
+    #[cfg(target_os = "macos")]
+    ("PadClear", Key::BrowserBack, "Num Clear"),
+    ("PadMultiply", Key::F21, "Num *"),
+    ("PadSlash", Key::F22, "Num /"),
+    ("PadPlus", Key::F23, "Num +"),
+    ("PadMinus", Key::F24, "Num -"),
+    ("PadDecimal", Key::F25, "Num ."),
+    ("Pad0", Key::F26, "Num 0"),
+    ("Pad1", Key::F27, "Num 1"),
+    ("Pad2", Key::F28, "Num 2"),
+    ("Pad3", Key::F29, "Num 3"),
+    ("Pad4", Key::F30, "Num 4"),
+    ("Pad5", Key::F31, "Num 5"),
+    ("Pad6", Key::F32, "Num 6"),
+    ("Pad7", Key::F33, "Num 7"),
+    ("Pad8", Key::F34, "Num 8"),
+    ("Pad9", Key::F35, "Num 9"),
+];
+
+fn numpad_key(name: &str) -> Option<Key> {
+    NUMPAD.iter().find(|(n, ..)| *n == name).map(|(_, k, _)| *k)
+}
+
+fn numpad_entry(key: Key) -> Option<&'static (&'static str, Key, &'static str)> {
+    NUMPAD.iter().find(|(_, k, _)| *k == key)
+}
+
 /// Key name for display. Arrow keys are `←→↑↓`, which the system UI fonts have (egui's
 /// `⏴⏵⏶⏷` are only in egui's bundled fonts, which BAE does not ship).
 fn key_label(key: Key) -> &'static str {
+    if let Some((_, _, label)) = numpad_entry(key) {
+        return crate::i18n::tr(label);
+    }
     match key {
         Key::ArrowLeft => "←",
         Key::ArrowRight => "→",
@@ -213,7 +260,7 @@ impl fmt::Display for Chord {
         if self.shift {
             f.write_str("Shift+")?;
         }
-        f.write_str(self.key.name())
+        f.write_str(numpad_entry(self.key).map_or(self.key.name(), |(name, ..)| name))
     }
 }
 
@@ -496,9 +543,38 @@ impl KeymapOverrides {
     }
 }
 
+/// Keys the system resolved to a navigation key whatever the physical key.
+fn is_navigation(key: Key) -> bool {
+    use Key::*;
+    matches!(
+        key,
+        Home | End
+            | PageUp
+            | PageDown
+            | ArrowLeft
+            | ArrowRight
+            | ArrowUp
+            | ArrowDown
+            | Insert
+            | Delete
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AE's numpad keys parse, print back and display as `Num *` (#261).
+    #[test]
+    fn numpad_keys_parse_and_display() {
+        let c = Chord::parse("Alt+PadMultiply").unwrap();
+        assert_eq!(c.key, Key::F21);
+        assert!(c.alt);
+        assert_eq!(c.to_string(), "Alt+PadMultiply");
+        assert!(c.display().ends_with("Num *"));
+        assert_eq!(Chord::parse("Pad0").unwrap().to_string(), "Pad0");
+        assert_eq!(Chord::parse("PadClear").is_ok(), cfg!(target_os = "macos"));
+    }
 
     #[test]
     fn chords_roundtrip() {
@@ -536,6 +612,29 @@ mod tests {
         let json = serde_json::to_string(&b).unwrap();
         assert_eq!(json, r#"{"chord":"Cmd+Shift+Z","action":"edit.redo"}"#);
         assert_eq!(serde_json::from_str::<Binding>(&json).unwrap(), b);
+    }
+
+    #[test]
+    fn navigation_keys_ignore_numpad_scan_codes() {
+        // Home from numpad 7 (NumLock off) is Home, not the "7" shortcut.
+        let home = Chord::parse("Home").unwrap();
+        let seven = Chord::parse("7").unwrap();
+        assert!(home.matches(Key::Home, Some(Key::Num7), Modifiers::NONE));
+        assert!(!seven.matches(Key::Home, Some(Key::Num7), Modifiers::NONE));
+        let km = Keymap::new(
+            "test",
+            vec![
+                Binding::new("7", "timeline.go_to_marker").when("timeline"),
+                Binding::new("Home", "go_start"),
+            ],
+        );
+        let hit = km.match_event(
+            Key::Home,
+            Some(Key::Num7),
+            Modifiers::NONE,
+            Some("timeline"),
+        );
+        assert_eq!(hit.map(|b| b.action.as_str()), Some("go_start"));
     }
 
     #[test]

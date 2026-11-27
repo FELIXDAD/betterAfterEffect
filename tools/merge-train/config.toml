@@ -1,0 +1,91 @@
+# merge-train configuration. Read by merge_train.py on every start; the daemon restarts
+# itself when this file changes in the runner worktree.
+
+repo = "FELIXDAD/betterAfterEffects"
+# Only these accounts may queue a PR with the merge-ready label (collaborators with write
+# access can add labels too). Empty or missing: anyone.
+label_actors = ["FELIXDAD"]
+base = "dev"
+
+# Orca repo name used to match worktrees in `orca worktree ps` (local and remote hosts).
+orca_repo = "betterAfterEffect"
+# Paired Orca servers whose worktrees are searched for PR owners and shown on the board.
+orca_environments = ["公司5090D2主机"]  # 米兰Mac retired 2026-11-23
+# Handle passed to `orca orchestration send --from` (the daemon runs outside any agent).
+orca_from = "merge-train"
+
+# Runner: a separate full clone the daemon runs from and fetches every pass. It must live
+# outside ~/Documents: launchd jobs have no access to the Documents folder (macOS privacy
+# protection), and a worktree of the main checkout would keep its .git there.
+runner_dir = "~/Library/Application Support/bae-merge-train/repo"
+# Ref the runner follows; it moves there by itself when the merge train changes.
+runner_ref = "origin/dev"
+# Scratch worktree (of the runner clone) for Cargo.lock repairs, and its own cargo
+# target dir (never shared).
+work_dir = "~/Library/Caches/bae-merge-train/work"
+cargo_target_dir = "~/Library/Caches/bae-merge-train/target"
+state_dir = "~/Library/Application Support/bae-merge-train"
+
+poll_seconds = 60
+# A PR whose required checks are still missing or running after this long is failed.
+ci_timeout_minutes = 150
+# mergeable=UNKNOWN right after another merge is normal; give up only after this long.
+unknown_timeout_minutes = 20
+# Required checks missing/skipped with nothing queued or running for this long (e.g. a
+# head pushed before a CI change): update-branch, or push an empty commit if the PR
+# already contains dev, so CI runs again. Once per head.
+missing_nudge_minutes = 10
+# A required check whose newest run on the head was cancelled (not a test failure) is
+# rerun once, after this grace period in case a replacing run is about to start; the
+# PR fails only when the same check is cancelled `max_cancellations` times on one head.
+cancel_grace_minutes = 2
+max_cancellations = 2
+# When the PR at the front has waited this long, a later PR (in label order) that is
+# fully ready merges first; the front PR keeps its place.
+skip_ahead_after_minutes = 2
+# While the head waits for CI, update this many later PRs that need it so their
+# CI runs in parallel.
+preupdate_ahead = 4
+
+[labels]
+queue = "merge-ready"
+paused = "merge-train-paused"        # on the board issue: pauses the queue
+blocked = "blocked"
+reference_data = "reference-data"    # squash-merged, like branches under ref/
+
+[checks]
+# Check-run names (GitHub check_runs[].name, verbatim) that must all be `success` on the
+# PR's current head; for each name the newest check run (highest id) counts, and skipped,
+# cancelled or missing never pass. Defined by the CI-tier work (branch build/ci-tiers):
+# `fast` runs on every PR push; `full` runs on dev/main pushes and on PRs labelled
+# merge-ready (labeled/synchronize), so it reruns by itself after update-branch.
+fast = ["fast / Windows x64"]  # macOS runs only in the full tier
+full = ["full / macOS arm64", "full / Windows x64"]  # checked on dev after each merge
+# false: a PR merges once its fast checks are green; the full tier runs only on dev after
+# the merge (backstop; red dev pauses the queue). Simplified 2026-11-24.
+pr_full = false
+# Any other check run that concludes failure/timed_out on the head also blocks the merge.
+fail_on_other_failures = true
+
+[merge]
+squash_branch_prefixes = ["ref/"]
+# PR files that never count as overlapping with newer dev changes.
+overlap_ignore_pr = ["Cargo.lock"]
+# dev changes (after the PR's merge-base) that never count as overlapping.
+overlap_ignore_dev = ["Cargo.lock", "docs/"]
+# false: a PR is retested only when it and newer dev changed the same file. With crate
+# relations on, nearly every PR pair is related (the app depends on every crate), so the
+# queue merged one PR per full CI run (~25 min) while agents opened 10+ PRs an hour
+# (2026-11-24). Cross-file breaks are caught by dev's post-merge CI, which pauses the queue.
+relate_crates = false
+
+[board]
+title = "BAE 进度看板"
+
+[notify]
+# false: no message to the leader for each successful merge (the board lists them). CI
+# failures, conflicts and a red dev are still reported.
+merged = false
+# false: when the PR's owning agent is found in Orca it gets the bounce; the leader is told
+# only when no owner is found.
+bounce_leader = false

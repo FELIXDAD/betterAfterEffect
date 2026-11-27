@@ -36,12 +36,16 @@ impl Lang {
 }
 
 static LANG: AtomicU8 = AtomicU8::new(0);
+static SYSTEM: AtomicU8 = AtomicU8::new(0);
 
 type Table = HashMap<&'static str, &'static str>;
 
 fn tables() -> &'static RwLock<Table> {
     static TABLE: OnceLock<RwLock<Table>> = OnceLock::new();
-    TABLE.get_or_init(|| RwLock::new(ZH.iter().copied().collect()))
+    TABLE.get_or_init(|| {
+        let shortcuts = crate::workbench::SHORTCUTS_ZH;
+        RwLock::new(ZH.iter().chain(shortcuts).copied().collect())
+    })
 }
 
 pub fn set_lang(lang: Lang) {
@@ -52,6 +56,29 @@ pub fn lang() -> Lang {
     match LANG.load(Ordering::Relaxed) {
         1 => Lang::Zh,
         _ => Lang::En,
+    }
+}
+
+/// Records the system's UI language (what Preferences > Appearance > Language
+/// "Follow System" picks); the host detects it at startup.
+pub fn set_system_lang(lang: Lang) {
+    SYSTEM.store(lang as u8, Ordering::Relaxed);
+}
+
+pub fn system_lang() -> Lang {
+    match SYSTEM.load(Ordering::Relaxed) {
+        1 => Lang::Zh,
+        _ => Lang::En,
+    }
+}
+
+/// The language a Preferences > Appearance > Language value picks: `zh-CN`,
+/// `en`, otherwise (`system`) the system's.
+pub fn lang_for_setting(value: &str) -> Lang {
+    match value {
+        "zh-CN" => Lang::Zh,
+        "en" => Lang::En,
+        _ => system_lang(),
     }
 }
 
@@ -103,10 +130,43 @@ macro_rules! tr {
 
 /// Shell strings. Keep in sync with docs/glossary.md.
 const ZH: &[(&str, &str)] = &[
+    ("Theme name", "主题名称"),
+    (
+        "Drop files here to import footage.",
+        "将文件拖到这里即可导入素材。",
+    ),
+    (
+        "Hold Space and drag to pan the composition.",
+        "按住空格键拖动，可平移合成视图。",
+    ),
+    (
+        "Drag the time indicator to preview a frame.",
+        "拖动时间指示器可预览对应帧。",
+    ),
+    ("Got it", "知道了"),
+    // Numpad keys in shortcuts (AE: 数字小键盘).
+    ("Num Clear", "数字小键盘 清除"),
+    ("Num *", "数字小键盘 *"),
+    ("Num /", "数字小键盘 /"),
+    ("Num +", "数字小键盘 +"),
+    ("Num -", "数字小键盘 -"),
+    ("Num .", "数字小键盘 ."),
+    ("Num 0", "数字小键盘 0"),
+    ("Num 1", "数字小键盘 1"),
+    ("Num 2", "数字小键盘 2"),
+    ("Num 3", "数字小键盘 3"),
+    ("Num 4", "数字小键盘 4"),
+    ("Num 5", "数字小键盘 5"),
+    ("Num 6", "数字小键盘 6"),
+    ("Num 7", "数字小键盘 7"),
+    ("Num 8", "数字小键盘 8"),
+    ("Num 9", "数字小键盘 9"),
     // Dock and panel menu
     ("Close Panel", "关闭面板"),
     ("Undock Panel", "浮动面板"),
     ("Close Other Panels in Group", "关闭组中的其他面板"),
+    ("Close Other Panels", "关闭其他面板"),
+    ("Close Other Similar Panels", "关闭其他类似面板"),
     ("Panel Group Settings", "面板组设置"),
     ("Close Panel Group", "关闭面板组"),
     ("Undock Panel Group", "浮动面板组"),
@@ -129,7 +189,12 @@ const ZH: &[(&str, &str)] = &[
     ("Edit Workspaces...", "编辑工作区..."),
     ("Edit Workspaces", "编辑工作区"),
     ("Save as New Workspace...", "另存为新工作区..."),
-    ("New Workspace", "新建工作区"),
+    ("New Workspace", "新工作区"),
+    (
+        "Assign Shortcut to “{name}” Workspace",
+        "将快捷键分配给“{name}”工作区",
+    ),
+    ("{key} (replaces “{name}”)", "{key}（替换“{name}”）"),
     ("Show in Bar", "显示在工作区栏"),
     ("Delete", "删除"),
     ("Name", "名称"),
@@ -170,6 +235,10 @@ const ZH: &[(&str, &str)] = &[
     ("Close Project", "关闭项目"),
     ("Save", "保存"),
     ("Save As...", "另存为..."),
+    ("Save a Copy...", "保存副本..."),
+    ("Increment and Save", "增量保存"),
+    ("Revert", "恢复"),
+    ("Reveal Project", "显示项目"),
     ("Switch Workspace", "切换工作区"),
     ("Open Panel", "打开面板"),
     ("BAE Help", "BAE 帮助"),
@@ -199,16 +268,12 @@ const ZH: &[(&str, &str)] = &[
     ("Remote change", "远程更改"),
     ("Layer stack change", "工程层更改"),
     ("Change", "更改"),
-    ("Keyboard Layout", "键盘布局"),
-    ("Reset All", "全部重置"),
-    ("is already used by", "已被以下命令使用："),
     ("Replace", "替换"),
     ("Remove", "移除"),
-    ("Add Shortcut", "添加快捷键"),
-    ("Press a key… (Esc to cancel)", "请按下快捷键…（Esc 取消）"),
     ("After Effects", "After Effects"),
     // bae-model built-in command titles
     ("Create Prim", "创建节点"),
+    ("Create Text Animator", "创建文字动画器"),
     ("Delete Prim", "删除节点"),
     ("Move Prim", "移动节点"),
     ("Rename Prim", "重命名节点"),

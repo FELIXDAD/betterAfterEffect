@@ -63,12 +63,18 @@ pub enum ParamKind {
     /// Start of a twirly group; parameters until the matching `GroupEnd` belong to it.
     GroupStart,
     GroupEnd,
+    /// Curves as a flat list of (channel, x, y) control points.
+    CurvePoints,
     /// Opaque plugin-defined data (value: bytes).
     ArbitraryData,
+    /// Editable Unicode text.
+    Text,
     /// A mask of the layer (value: prim_ref to a Mask prim).
     Path,
     /// A button (no value; clicking triggers the plugin).
     Button,
+    /// A read-only visualization derived from other parameters. Stores no value.
+    Display,
 }
 
 fn none_str() -> String {
@@ -76,7 +82,7 @@ fn none_str() -> String {
 }
 
 impl ParamKind {
-    /// Value type stored in the `param:NNNN` attribute; `None` for groups and buttons.
+    /// Value type stored in the `param:NNNN` attribute, if this control owns one.
     pub fn value_type(&self) -> Option<ValueType> {
         Some(match self {
             ParamKind::Slider { integer: true, .. } => ValueType::Int,
@@ -87,8 +93,13 @@ impl ParamKind {
             ParamKind::Point3d => ValueType::Vec3,
             ParamKind::Popup { .. } => ValueType::Int,
             ParamKind::Layer | ParamKind::Path => ValueType::PrimRef,
+            ParamKind::CurvePoints => ValueType::FloatList,
+            ParamKind::Text => ValueType::String,
             ParamKind::ArbitraryData => ValueType::Bytes,
-            ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Button => return None,
+            ParamKind::GroupStart
+            | ParamKind::GroupEnd
+            | ParamKind::Button
+            | ParamKind::Display => return None,
         })
     }
 }
@@ -113,6 +124,45 @@ pub struct ParamFlags {
     /// Parameter has a custom-drawn UI (control panel or comp viewer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub custom_ui: bool,
+    /// The default (a point) is a fraction of the layer size, as AE's
+    /// `PF_ADD_POINT` percentages: an instance starts at `default × layer
+    /// size`. A 3D point's z stays absolute.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relative_default: bool,
+    /// The default is in AE reference-layer pixels (640 × 360), rather than layer pixels.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference_point_default: bool,
+}
+
+/// Coordinate units of an unauthored effect point. Authored points use layer pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointDefaultSpace {
+    Pixels,
+    LayerFraction,
+    AeReference,
+}
+
+impl ParamFlags {
+    pub fn point_default_space(self) -> PointDefaultSpace {
+        if self.relative_default {
+            PointDefaultSpace::LayerFraction
+        } else if self.reference_point_default {
+            PointDefaultSpace::AeReference
+        } else {
+            PointDefaultSpace::Pixels
+        }
+    }
+}
+
+impl PointDefaultSpace {
+    /// Resolve the default in layer pixels, relative to the layer's origin.
+    pub fn layer_pixels(self, [x, y]: [f64; 2], [w, h]: [f64; 2]) -> [f64; 2] {
+        match self {
+            Self::Pixels => [x, y],
+            Self::LayerFraction => [x * w, y * h],
+            Self::AeReference => [x * w * (1. / 640.), y * h * (1. / 360.)],
+        }
+    }
 }
 
 /// One parameter of an effect definition.

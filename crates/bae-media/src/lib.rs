@@ -37,7 +37,7 @@
 //! |---|---|---|
 //! | Still / sequence | PNG, JPEG, WebP, OpenEXR | pure Rust (`png`, `zune-jpeg`, `image-webp`, `exr`) |
 //! | Video (macOS) | H.264, HEVC, ProRes (QuickTime / MP4) | AVFoundation / VideoToolbox, IOSurface → Metal texture, zero copy ([`apple`]) |
-//! | Video (Windows) | H.264, HEVC | Media Foundation (placeholder; next PR) |
+//! | Video (Windows) | H.264, HEVC | Media Foundation / D3D11, one upload into wgpu |
 //!
 //! Export: [`export`] (encoders, async GPU readback, render loop, render
 //! queue); PNG / TIFF / OpenEXR sequence encoders built in. Audio: [`audio`]
@@ -48,6 +48,7 @@
 #[cfg(target_vendor = "apple")]
 pub mod apple;
 pub mod audio;
+mod audio_fx;
 mod cache;
 pub mod export;
 mod frame;
@@ -56,13 +57,18 @@ mod library;
 #[cfg(windows)]
 pub mod media_foundation;
 mod meta;
+pub mod mix;
 mod module;
 mod mp4;
+pub mod playback;
+pub mod psd;
 pub mod sequence;
 mod source;
 pub mod still;
 pub mod time;
 pub mod trim;
+pub mod visual_audio;
+pub mod wav;
 
 use std::sync::Arc;
 
@@ -81,6 +87,7 @@ pub use source::{MediaError, MediaFormat, MediaFormats, MediaSource, OpenOptions
 pub use time::{FrameRate, Time, Timecode};
 
 pub use audio::{AudioBuffer, AudioSource, FileAudio, MemoryAudio, Waveform};
+pub use audio_fx::eq_band_response_db;
 pub use export::{
     CancelToken, EncodeOutput, EncodeSettings, EncodeStats, Encoder, EncoderFormat, ExrCompression,
     FrameProducer, FrameReadback, MediaEncoders, PngCompression, ProResProfile, ProducedFrame,
@@ -93,6 +100,7 @@ pub use trim::{TimeRange, TrimMode, TrimPlan, TrimRequest, TrimResult, Trimmer, 
 pub fn builtin_formats() -> Vec<Arc<dyn MediaFormat>> {
     #[allow(unused_mut)]
     let mut formats = still::formats();
+    formats.push(Arc::new(psd::Photoshop));
     #[cfg(target_vendor = "apple")]
     formats.push(Arc::new(apple::AvFoundationFormat));
     #[cfg(windows)]
@@ -106,6 +114,8 @@ pub fn builtin_encoders() -> Vec<Arc<dyn EncoderFormat>> {
     let mut encoders: Vec<Arc<dyn EncoderFormat>> = vec![Arc::new(export::ImageSequenceFormat)];
     #[cfg(target_vendor = "apple")]
     encoders.push(Arc::new(apple::AvWriterFormat));
+    #[cfg(windows)]
+    encoders.push(Arc::new(media_foundation::MfWriterFormat));
     encoders
 }
 

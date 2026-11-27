@@ -37,6 +37,7 @@ const ZH: &[(&str, &str)] = &[
     ("Adjustment Layer", "调整图层"),
     ("Pre-comp", "预合成"),
     ("Footage", "素材"),
+    ("Layers", "图层"),
     ("Audio", "音频"),
     // Shape contents.
     ("Rectangle", "矩形"),
@@ -47,6 +48,20 @@ const ZH: &[(&str, &str)] = &[
     ("Polystar Path", "多边星形路径"),
     ("Fill", "填充"),
     ("Stroke", "描边"),
+    // AE's shape Add menu (ShapeLayer/AddMenu): the numbered item names.
+    ("Group", "组"),
+    ("Gradient Fill", "渐变填充"),
+    ("Gradient Stroke", "渐变描边"),
+    ("Merge Paths", "合并路径"),
+    ("Offset Paths", "位移路径"),
+    ("Pucker & Bloat", "收缩和膨胀"),
+    ("Repeater", "中继器"),
+    ("Round Corners", "圆角"),
+    ("Trim Paths", "修剪路径"),
+    ("Twist", "扭转"),
+    ("Wiggle Paths", "摆动路径"),
+    ("Wiggle Transform", "摆动变换"),
+    ("Zig Zag", "Z 字形"),
     // Pen-drawn shapes and masks.
     ("Shape", "形状"),
     ("Path", "路径"),

@@ -1,0 +1,139 @@
+//! Mouse wheel zoom and trackpad pan.
+
+use super::*;
+
+#[test]
+fn mouse_wheel_zooms_around_the_pointer_and_trackpads_pan() {
+    let mut h = H::new();
+    let at = h.screen(100.0, 100.0);
+    let wheel = |unit, d: egui::Vec2, m: Modifiers| Event::MouseWheel {
+        unit,
+        delta: d,
+        phase: egui::TouchPhase::Move,
+        modifiers: m,
+    };
+    let before = h.viewer.last_view.unwrap().scale;
+    h.move_to(
+        at,
+        Modifiers::NONE,
+        vec![wheel(
+            egui::MouseWheelUnit::Line,
+            vec2(0.0, 1.0),
+            Modifiers::NONE,
+        )],
+    );
+    h.frame(Vec::new(), Modifiers::NONE);
+    let v = h.viewer.last_view.unwrap();
+    assert!(
+        (v.scale / before - 1.125).abs() < 1e-3,
+        "{} → {}",
+        before,
+        v.scale
+    );
+    // The comp point under the pointer stays there.
+    let p = v.to_screen(DVec2::new(100.0, 100.0));
+    assert!(p.distance(at) < 0.5, "{p:?} {at:?}");
+    // Pixel-precise scrolling: a trackpad on macOS pans (AE 25.3+), a
+    // high-resolution wheel elsewhere zooms (#571).
+    let o = v.origin;
+    h.move_to(
+        at,
+        Modifiers::NONE,
+        vec![wheel(
+            egui::MouseWheelUnit::Point,
+            vec2(10.0, -20.0),
+            Modifiers::NONE,
+        )],
+    );
+    h.frame(Vec::new(), Modifiers::NONE);
+    let v2 = h.viewer.last_view.unwrap();
+    if cfg!(target_os = "macos") {
+        assert!((v2.scale - v.scale).abs() < 1e-6);
+        assert!(
+            (v2.origin - o - vec2(10.0, -20.0)).length() < 0.5,
+            "{:?}",
+            v2.origin - o
+        );
+    } else {
+        assert!(v2.scale < v.scale, "zoomed out: {} → {}", v.scale, v2.scale);
+    }
+}
+
+/// Zoom In / Out (. and ,) step by powers of two like AE (no 33.3 %, #570),
+/// and / sets 100 % (#569).
+#[test]
+fn zoom_keys_step_by_powers_of_two_and_slash_is_100() {
+    let mut h = H::new();
+    h.viewer.zoom = Some(1.0);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let mag = |h: &H| h.viewer.last_view.unwrap().scale * h.ctx.pixels_per_point();
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        assert!(h.action("viewer.zoom_out"));
+        h.frame(Vec::new(), Modifiers::NONE);
+        seen.push((mag(&h) * 1000.0).round() / 1000.0);
+    }
+    assert_eq!(seen, [0.5, 0.25, 0.125]);
+    assert!(h.action(crate::viewer::ZOOM_100));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!((mag(&h) - 1.0).abs() < 1e-4, "{}", mag(&h));
+}
+
+/// Fit (Shift+/) fills the panel past 100 %; Fit up to 100 % (Alt/Option+/,
+/// the default) stops at 100 % (AE's two magnification popup entries).
+#[test]
+fn fit_fills_the_panel_and_fit_up_to_100_stops_at_100() {
+    let mut h = H::new();
+    h.frame(Vec::new(), Modifiers::NONE);
+    let mag = |h: &H| h.viewer.last_view.unwrap().scale * h.ctx.pixels_per_point();
+    assert!((mag(&h) - 1.0).abs() < 1e-4, "default: {}", mag(&h));
+    assert!(h.action("viewer.fit"));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(
+        mag(&h) > 1.5,
+        "a 640 × 360 comp fills the panel: {}",
+        mag(&h)
+    );
+    assert!(h.action(crate::viewer::FIT_UP_TO_100));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!((mag(&h) - 1.0).abs() < 1e-4, "{}", mag(&h));
+}
+
+#[test]
+fn smart_zoom_keeps_pointer_fixed_then_restores_fit() {
+    let mut h = H::new();
+    h.viewer.zoom = None;
+    h.frame(Vec::new(), Modifiers::NONE);
+    let at = h.screen(100.0, 100.0);
+    h.move_to(at, Modifiers::NONE, Vec::new());
+    let fit = h.viewer.last_view.unwrap();
+    crate::request_smart_zoom(&h.ctx);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let zoomed = h.viewer.last_view.unwrap();
+    assert!(zoomed.scale > fit.scale);
+    assert!(zoomed.to_screen(fit.to_comp(at)).distance(at) < 0.01);
+    crate::request_smart_zoom(&h.ctx);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.viewer.last_view.unwrap().origin, fit.origin);
+}
+
+#[test]
+fn magnification_preferences_change_wheel_zoom() {
+    use crate::viewer::Magnification;
+    let smooth = Magnification::default();
+    let mut rest = 0.0;
+    assert!((smooth.wheel_zoom(1.0, 1.0, &mut rest) - 1.125).abs() < 1e-6);
+    assert!(smooth.follows_pointer(false) && !smooth.follows_pointer(true));
+    // Legacy steps through the zoom menu's levels, whole notches at a time.
+    let legacy = Magnification {
+        legacy: true,
+        centered: true,
+        trackpad_zooms: false,
+    };
+    assert_eq!(legacy.wheel_zoom(1.0, 1.0, &mut rest), 2.0);
+    assert_eq!(legacy.wheel_zoom(1.0, -2.0, &mut rest), 0.25);
+    assert_eq!(legacy.wheel_zoom(0.7, 1.0, &mut rest), 1.0);
+    assert_eq!(legacy.wheel_zoom(1.0, 0.6, &mut rest), 1.0);
+    assert_eq!(legacy.wheel_zoom(1.0, 0.6, &mut rest), 2.0);
+    assert!(!legacy.follows_pointer(false) && legacy.follows_pointer(true));
+}

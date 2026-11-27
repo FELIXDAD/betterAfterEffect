@@ -2,39 +2,91 @@
 //!
 //! `bae_anim::Evaluator` does the animation work (AE easing, spatial paths,
 //! parenting, layer time, time remapping, later expressions); this module maps
-//! its [`EvaluatedComp`] onto [`RenderComp`]: world matrices become 2D affines,
-//! sources are resolved (solid assets, footage files; nested comps arrive
-//! already evaluated at their mapped time), tokens become enums.
+//! its [`EvaluatedComp`] onto [`RenderComp`]: world matrices become 2D affines
+//! (and stay 4×4 for 3D layers), the active camera and enabled lights are
+//! collected, motion-blurred layers are sampled at 03's shutter times, sources
+//! are resolved (solid assets, footage files; nested comps arrive already
+//! evaluated at their mapped time), tokens become enums.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use std::hash::{Hash, Hasher};
 
-use bae_anim::{EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, LayerSource};
+use bae_anim::{
+    CameraState, EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, FrameBlending,
+    LayerSource, LightState,
+};
 use bae_model::{LayerKind, PrimPath, Stage, StageEvent, Time};
 use glam::{DAffine2, DMat4, DVec2};
 use rustc_hash::FxHasher;
 
 use crate::assets::AssetFiles;
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
+use crate::camera::Camera;
 use crate::error::RenderError;
 use crate::eval::CompEvaluator;
 use crate::graph::MAX_DEPTH;
 use crate::input::{
-    CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
-    TrackMatte, hash_value,
+    CustomContent, FootageRef, FrameBlend, LayerContent, RenderComp, RenderEffect, RenderLayer,
+    RenderMask, TrackMatte, hash_value,
 };
+use crate::light::{Falloff, Light, LightKind, Material, ShadowMode};
+use crate::motion::{CompMotionBlur, LayerSample};
 use crate::request::RenderPurpose;
+
+#[cfg(feature = "media")]
+mod preview_audio;
+
+/// Prepare the audio spectrum's FFT alongside its GPU pipeline on the effects worker.
+pub fn prewarm_audio_analysis() {
+    #[cfg(feature = "media")]
+    bae_media::visual_audio::SpectrumPlans::prewarm();
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct NestedSwitches {
+    quality: bae_anim::LayerQuality,
+    effects_off: bool,
+    frame_blending_off: bool,
+    motion_blur_off: bool,
+}
+
+impl NestedSwitches {
+    fn through(self, comp: &EvaluatedComp, layer: &EvaluatedLayer) -> Self {
+        Self {
+            quality: self.quality.min(layer.switches.quality),
+            effects_off: self.effects_off || !layer.switches.effects,
+            frame_blending_off: self.frame_blending_off || !comp.frame_blending,
+            motion_blur_off: self.motion_blur_off
+                || !comp.motion_blur.enabled
+                || !layer.switches.motion_blur,
+        }
+    }
+}
 
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
 /// frames; forward [`StageEvent`]s to [`CompEvaluator::invalidate`]).
 #[derive(Debug)]
 pub struct AnimEvaluator {
+    #[cfg(feature = "media")]
+    audio_windows: bae_media::visual_audio::AudioWindows,
+    #[cfg(feature = "media")]
+    spectrum_plans: bae_media::visual_audio::SpectrumPlans,
+    #[cfg(feature = "media")]
+    preview_audio: Option<preview_audio::PreviewAudio>,
     inner: Evaluator,
+    scalar_tracks: crate::parameter_track::TrackCache,
+    attributes: AttributeCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
+    propagate_switches: bool,
     warnings: Vec<String>,
+    /// Shape and text layers' content of the previous conversion, by layer:
+    /// reused while what the provider draws is unchanged, so a layer that only
+    /// moves costs no deep clone, hash or JSON per frame. Swept after each
+    /// top-level conversion.
+    customs: rustc_hash::FxHashMap<PrimPath, (CustomContent, bool)>,
 }
 
 impl AnimEvaluator {
@@ -42,10 +94,20 @@ impl AnimEvaluator {
     /// project's directory).
     pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
+            #[cfg(feature = "media")]
+            audio_windows: Default::default(),
+            #[cfg(feature = "media")]
+            spectrum_plans: Default::default(),
+            #[cfg(feature = "media")]
+            preview_audio: None,
             inner: Evaluator::new(),
+            scalar_tracks: Default::default(),
+            attributes: AttributeCache::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
+            propagate_switches: true,
             warnings: Vec::new(),
+            customs: rustc_hash::FxHashMap::default(),
         }
     }
 
@@ -67,6 +129,48 @@ impl AnimEvaluator {
     pub fn with_purpose(mut self, purpose: RenderPurpose) -> Self {
         self.purpose = purpose;
         self
+    }
+
+    /// Apply composition switches recursively when rendering nested comp instances.
+    pub fn set_nested_switches(&mut self, enabled: bool) {
+        self.propagate_switches = enabled;
+    }
+
+    /// Drops compiled animation when the caller observed edits without individual stage events.
+    pub fn clear_compiled(&mut self) {
+        self.inner.clear();
+        self.attributes = AttributeCache::default();
+        #[cfg(feature = "media")]
+        if let Some(preview) = &mut self.preview_audio {
+            preview.composition = None;
+        }
+    }
+
+    /// Prepare the interactive viewer's audio decoders and FFT plans on one worker.
+    pub fn prepare_preview_audio(&mut self, _repaint: impl Fn() + Send + 'static) {
+        #[cfg(feature = "media")]
+        {
+            self.preview_audio = Some(preview_audio::PreviewAudio::new(
+                self.assets.clone(),
+                _repaint,
+            ));
+        }
+    }
+
+    /// The current frame uses a decoder which is still opening in the background.
+    pub fn audio_preparation_pending(&self) -> bool {
+        #[cfg(feature = "media")]
+        if let Some(preview) = &self.preview_audio {
+            return preview.pending;
+        }
+        false
+    }
+
+    /// Evaluates with uncommitted values (a value drag in a panel):
+    /// [`bae_anim::Evaluator::set_overrides`]. Motion blur samples and effects
+    /// reading other frames see them too.
+    pub fn set_overrides(&mut self, overrides: Vec<bae_anim::AttrOverride>) {
+        self.inner.set_overrides(overrides);
     }
 
     fn warn(&mut self, message: String) {
@@ -102,6 +206,22 @@ impl AnimEvaluator {
         ec: &EvaluatedComp,
         depth: usize,
     ) -> Result<RenderComp, RenderError> {
+        self.convert_nested(stage, ec, depth, NestedSwitches::default())
+    }
+
+    fn convert_nested(
+        &mut self,
+        stage: &Stage,
+        ec: &EvaluatedComp,
+        depth: usize,
+        inherited: NestedSwitches,
+    ) -> Result<RenderComp, RenderError> {
+        #[cfg(feature = "media")]
+        if depth == 0
+            && let Some(preview) = &mut self.preview_audio
+        {
+            preview.begin(stage, ec);
+        }
         for e in &ec.errors {
             self.warn(format!("{}.{}: {}", e.prim, e.attr, e.message));
         }
@@ -115,12 +235,112 @@ impl AnimEvaluator {
             background: ec.bg_color.map(|v| v as f32),
             shutter: [ec.motion_blur.shutter_angle, ec.motion_blur.shutter_phase],
             layers: Vec::with_capacity(ec.layers.len()),
+            camera: active_camera(ec),
+            lights: comp_lights(ec).to_vec(),
+            motion_blur: None,
         };
-        for layer in &ec.layers {
-            let out = self.layer(stage, ec, layer, depth)?;
+        let mut samples = match if inherited.motion_blur_off {
+            None
+        } else {
+            self.motion_samples(stage, ec)?
+        } {
+            Some((mb, samples)) => {
+                rc.motion_blur = Some(Arc::new(mb));
+                samples
+            }
+            None => Vec::new(),
+        };
+        for (i, layer) in ec.layers.iter().enumerate() {
+            let mut out = self.layer(stage, ec, layer, depth, inherited)?;
+            if let Some(s) = samples.get_mut(i) {
+                out.motion_samples = std::mem::take(s).into();
+            }
             rc.layers.push(out);
         }
+        rc.photoshop_clipping_visibility(stage);
+        // Layers that cannot show in this frame (outside their in/out points,
+        // hidden, not a parent or an active layer's matte): the frame does not
+        // depend on their content (cache invalidation, `RenderLayer::inert`).
+        let parents: Vec<usize> = ec.layers.iter().filter_map(|l| l.parent).collect();
+        let mattes: Vec<usize> = rc
+            .layers
+            .iter()
+            .filter(|l| l.active)
+            .filter_map(|l| l.track_matte.map(|m| m.layer))
+            .collect();
+        for (i, l) in rc.layers.iter_mut().enumerate() {
+            l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
+        }
+        collapse_3d_precomps(ec, &mut rc);
+        if depth == 0 {
+            self.customs.retain(|_, (_, used)| std::mem::take(used));
+        }
         Ok(rc)
+    }
+
+    /// The comp evaluated at its motion-blur sample times (AE-ANI-103): 03 puts
+    /// the times on every blurred layer (both switches on); all layers of a comp
+    /// share them. Returns the comp's samples and, per layer, its placement at
+    /// each time (empty for layers that are not blurred).
+    #[allow(clippy::type_complexity)]
+    fn motion_samples(
+        &mut self,
+        stage: &Stage,
+        ec: &EvaluatedComp,
+    ) -> Result<Option<(CompMotionBlur, Vec<Vec<LayerSample>>)>, RenderError> {
+        let blurred = |l: &EvaluatedLayer| {
+            l.active
+                && !l.motion_blur_times.is_empty()
+                && !matches!(
+                    l.kind,
+                    LayerKind::Camera | LayerKind::Light | LayerKind::Audio
+                )
+        };
+        let Some(times) = ec
+            .layers
+            .iter()
+            .find(|l| blurred(l))
+            .map(|l| l.motion_blur_times.clone())
+        else {
+            return Ok(None);
+        };
+        let mut layers: Vec<Vec<LayerSample>> = vec![Vec::new(); ec.layers.len()];
+        let mut cameras = Vec::with_capacity(times.len());
+        let mut lights = Vec::with_capacity(times.len());
+        for &t in &times {
+            // Transform-only sampling would be cheaper; 03 evaluates whole comps.
+            let at = self
+                .inner
+                .evaluate_comp(stage, &ec.path, t)
+                .map_err(|e| RenderError::Other(format!("{}: {e}", ec.path)))?;
+            if at.layers.len() != ec.layers.len() {
+                self.warn(format!(
+                    "{}: layers changed between motion-blur samples",
+                    ec.path
+                ));
+                return Ok(None);
+            }
+            cameras.push(active_camera(&at));
+            lights.push(comp_lights(&at));
+            for (i, l) in ec.layers.iter().enumerate() {
+                if blurred(l) {
+                    let s = &at.layers[i];
+                    layers[i].push(LayerSample {
+                        transform: affine_2d(&s.world_matrix),
+                        matrix_3d: matrix_3d(s),
+                    });
+                }
+            }
+        }
+        Ok(Some((
+            CompMotionBlur {
+                times,
+                cameras,
+                lights,
+                adaptive_limit: ec.motion_blur.adaptive_limit,
+            },
+            layers,
+        )))
     }
 
     fn layer(
@@ -129,20 +349,30 @@ impl AnimEvaluator {
         ec: &EvaluatedComp,
         l: &EvaluatedLayer,
         depth: usize,
+        inherited: NestedSwitches,
     ) -> Result<RenderLayer, RenderError> {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
+        // The render queue renders at Best Settings (every layer, nested
+        // ones too, at Best); the Quality switches only change previews.
+        out.quality = match self.purpose {
+            RenderPurpose::Final => bae_anim::LayerQuality::Best,
+            _ => inherited.quality.min(l.switches.quality),
+        };
         out.time = l.layer_time;
+        out.start_time = l.timing.start_time;
+        out.time_scale = l.timing.stretch_percent() / 100.;
+        out.in_point = l.timing.in_point.min(l.timing.out_point);
         out.active = l.active && guide_ok;
         out.visible = l.visible;
         out.adjustment = l.switches.adjustment || l.kind == LayerKind::Adjustment;
-        if l.switches.three_d {
-            self.warn(format!(
-                "{}: 3D layers are drawn flat (no camera projection yet)",
-                l.path
-            ));
-        }
         out.transform = affine_2d(&l.world_matrix);
+        out.matrix_3d = matrix_3d(l);
+        if out.matrix_3d.is_some()
+            && let Some(m) = &l.material
+        {
+            out.material = material(m);
+        }
         out.opacity = l.opacity.clamp(0.0, 1.0) as f32;
         out.blend_mode = BlendMode::from_token(&l.blend_mode).unwrap_or_else(|| {
             self.warn(format!("{}: unknown blend mode `{}`", l.path, l.blend_mode));
@@ -152,10 +382,13 @@ impl AnimEvaluator {
         out.track_matte = matte_mode(l.track_matte)
             .and_then(|mode| l.track_matte_layer.map(|layer| TrackMatte { layer, mode }));
         if out.active {
-            out.content = self.content(stage, ec, l, depth)?;
+            out.content = self.content(stage, ec, l, depth, inherited)?;
+            // A mask a text layer uses as its path does not mask (AE).
+            let text_path = l.text_path.as_ref().map(|t| &t.mask);
             out.masks = l
                 .masks
                 .iter()
+                .filter(|m| text_path != Some(&m.path))
                 .map(|m| RenderMask {
                     path: m.path.clone(),
                     shape: m.shape.clone(),
@@ -166,58 +399,234 @@ impl AnimEvaluator {
                     expansion: m.expansion as f32,
                 })
                 .collect();
+            out.layer_styles =
+                l.layer_styles
+                    .as_ref()
+                    .filter(|e| e.enabled)
+                    .map(|e| RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: true,
+                        params: e
+                            .params
+                            .iter()
+                            .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
+                            .collect(),
+                    });
+            // The fx switch turns the whole effect stack off.
             out.effects = l
                 .effects
                 .iter()
-                .map(|e| RenderEffect {
-                    path: e.path.clone(),
-                    effect: e.match_name.clone(),
-                    enabled: e.enabled,
-                    params: e
+                .filter(|_| l.switches.effects && !inherited.effects_off)
+                .map(|e| {
+                    let mut params: Vec<(u32, bae_model::Value)> = e
                         .params
                         .iter()
                         .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
-                        .collect(),
+                        .collect();
+                    // The Paint effect's strokes visible at this frame.
+                    if e.match_name == crate::paint::PAINT_EFFECT {
+                        let strokes = crate::paint::strokes(&e.children, l.layer_time);
+                        params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
+                        params.extend(crate::paint::source_params(&strokes));
+                    }
+                    RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: e.enabled,
+                        params,
+                    }
                 })
                 .collect();
+            #[cfg(feature = "media")]
+            for fx in &mut out.effects {
+                self.audio_visual(stage, ec, l, fx);
+            }
         }
+        out.resolve_photoshop_mask(stage);
+        out.resolve_photoshop_group(stage, &self.assets);
         Ok(out)
+    }
+
+    #[cfg(feature = "media")]
+    fn audio_visual(
+        &mut self,
+        stage: &Stage,
+        ec: &EvaluatedComp,
+        owner: &EvaluatedLayer,
+        fx: &mut RenderEffect,
+    ) {
+        use bae_media::visual_audio::{self, RATE};
+        use bae_model::Value;
+        let spectrum = match fx.effect.as_str() {
+            "ADBE AudSpect" => true,
+            "ADBE AudWave" => false,
+            _ => return,
+        };
+        if !fx.enabled {
+            return;
+        }
+        let n = |id, default| fx.param(id).and_then(Value::as_f64).unwrap_or(default);
+        let duration = n(
+            if spectrum { 10 } else { 7 },
+            if spectrum { 90.0 } else { 125.0 },
+        )
+        .clamp(0.0, 30000.0)
+            * 0.001;
+        let start = ec.time
+            + Time::from_seconds(n(if spectrum { 11 } else { 8 }, 0.0) * 0.001 - duration * 0.5);
+        let points = n(
+            if spectrum { 8 } else { 5 },
+            if spectrum { 64.0 } else { 120.0 },
+        )
+        .round()
+        .clamp(1.0, if spectrum { 4096.0 } else { 44100.0 }) as usize;
+        let channel = if spectrum { 1 } else { n(14, 1.0) as i64 };
+        let layer = fx
+            .param(1)
+            .and_then(Value::as_prim_ref)
+            .unwrap_or(&owner.path);
+        let Some(view) = stage.prim(layer) else {
+            return;
+        };
+        let Some(asset) = view
+            .value("source")
+            .and_then(Value::as_prim_ref)
+            .and_then(|p| stage.prim(p))
+        else {
+            return;
+        };
+        if asset.value("has_audio").and_then(Value::as_bool) != Some(true) {
+            return;
+        }
+        let comp_duration = stage
+            .prim(&ec.path)
+            .and_then(|v| v.value("duration"))
+            .and_then(Value::as_time)
+            .unwrap_or(Time::MAX);
+        let timing = bae_anim::layer_timing(&view, comp_duration);
+        let count = (duration * f64::from(RATE)).round().max(1.0) as usize;
+        let samples = if let Some(preview) = &mut self.preview_audio {
+            match preview.source(&asset, timing.layer_time(ec.time), &mut self.spectrum_plans) {
+                Ok(Some(source)) => {
+                    visual_audio::AudioWindows::read_source(source, timing, start, count, channel)
+                        .map_err(|e| e.to_string())
+                }
+                Ok(None) => return,
+                Err(e) => Err(e),
+            }
+        } else {
+            match self.assets.file(&asset) {
+                Ok(Some(file)) => self
+                    .audio_windows
+                    .read(&file, timing, start, count, channel)
+                    .map_err(|e| e.to_string()),
+                Ok(None) => return,
+                Err(e) => Err(e),
+            }
+        };
+        let pcm = match samples {
+            Ok(pcm) => pcm,
+            Err(e) => {
+                self.warn(format!("{}: {e}", asset.path()));
+                return;
+            }
+        };
+        let envelope = if spectrum {
+            let average = fx.param(22).and_then(Value::as_bool).unwrap_or(false);
+            self.spectrum_plans
+                .spectrum(&pcm, points, n(6, 20.0), n(7, 2000.0), average)
+        } else {
+            visual_audio::waveform(&pcm, points)
+        };
+        if let Some(mask) = fx
+            .param(4)
+            .and_then(Value::as_prim_ref)
+            .and_then(|p| owner.masks.iter().find(|m| m.path == *p))
+        {
+            fx.params.push((
+                crate::effect::AUDIO_VISUAL_PATH,
+                Value::Bezier(mask.shape.clone()),
+            ));
+        }
+        fx.params.push((
+            crate::effect::AUDIO_VISUAL_VALUES,
+            Value::FloatList(envelope),
+        ));
+    }
+
+    /// The previous conversion's content of shape or text layer `l` while what
+    /// its provider draws is unchanged; otherwise `make`'s (remembered).
+    fn reuse(
+        &mut self,
+        l: &EvaluatedLayer,
+        make: impl FnOnce(&EvaluatedLayer) -> LayerContent,
+    ) -> LayerContent {
+        if let Some((content, used)) = self.customs.get_mut(&l.path)
+            && let Some(prev) = content.data.downcast_ref::<EvaluatedLayer>()
+            && same_drawing(prev, l)
+        {
+            *used = true;
+            return LayerContent::Custom(content.clone());
+        }
+        let content = make(l);
+        if let LayerContent::Custom(c) = &content {
+            self.customs.insert(l.path.clone(), (c.clone(), true));
+        }
+        content
     }
 
     fn content(
         &mut self,
         stage: &Stage,
-        _ec: &EvaluatedComp,
+        ec: &EvaluatedComp,
         l: &EvaluatedLayer,
         depth: usize,
+        inherited: NestedSwitches,
     ) -> Result<LayerContent, RenderError> {
         if matches!(
             l.kind,
-            LayerKind::Null
-                | LayerKind::Camera
-                | LayerKind::Light
-                | LayerKind::Audio
-                | LayerKind::Adjustment
+            LayerKind::Null | LayerKind::Camera | LayerKind::Light | LayerKind::Audio
         ) {
             return Ok(LayerContent::None);
         }
         match &l.source {
             // Shape and text layers are drawn by 05's providers from the
             // evaluated layer (contents, source text, animators).
-            LayerSource::None if l.kind == LayerKind::Shape => Ok(custom(SHAPE_PROVIDER, l, |h| {
-                hash_prims(&l.contents, h);
+            LayerSource::None if l.kind == LayerKind::Shape => Ok(self.reuse(l, |l| {
+                custom(SHAPE_PROVIDER, l, |h| {
+                    hash_prims(&l.contents, h);
+                    if has_wiggle(&l.contents) {
+                        l.layer_time.hash(h);
+                    }
+                })
             })),
-            LayerSource::None if l.kind == LayerKind::Text => Ok(custom(TEXT_PROVIDER, l, |h| {
-                if let Some(doc) = &l.text {
-                    serde_json::to_vec(doc).unwrap_or_default().hash(h);
-                }
-                hash_prims(&l.text_animators, h);
+            // A Photoshop text layer retains original footage for its inherited styles.
+            _ if l.kind == LayerKind::Text => Ok(self.reuse(l, |l| {
+                custom(TEXT_PROVIDER, l, |h| {
+                    if let Some(doc) = &l.text {
+                        serde_json::to_vec(doc).unwrap_or_default().hash(h);
+                    }
+                    hash_prims(&l.text_animators, h);
+                    // Text on a path: its options and the mask's shape.
+                    if let Some(tp) = &l.text_path {
+                        serde_json::to_vec(tp).unwrap_or_default().hash(h);
+                        if let Some(m) = l.masks.iter().find(|m| m.path == tp.mask) {
+                            serde_json::to_vec(&m.shape).unwrap_or_default().hash(h);
+                        }
+                    }
+                })
             })),
             LayerSource::None => Ok(LayerContent::None),
             LayerSource::Comp { comp, nested, .. } => match nested {
                 // bae-anim evaluates nested comps itself (at the mapped time).
                 Some(nested) => {
-                    let rc = self.convert(stage, nested, depth + 1)?;
+                    let switches = if self.propagate_switches {
+                        inherited.through(ec, l)
+                    } else {
+                        NestedSwitches::default()
+                    };
+                    let rc = self.convert_nested(stage, nested, depth + 1, switches)?;
                     Ok(LayerContent::Comp(Arc::new(rc)))
                 }
                 None => {
@@ -236,6 +645,12 @@ impl AnimEvaluator {
                 },
                 "footage" | "sequence" => LayerContent::Footage(FootageRef {
                     asset: asset.clone(),
+                    file_revision: stage
+                        .prim(asset)
+                        .map_or(0, |v| bae_model::asset::file_revision(&v)),
+                    psd_layer: stage
+                        .prim(asset)
+                        .and_then(|v| bae_model::psd::LayerImage::from_asset(&v)),
                     file: match stage.prim(asset).map(|view| self.assets.file(&view)) {
                         Some(Ok(file)) => file,
                         Some(Err(message)) => {
@@ -246,6 +661,20 @@ impl AnimEvaluator {
                     },
                     size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
                     source_time: *time,
+                    alphabetical: stage.prim(asset).is_some_and(|view| {
+                        view.value("sequence:pattern")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| s.starts_with("*."))
+                    }),
+                    sequence: (info.kind == "sequence")
+                        .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
+                    blend: l
+                        .frame_blend_span
+                        .filter(|_| !inherited.frame_blending_off)
+                        .map(|span| FrameBlend {
+                            span,
+                            pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
+                        }),
                 }),
                 _ => LayerContent::None,
             }),
@@ -263,14 +692,101 @@ impl CompEvaluator for AnimEvaluator {
         self.eval(stage, comp, time, 0)
     }
 
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<bae_model::Value> {
+        let cache = &mut self.attributes;
+        if cache.revision != stage.revision() || cache.len > ATTRIBUTE_CACHE_LIMIT {
+            *cache = AttributeCache {
+                revision: stage.revision(),
+                ..AttributeCache::default()
+            };
+        }
+        if let Some(value) = cache
+            .values
+            .get(path)
+            .and_then(|attrs| attrs.get(name))
+            .and_then(|times| times.get(&time))
+        {
+            return value.clone();
+        }
+        let value = self.inner.evaluate_attribute(stage, path, name, time).ok();
+        cache
+            .values
+            .entry(path.clone())
+            .or_default()
+            .entry(name.to_owned())
+            .or_default()
+            .insert(time, value.clone());
+        cache.len += 1;
+        value
+    }
+
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &bae_model::AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
+        crate::parameter_track::prepare(slot, attr, frame, |t| {
+            let (value, reads) = self
+                .inner
+                .evaluate_attribute_traced(stage, path, name, t)
+                .ok()?;
+            Some((value.as_f64()?, reads))
+        })
+    }
+
     fn invalidate(&mut self, event: &StageEvent) {
+        self.attributes = AttributeCache::default();
         self.inner.invalidate(event);
+        #[cfg(feature = "media")]
+        {
+            // Decoders are keyed by file: only asset or structural edits can strand them.
+            let files = event.changes.iter().any(|c| match c {
+                bae_model::Change::AttrChanged { attr, .. } => attr.starts_with("file:"),
+                _ => true,
+            });
+            if files {
+                self.audio_windows = Default::default();
+            }
+            if let Some(preview) = &mut self.preview_audio {
+                preview.composition = None;
+            }
+        }
+    }
+
+    fn set_image_samples(&mut self, samples: Option<Arc<bae_anim::ImageSamples>>) {
+        self.inner.set_image_samples(samples);
     }
 
     fn take_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.warnings)
     }
 }
+
+/// Effect controls evaluated at other times (expressions of generate-mode
+/// effects sampled at every birth, the same births each frame), for one stage
+/// revision: an expression runs once per (control, time).
+#[derive(Debug, Default)]
+struct AttributeCache {
+    revision: u64,
+    len: usize,
+    values: rustc_hash::FxHashMap<
+        PrimPath,
+        rustc_hash::FxHashMap<String, rustc_hash::FxHashMap<Time, Option<bae_model::Value>>>,
+    >,
+}
+
+/// Entries before the cache starts over (a long scrub).
+const ATTRIBUTE_CACHE_LIMIT: usize = 16_384;
 
 /// Provider ID of shape layers (05's `bae_vector::SHAPE_PROVIDER`).
 pub const SHAPE_PROVIDER: &str = "bae.shape";
@@ -290,13 +806,47 @@ fn custom(provider: &str, l: &EvaluatedLayer, hash: impl FnOnce(&mut FxHasher)) 
     })
 }
 
+/// Whether a shape or text provider draws `a` and `b` the same (what the
+/// custom content hashes; the transform does not matter).
+fn same_drawing(a: &EvaluatedLayer, b: &EvaluatedLayer) -> bool {
+    a.kind == b.kind
+        && match b.kind {
+            LayerKind::Shape => {
+                a.contents == b.contents
+                    && (a.layer_time == b.layer_time || !has_wiggle(&b.contents))
+            }
+            LayerKind::Text => {
+                a.text == b.text
+                    && a.text_animators == b.text_animators
+                    && a.text_path == b.text_path
+                    && (b.text_path.is_none() || a.masks == b.masks)
+            }
+            _ => false,
+        }
+}
+
+fn has_wiggle(prims: &[EvaluatedPrim]) -> bool {
+    prims.iter().any(|p| {
+        matches!(
+            p.get("match_name")
+                .or_else(|| p.get("operator"))
+                .and_then(bae_model::Value::as_str),
+            Some("ADBE Vector Filter - Roughen" | "wiggle_paths" | "roughen")
+        ) && p
+            .f64("ae:ADBE_Vector_Temporal_Freq")
+            .or_else(|| p.f64("wiggle_paths:frequency"))
+            != Some(0.0)
+            || has_wiggle(&p.children)
+    })
+}
+
 fn hash_prims(prims: &[EvaluatedPrim], h: &mut FxHasher) {
     prims.len().hash(h);
     for p in prims {
         p.path.hash(h);
         p.prim_type.hash(h);
         p.attrs.len().hash(h);
-        for (name, value) in &p.attrs {
+        for (name, value) in p.attrs.iter() {
             name.hash(h);
             hash_value(value, h);
         }
@@ -311,6 +861,177 @@ fn matte_mode(m: bae_anim::TrackMatte) -> Option<TrackMatteMode> {
         bae_anim::TrackMatte::AlphaInverted => Some(TrackMatteMode::AlphaInverted),
         bae_anim::TrackMatte::Luma => Some(TrackMatteMode::Luma),
         bae_anim::TrackMatte::LumaInverted => Some(TrackMatteMode::LumaInverted),
+    }
+}
+
+/// The layer's 4×4 world matrix when it is a 3D layer that draws (cameras and
+/// lights are 3D but have no pixels).
+fn matrix_3d(l: &EvaluatedLayer) -> Option<DMat4> {
+    (l.switches.three_d && !matches!(l.kind, LayerKind::Camera | LayerKind::Light))
+        .then_some(l.world_matrix)
+}
+
+/// The comp's active camera (03 picks it, AE-CMP-423).
+fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
+    let c: &CameraState = ec.layers.get(ec.camera?)?.camera.as_ref()?;
+    Some(Camera {
+        world: c.world_matrix,
+        zoom: c.zoom,
+        depth_of_field: c.depth_of_field,
+        focus_distance: c.focus_distance,
+        aperture: c.aperture,
+        blur_level: c.blur_level,
+        iris: c.iris,
+        projection: crate::camera::Projection::Perspective,
+    })
+}
+
+/// Collapsed 3D pre-comps (AE-CMP-424): a 3D pre-comp layer with Collapse
+/// Transformations on and no effects, masks or track matte joins the comp's
+/// 3D scene. Its layers take its place in the stack, placed by its matrix and
+/// faded by its opacity, and are seen by this comp's camera and lit by its
+/// lights (the pre-comp's own cameras and lights are ignored); its 2D layers
+/// lie on its plane.
+fn collapse_3d_precomps(ec: &EvaluatedComp, rc: &mut RenderComp) {
+    let mut i = 0;
+    while i < rc.layers.len() {
+        let collapsed = ec
+            .layers
+            .iter()
+            .find(|l| l.path == rc.layers[i].path)
+            .is_some_and(|l| l.switches.collapse_transformation && l.switches.three_d);
+        let outer = &rc.layers[i];
+        let (Some(m), LayerContent::Comp(nested)) = (outer.matrix_3d, &outer.content) else {
+            i += 1;
+            continue;
+        };
+        if !collapsed
+            || outer.effects.iter().any(|e| e.enabled)
+            || outer.masks.iter().any(|m| m.mode != MaskMode::None)
+            || outer.track_matte.is_some()
+        {
+            i += 1;
+            continue;
+        }
+        let nested = nested.clone();
+        let (opacity, active, visible) = (outer.opacity, outer.active, outer.visible);
+        let inner: Vec<RenderLayer> = nested
+            .layers
+            .iter()
+            .map(|l| {
+                let mut l = l.clone();
+                let world = m * l.matrix_3d.unwrap_or_else(|| embed_2d(&l.transform));
+                l.matrix_3d = Some(world);
+                l.transform = affine_2d(&world);
+                l.motion_samples = l
+                    .motion_samples
+                    .iter()
+                    .map(|s| LayerSample {
+                        transform: affine_2d(
+                            &(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                        ),
+                        matrix_3d: Some(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                    })
+                    .collect();
+                l.opacity *= opacity;
+                l.active &= active;
+                l.visible &= visible;
+                if let Some(t) = &mut l.track_matte {
+                    t.layer += i;
+                }
+                l
+            })
+            .collect();
+        let n = inner.len();
+        // Indices past the pre-comp move by the layers it adds.
+        let shift = |index: &mut usize| {
+            if *index > i {
+                *index = *index + n - 1;
+            }
+        };
+        for l in rc.layers.iter_mut() {
+            if let Some(t) = &mut l.track_matte {
+                shift(&mut t.layer);
+            }
+        }
+        for light in rc.lights.iter_mut() {
+            if let Some(index) = &mut light.scope_below {
+                shift(index);
+            }
+        }
+        rc.layers.splice(i..=i, inner);
+        i += n.max(1);
+    }
+}
+
+/// A 2D layer's transform as a 3D placement on the z = 0 plane.
+fn embed_2d(t: &DAffine2) -> DMat4 {
+    DMat4::from_cols(
+        glam::DVec4::new(t.matrix2.x_axis.x, t.matrix2.x_axis.y, 0.0, 0.0),
+        glam::DVec4::new(t.matrix2.y_axis.x, t.matrix2.y_axis.y, 0.0, 0.0),
+        glam::DVec4::new(0.0, 0.0, 1.0, 0.0),
+        glam::DVec4::new(t.translation.x, t.translation.y, 0.0, 1.0),
+    )
+}
+
+/// The lights of `ec` that light its layers.
+fn comp_lights(ec: &EvaluatedComp) -> Arc<[Light]> {
+    ec.layers
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.switches.enabled && l.active)
+        .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
+        .collect()
+}
+
+fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
+    use bae_anim::{LightFalloff, LightType};
+    Light {
+        kind: match s.light_type {
+            LightType::Parallel => LightKind::Parallel,
+            LightType::Spot => LightKind::Spot,
+            LightType::Point => LightKind::Point,
+            LightType::Ambient => LightKind::Ambient,
+            LightType::Environment => LightKind::Environment,
+        },
+        world: s.world_matrix,
+        point_of_interest: s.point_of_interest,
+        color: [s.color[0] as f32, s.color[1] as f32, s.color[2] as f32],
+        intensity: s.intensity as f32,
+        cone_angle: s.cone_angle as f32,
+        cone_feather: s.cone_feather as f32,
+        falloff: match s.falloff {
+            LightFalloff::None => Falloff::None,
+            LightFalloff::Smooth => Falloff::Smooth,
+            LightFalloff::InverseSquareClamped => Falloff::InverseSquareClamped,
+        },
+        radius: s.radius as f32,
+        falloff_distance: s.falloff_distance as f32,
+        casts_shadows: s.casts_shadows,
+        shadow_darkness: s.shadow_darkness as f32,
+        shadow_diffusion: s.shadow_diffusion as f32,
+        scope_below: l.switches.adjustment.then_some(index),
+    }
+}
+
+/// Material Options of a 3D layer, as 03 evaluated them.
+fn material(m: &bae_anim::MaterialState) -> Material {
+    let mode = |v: u8| match v {
+        1 => ShadowMode::On,
+        2 => ShadowMode::Only,
+        _ => ShadowMode::Off,
+    };
+    let percent = |v: f64| v.clamp(0.0, 100.0) as f32;
+    Material {
+        casts_shadows: mode(m.casts_shadows),
+        light_transmission: percent(m.light_transmission),
+        accepts_shadows: mode(m.accepts_shadows),
+        accepts_lights: m.accepts_lights,
+        ambient: percent(m.ambient),
+        diffuse: percent(m.diffuse),
+        specular_intensity: percent(m.specular_intensity),
+        specular_shininess: percent(m.specular_shininess),
+        metal: percent(m.metal),
     }
 }
 

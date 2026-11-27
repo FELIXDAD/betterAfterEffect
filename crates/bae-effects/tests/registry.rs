@@ -32,9 +32,9 @@ fn builtins_register_through_the_plugin_registries() {
         assert!(b.info.full_id.starts_with("bae.effects/"));
         // Built-ins are not plugin effects: never removed, never "missing".
         assert!(def.plugin.is_none(), "{}", def.match_name);
-        assert!(def.match_name.starts_with("ADBE "), "{}", def.match_name);
+        assert!(!def.match_name.is_empty());
         assert!(
-            !b.info.name_zh.is_empty() && b.info.name_zh != b.info.name,
+            !b.info.name.is_empty() && !b.info.name_zh.is_empty(),
             "{}",
             def.match_name
         );
@@ -116,4 +116,12 @@ fn prewarm_compiles_every_pipeline() {
         bae_effects::prewarm(&gpu, format).unwrap();
         eprintln!("prewarm {format:?}: {:?}", t.elapsed());
     }
+}
+
+#[path = "registry/ae_reference.rs"]
+mod ae_reference;
+
+#[test]
+fn builtin_defs_follow_the_ae_26_reference() {
+    ae_reference::check();
 }

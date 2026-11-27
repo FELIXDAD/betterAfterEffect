@@ -12,18 +12,21 @@ use bae_ui::PanelContext;
 use egui::{Color32, Painter, Pos2, Rect, Stroke};
 use serde_json::json;
 
+use bae_render::Camera;
+
 use crate::render::{self, Affine, View};
 use crate::session::SharedSession;
 
-/// Snapping distance on screen (points): AE 26 snaps at 13.3 DIP, not at 16
-/// (R1, transform-tools.md §4).
-pub(super) const SNAP_DISTANCE: f32 = 14.0;
+/// Snapping distance on screen (points): AE 26 snaps within 20 physical
+/// pixels at 150 % (13.3 DIP) and not at 24 (16 DIP) (R1, transform-tools.md
+/// §4).
+pub(super) const SNAP_DISTANCE: f32 = 20.0 / 1.5;
 /// Pick radius of bounding-box handles and the anchor point (points).
 pub(super) const HANDLE_PICK: f32 = 5.0;
 pub(super) const ANCHOR_PICK: f32 = 8.0;
 
 /// One layer a drag changes.
-pub(super) struct LayerEdit {
+pub(crate) struct LayerEdit {
     pub path: PrimPath,
     pub start: Transform,
     pub now: Transform,
@@ -42,7 +45,8 @@ impl LayerEdit {
             parent: l
                 .parent
                 .map_or(DMat4::IDENTITY, |i| comp.layers[i].world_matrix),
-            three_d: l.switches.three_d,
+            // Cameras and lights are always 3D.
+            three_d: l.switches.three_d || matches!(l.kind, LayerKind::Camera | LayerKind::Light),
         }
     }
 
@@ -89,14 +93,15 @@ pub(super) fn handles(l: &EvaluatedLayer, view: &View) -> Option<[Pos2; 8]> {
     Some(out)
 }
 
-/// The anchor point of a layer on screen.
+/// The anchor point of a layer on screen (far off screen behind the camera).
 pub(super) fn anchor_screen(l: &EvaluatedLayer, view: &View) -> Pos2 {
     let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-    view.to_screen(DVec2::new(a.x, a.y))
+    view.project(a, render::is_3d(l))
+        .unwrap_or(Pos2::new(f32::MAX, f32::MAX))
 }
 
 /// What a drag does.
-pub(super) enum Kind {
+pub(crate) enum Kind {
     Move {
         start: DVec2,
     },
@@ -118,6 +123,45 @@ pub(super) enum Kind {
         /// otherwise the content pans behind the anchor.
         compensate: bool,
     },
+    /// A 3D layer's axis arrow: Position along `dir` (comp space, unit).
+    Axis {
+        axis: usize,
+        origin: DVec3,
+        dir: DVec3,
+        camera: Box<Camera>,
+        size: DVec2,
+        /// Where along the axis the drag started.
+        start: f64,
+    },
+    /// A 3D layer's scale arrow: Scale `axis` by how far along `dir` the
+    /// pointer is from `origin`, relative to where it started.
+    AxisScale {
+        axis: usize,
+        origin: DVec3,
+        dir: DVec3,
+        camera: Box<Camera>,
+        size: DVec2,
+        start: f64,
+    },
+    /// A 3D layer's rotation ring: X / Y / Z Rotation (or Orientation) `axis`.
+    Spin {
+        axis: usize,
+        center: DVec2,
+        start: DVec2,
+        last: f64,
+        /// +1 or −1: a clockwise drag turns this way about the axis.
+        sign: f64,
+        orientation: bool,
+    },
+}
+
+/// The plane a 3D layer moves in when dragged: parallel to the view at the
+/// grabbed layer's depth.
+#[derive(Clone, Copy)]
+pub(crate) struct ViewPlane {
+    pub camera: Camera,
+    pub size: DVec2,
+    pub depth: f64,
 }
 
 /// The point that snaps and what it snaps to (comp space).
@@ -128,7 +172,54 @@ struct Snapping {
 
 /// The 9 snap features of a layer: bounds corners, edge midpoints and center
 /// (comp space).
-fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
+/// A layer's snapping features (AE): its 9 bound points, its anchor point
+/// (`anchor`), the vertices of its masks and shape paths and, with `inner`,
+/// the features of the layers inside a collapsed pre-comp.
+fn features(l: &EvaluatedLayer, anchor: bool, inner: bool, out: &mut Vec<DVec2>) {
+    if inner
+        && l.switches.collapse_transformation
+        && let bae_anim::LayerSource::Comp {
+            nested: Some(nested),
+            ..
+        } = &l.source
+    {
+        let m = Affine::new(l.world_matrix);
+        for n in nested
+            .layers
+            .iter()
+            .filter(|n| n.visible && !matches!(n.kind, LayerKind::Camera | LayerKind::Light))
+        {
+            let mut own = Vec::new();
+            features(n, true, true, &mut own);
+            out.extend(own.into_iter().map(|p| m.apply(p)));
+        }
+    }
+    if anchor {
+        let a = l.world_matrix.transform_point3(l.transform.anchor_point);
+        out.push(DVec2::new(a.x, a.y));
+    }
+    let mut paths = Vec::new();
+    for m in &l.masks {
+        paths.push((m.shape.clone(), l.world_matrix));
+    }
+    if l.kind == LayerKind::Shape {
+        let mut shapes = Vec::new();
+        super::overlay::shape_paths(
+            &l.contents,
+            &l.world_matrix,
+            egui::Color32::TRANSPARENT,
+            &mut shapes,
+        );
+        paths.extend(shapes.into_iter().map(|p| (p.path, p.to_comp)));
+    }
+    for (path, m) in paths {
+        let m = Affine::new(m);
+        out.extend(
+            path.vertices
+                .iter()
+                .map(|v| m.apply(DVec2::new(v[0], v[1]))),
+        );
+    }
     if let Some((a, b)) = render::layer_bounds(l) {
         let m = Affine::new(l.world_matrix);
         let c = (a + b) / 2.0;
@@ -149,12 +240,21 @@ fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
 }
 
 /// A drag of the selected layers.
-pub(super) struct TransformDrag {
+pub(crate) struct TransformDrag {
     pub edits: Vec<LayerEdit>,
     pub kind: Kind,
     snapping: Option<Snapping>,
     /// The point snapped to in the last frame (comp space).
     guide: Option<DVec2>,
+    /// The grabbed feature where it is now, while snapping is on (AE
+    /// highlights it).
+    feature_now: Option<DVec2>,
+    /// Guides and grid lines the snapping point snaps to (View ▸ Snap to
+    /// Guides / Grid): `(vertical, at)` comp pixels, within `line_snap`.
+    lines: Vec<(bool, f64)>,
+    line_snap: f64,
+    /// 3D layers move in this plane (Move).
+    plane: Option<ViewPlane>,
 }
 
 impl TransformDrag {
@@ -171,15 +271,39 @@ impl TransformDrag {
             kind,
             snapping: None,
             guide: None,
+            feature_now: None,
+            lines: Vec::new(),
+            line_snap: 0.0,
+            plane: None,
         }
     }
 
+    /// Guide and grid lines to snap to, within `distance` comp pixels.
+    pub fn with_lines(mut self, lines: Vec<(bool, f64)>, distance: f64) -> Self {
+        self.lines = lines;
+        self.line_snap = distance;
+        self
+    }
+
+    /// 3D layers move parallel to the view (through `plane`'s camera).
+    pub fn with_plane(mut self, plane: Option<ViewPlane>) -> Self {
+        self.plane = plane;
+        self
+    }
+
     /// Snapping as AE 26 does it (R1, transform-tools.md §4): only one point
-    /// snaps — for a move, the 9-point feature of the grabbed layer nearest the
-    /// grab point; for an anchor drag, the anchor — point to point to the 9
-    /// features of the other visible layers (and, dragging the anchor, of its own
-    /// layer). The comp frame is not a target.
-    pub fn with_snapping(mut self, comp: &EvaluatedComp, primary: &PrimPath, grab: DVec2) -> Self {
+    /// snaps — for a move, the feature of the grabbed layer nearest the grab
+    /// point; for an anchor drag, the anchor — point to point to the features
+    /// of the other visible layers (and, dragging the anchor, of its own
+    /// layer). A layer's features are its 9 bound points, its anchor point and
+    /// its mask and shape path vertices (AE). The comp frame is not a target.
+    pub fn with_snapping(
+        mut self,
+        comp: &EvaluatedComp,
+        primary: &PrimPath,
+        grab: DVec2,
+        inner: bool,
+    ) -> Self {
         let anchor = matches!(
             self.kind,
             Kind::Anchor {
@@ -195,11 +319,12 @@ impl TransformDrag {
         let mut targets = Vec::new();
         for l in &comp.layers {
             if moving.contains(&&l.path) {
+                // Dragging the anchor: not to itself.
                 if &l.path == primary {
-                    features(l, &mut own);
+                    features(l, !anchor, inner, &mut own);
                 }
             } else if l.visible && !matches!(l.kind, LayerKind::Camera | LayerKind::Light) {
-                features(l, &mut targets);
+                features(l, true, inner, &mut targets);
             }
         }
         let feature = if anchor {
@@ -222,6 +347,7 @@ impl TransformDrag {
     /// pixels, when snapping is on for this frame.
     pub fn update(&mut self, p: DVec2, shift: bool, snap: Option<f64>) {
         self.guide = None;
+        self.feature_now = None;
         // Move and anchor drags: the pointer offset, axis-locked with Shift
         // (moves), then snapped.
         let offset = match self.kind {
@@ -229,7 +355,8 @@ impl TransformDrag {
                 let lock = shift && matches!(self.kind, Kind::Move { .. });
                 let axis = |mut d: DVec2| {
                     if lock {
-                        if (p - start).x.abs() > (p - start).y.abs() {
+                        // AE 26: |dx| ≥ |dy| locks horizontally (R1).
+                        if (p - start).x.abs() >= (p - start).y.abs() {
                             d.y = 0.0;
                         } else {
                             d.x = 0.0;
@@ -241,16 +368,113 @@ impl TransformDrag {
                 if let Some(t) = self.snap_target(d, snap) {
                     d = axis(t - self.snapping.as_ref().expect("snapping").feature);
                     self.guide = Some(t);
+                } else if let Some(s) = &self.snapping {
+                    // Guides and grid lines: each axis on its own.
+                    let f = s.feature + d;
+                    let near = |vertical: bool, v: f64| {
+                        self.lines
+                            .iter()
+                            .filter(|(vv, at)| *vv == vertical && (v - at).abs() <= self.line_snap)
+                            .min_by(|a, b| (v - a.1).abs().total_cmp(&(v - b.1).abs()))
+                            .map(|(_, at)| *at)
+                    };
+                    if let Some(x) = near(true, f.x) {
+                        d.x += x - f.x;
+                    }
+                    if let Some(y) = near(false, f.y) {
+                        d.y += y - f.y;
+                    }
+                }
+                if snap.is_some() {
+                    self.feature_now = self.snapping.as_ref().map(|s| s.feature + d);
                 }
                 d
             }
             _ => DVec2::ZERO,
         };
         match &mut self.kind {
-            Kind::Move { .. } => {
+            Kind::Move { start } => {
                 let d = offset;
+                let start = *start;
+                let world = self.plane.map(|v| {
+                    v.camera.unproject(start + d, v.depth, v.size)
+                        - v.camera.unproject(start, v.depth, v.size)
+                });
                 for e in &mut self.edits {
-                    e.now.position = e.start.position + e.to_parent(d);
+                    e.now.position = e.start.position
+                        + match world {
+                            Some(w) if e.three_d => e.parent.inverse().transform_vector3(w),
+                            _ => e.to_parent(d),
+                        };
+                }
+            }
+            Kind::Axis {
+                origin,
+                dir,
+                camera,
+                size,
+                start,
+                ..
+            } => {
+                let Some(t) = super::gizmo3d::along(camera, *size, p, *origin, *dir) else {
+                    return;
+                };
+                let w = *dir * (t - *start);
+                for e in &mut self.edits {
+                    e.now.position = e.start.position + e.parent.inverse().transform_vector3(w);
+                }
+            }
+            Kind::AxisScale {
+                axis,
+                origin,
+                dir,
+                camera,
+                size,
+                start,
+            } => {
+                let Some(t) = super::gizmo3d::along(camera, *size, p, *origin, *dir) else {
+                    return;
+                };
+                if start.abs() < 1e-6 {
+                    return;
+                }
+                let ratio = t / *start;
+                for e in &mut self.edits {
+                    e.now.scale[*axis] = e.start.scale[*axis] * ratio;
+                }
+            }
+            Kind::Spin {
+                axis,
+                center,
+                start,
+                last,
+                sign,
+                orientation,
+            } => {
+                let a0 = (*start - *center).to_angle().to_degrees();
+                let a1 = (p - *center).to_angle().to_degrees();
+                let mut delta = a1 - a0;
+                delta += ((*last - delta) / 360.0).round() * 360.0;
+                *last = delta;
+                delta *= *sign;
+                let i = *axis;
+                let pick = |t: &Transform| {
+                    if *orientation {
+                        t.orientation[i]
+                    } else {
+                        t.rotation[i]
+                    }
+                };
+                if shift && let Some(e0) = self.edits.first() {
+                    let r0 = pick(&e0.start);
+                    delta = ((r0 + delta) / 45.0).round() * 45.0 - r0;
+                }
+                for e in &mut self.edits {
+                    if *orientation {
+                        e.now.orientation[i] = e.start.orientation[i] + delta;
+                    } else {
+                        e.now.rotation[i] = e.start.rotation[i] + delta;
+                    }
                 }
             }
             Kind::Scale { handle, bounds } => {
@@ -268,7 +492,20 @@ impl TransformDrag {
                 let d = DVec2::new(hp.x - a.x, hp.y - a.y);
                 let s0 = e0.start.scale;
                 let (mut rx, mut ry) = (1.0, 1.0);
-                if shift {
+                if shift && ax && ay {
+                    // A corner keeps the proportions with the larger of the two
+                    // ratios (AE 26: max(|sx|, |sy|), R1 transform-tools.md §1).
+                    let ratio = |q: f64, d: f64, s: f64| {
+                        if d.abs() > 1e-9 && s.abs() > 1e-9 {
+                            100.0 * q / d / s
+                        } else {
+                            1.0
+                        }
+                    };
+                    let (sx, sy) = (ratio(q.x, d.x, s0.x), ratio(q.y, d.y, s0.y));
+                    let m = if sx.abs() >= sy.abs() { sx } else { sy };
+                    (rx, ry) = (m, m);
+                } else if shift {
                     // Keep the proportions: the handle moves along its line
                     // through the anchor.
                     let dd = DVec2::new(
@@ -354,14 +591,35 @@ impl TransformDrag {
             .copied()
     }
 
-    /// The snapped-to point: a small target mark.
+    /// Snapping as AE shows it: the grabbed feature as a small square while
+    /// snapping is on, filled once it snaps, with a target mark on the point
+    /// snapped to.
     pub fn paint_guides(&self, painter: &Painter, view: &View, _info: &CompInfo) {
-        let stroke = Stroke::new(1.0, Color32::from_rgb(0x52, 0xb8, 0xff));
+        let color = Color32::from_rgb(0x52, 0xb8, 0xff);
+        let stroke = Stroke::new(1.0, color);
+        if let Some(f) = self.feature_now {
+            let r = Rect::from_center_size(view.to_screen(f), egui::vec2(7.0, 7.0));
+            if self.guide.is_some() {
+                painter.rect_filled(r, 0.0, color);
+            } else {
+                painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
+            }
+        }
         if let Some(t) = self.guide {
             let c = view.to_screen(t);
             painter.circle_stroke(c, 5.0, stroke);
             painter.line_segment([c - egui::vec2(8.0, 0.0), c + egui::vec2(8.0, 0.0)], stroke);
             painter.line_segment([c - egui::vec2(0.0, 8.0), c + egui::vec2(0.0, 8.0)], stroke);
+        }
+    }
+
+    /// The gizmo axis an axis or ring drag uses.
+    pub fn axis(&self) -> Option<usize> {
+        match self.kind {
+            Kind::Axis { axis, .. } | Kind::AxisScale { axis, .. } | Kind::Spin { axis, .. } => {
+                Some(axis)
+            }
+            _ => None,
         }
     }
 
@@ -387,6 +645,12 @@ impl TransformDrag {
             }
             if e.now.scale != e.start.scale {
                 push("transform:scale", v3(e.now.scale));
+            }
+            if e.now.rotation.x != e.start.rotation.x {
+                push("transform:rotation_x", Value::Float(e.now.rotation.x));
+            }
+            if e.now.rotation.y != e.start.rotation.y {
+                push("transform:rotation_y", Value::Float(e.now.rotation.y));
             }
             if e.now.rotation.z != e.start.rotation.z {
                 push("transform:rotation", Value::Float(e.now.rotation.z));

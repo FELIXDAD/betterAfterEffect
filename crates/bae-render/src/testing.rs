@@ -34,9 +34,14 @@ struct Allocator {
 }
 
 impl crate::source::ImageAllocator for Allocator {
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
+    fn allocate(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
         self.pool
-            .acquire(self.gpu.device(), FORMAT, rect, pixel_scale)
+            .acquire(self.gpu.device(), format, rect, pixel_scale)
     }
 }
 
@@ -63,6 +68,9 @@ pub fn with_encode_context<R>(
             encoder: &mut encoder,
             format: FORMAT,
             allocator: &mut alloc,
+            intermediates: None,
+            effect_inputs: &[],
+            effect_masks: &[],
         };
         f(&mut ctx)
     };

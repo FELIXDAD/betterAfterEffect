@@ -1,10 +1,10 @@
 //! `cargo xtask dist`: release build and packaging into `<target-dir>/dist/`.
 //!
-//! - macOS: `BAE.app` (ad-hoc signed, not notarized) and `BAE-<version>-<arch>-macos.zip` of it.
+//! - macOS: `BAE.app` (ad-hoc signed, not notarized) and `BAE-<version>-<arch>-macos.dmg` of it.
 //!   The bundle has the app icon (`assets/icons/app/bae.icns`) and declares the `.bae`
 //!   (project folder, shown as one document) and `.baez` (packed project) document types.
 //! - Windows: `BAE-<version>-<arch>-windows/` and a zip of its contents. `bae.exe` must carry
-//!   the app icon (linked in by `apps/bae/build.rs`); packaging fails when it does not.
+//!   the app icon and version information (linked in by `apps/bae/build.rs`).
 //!
 //! Sizes are compared with the `app-bundle` and `installer` budgets; they fail the task only
 //! once those budgets are marked `enforced` in `tools/size-budget/budget.toml`.
@@ -27,9 +27,38 @@ const USAGE: &str = "\
 Usage: cargo xtask dist [--target <triple>] [--no-build]
 
 Builds `bae` in release mode and packages it into <target-dir>/dist/:
-  macOS    BAE.app (ad-hoc signed, not notarized) and BAE-<version>-<arch>-macos.zip
+  macOS    BAE.app (ad-hoc signed, not notarized) and BAE-<version>-<arch>-macos.dmg
   Windows  BAE-<version>-<arch>-windows.zip (bae.exe, LICENSE, README.md)
+Both include ThirdPartyNotices/ (licenses of bundled third-party assets).
 ";
+
+/// Licenses and notices of third-party assets compiled into `bae` (source in the
+/// repository, path inside `ThirdPartyNotices/`): Adobe's open-source Spectrum icons
+/// (Apache-2.0 section 4: ship the license and the copyright notice).
+const THIRD_PARTY_NOTICES: &[(&str, &str)] = &[
+    ("assets/icons/spectrum/LICENSE", "Spectrum-Icons/LICENSE"),
+    (
+        "assets/icons/spectrum/COPYRIGHT",
+        "Spectrum-Icons/COPYRIGHT",
+    ),
+    ("assets/icons/spectrum/NOTICE", "Spectrum-Icons/NOTICE"),
+    (
+        "assets/icons/spectrum/README.md",
+        "Spectrum-Icons/README.md",
+    ),
+];
+
+fn copy_third_party_notices(ws: &Workspace, dest: &Path) -> Result<()> {
+    for (from, to) in THIRD_PARTY_NOTICES {
+        let to = dest.join("ThirdPartyNotices").join(to);
+        if let Some(dir) = to.parent() {
+            fs::create_dir_all(dir)
+                .with_context(|| format!("failed to create {}", dir.display()))?;
+        }
+        copy_file(&ws.workspace_root.join(from), &to)?;
+    }
+    Ok(())
+}
 
 const BUNDLE_ID: &str = "io.github.felixdad.bae";
 const BUNDLE_NAME: &str = "BAE";
@@ -74,24 +103,39 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
     let binary = ws.existing_release_binary(&target)?;
     if target.is_windows() {
-        check_exe_icon(&binary)?;
+        check_exe_resources(&binary)?;
     }
     let dist = ws.target_directory.join("dist");
     fs::create_dir_all(&dist).with_context(|| format!("failed to create {}", dist.display()))?;
-    let stamp = zip_timestamp();
-
     let (unpacked, archive) = if target.is_macos() {
-        package_macos(
-            &ws,
-            &binary,
-            &version,
-            &target,
-            &dist,
-            stamp,
-            Signing::AdHoc,
-        )?
+        let name = format!("{BUNDLE_NAME}-{version}-{}-macos", target.arch());
+        let stage = dist.join(&name);
+        recreate_dir(&stage)?;
+        let app = assemble_macos_bundle(&ws, &binary, &version, &stage)?;
+        sign_bundle_ad_hoc(&app)?;
+        // The disk image holds BAE.app and a link to /Applications to drag it
+        // onto, as Mac installers do.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/Applications", stage.join("Applications"))
+            .context("failed to link /Applications into the disk image")?;
+        let dmg = dist.join(format!("{name}.dmg"));
+        util::run(
+            Command::new("hdiutil")
+                .args([
+                    "create",
+                    "-ov",
+                    "-format",
+                    "UDZO",
+                    "-volname",
+                    BUNDLE_NAME,
+                    "-srcfolder",
+                ])
+                .arg(&stage)
+                .arg(&dmg),
+        )?;
+        (app, dmg)
     } else {
-        package_windows(&ws, &binary, &version, &target, &dist, stamp)?
+        package_windows(&ws, &binary, &version, &target, &dist, zip_timestamp())?
     };
 
     let unpacked_bytes = util::dir_size(&unpacked)?;
@@ -143,28 +187,14 @@ fn file_name(path: &Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
-/// How `package_macos` signs the bundle.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Signing {
-    /// Ad-hoc signature (`codesign --sign -`), then `codesign --verify --deep --strict`.
-    AdHoc,
-    /// Leave the bundle as assembled. Only for layout tests whose "binary" is not Mach-O.
-    #[cfg(test)]
-    None,
-}
-
-/// Builds `dist/BAE.app`, signs it and zips it. Returns (bundle dir, zip path).
-fn package_macos(
+/// Assembles the application before signing and imaging it.
+fn assemble_macos_bundle(
     ws: &Workspace,
     binary: &Path,
     version: &str,
-    target: &Target,
-    dist: &Path,
-    stamp: DateTime,
-    signing: Signing,
-) -> Result<(PathBuf, PathBuf)> {
-    let app = dist.join(format!("{BUNDLE_NAME}.app"));
-    recreate_dir(&app)?;
+    stage: &Path,
+) -> Result<PathBuf> {
+    let app = stage.join(format!("{BUNDLE_NAME}.app"));
     let contents = app.join("Contents");
     let macos = contents.join("MacOS");
     let resources = contents.join("Resources");
@@ -181,16 +211,8 @@ fn package_macos(
         &ws.workspace_root.join("LICENSE"),
         &resources.join("LICENSE"),
     )?;
-    if signing == Signing::AdHoc {
-        sign_bundle_ad_hoc(&app)?;
-    }
-
-    let zip = dist.join(format!(
-        "{BUNDLE_NAME}-{version}-{}-macos.zip",
-        target.arch()
-    ));
-    zip_dir(&app, &format!("{BUNDLE_NAME}.app"), &zip, stamp)?;
-    Ok((app, zip))
+    copy_third_party_notices(ws, &resources)?;
+    Ok(app)
 }
 
 /// Builds `dist/BAE-<version>-<arch>-windows/` and zips its contents (at the archive root).
@@ -209,20 +231,30 @@ fn package_windows(
     for doc in ["LICENSE", "README.md"] {
         copy_file(&ws.workspace_root.join(doc), &stage.join(doc))?;
     }
+    copy_third_party_notices(ws, &stage)?;
     let zip = dist.join(format!("{name}.zip"));
-    zip_dir(&stage, "", &zip, stamp)?;
+    zip_dir(&stage, &zip, stamp)?;
     Ok((stage, zip))
 }
 
-/// `bae.exe` must carry the app icon (`RT_GROUP_ICON`, from `assets/icons/app/bae.res`
-/// through `apps/bae/build.rs`); otherwise Explorer and the taskbar show a blank one.
-fn check_exe_icon(exe: &Path) -> Result<()> {
+/// Verify the resources Explorer uses for the icon and file properties.
+fn check_exe_resources(exe: &Path) -> Result<()> {
+    const RT_VERSION: u16 = 16;
     let bytes = fs::read(exe).with_context(|| format!("failed to read {}", exe.display()))?;
-    if !icon::pe_has_group_icon(&bytes).with_context(|| format!("reading {}", exe.display()))? {
+    let has = |kind| {
+        icon::pe_has_resource(&bytes, kind).with_context(|| format!("reading {}", exe.display()))
+    };
+    if !has(icon::RT_GROUP_ICON)? {
         bail!(
             "{} has no icon resource; apps/bae/build.rs should link {}/bae.res",
             exe.display(),
             icon::ICON_DIR
+        );
+    }
+    if !has(RT_VERSION)? {
+        bail!(
+            "{} has no VERSIONINFO resource; rebuild bae with apps/bae/build.rs",
+            exe.display()
         );
     }
     Ok(())
@@ -364,6 +396,30 @@ pub fn info_plist(version: &str) -> String {
             Array(vec![
                 document_type("BAE Project", PROJECT_UTI, true),
                 document_type("BAE Project Package", PACKAGE_UTI, false),
+                // Accept footage drops on the Dock without becoming the default viewer.
+                Plist::Dict(vec![
+                    ("CFBundleTypeName", Str("Footage")),
+                    ("CFBundleTypeRole", Str("Viewer")),
+                    ("LSHandlerRank", Str("Alternate")),
+                    (
+                        "LSItemContentTypes",
+                        strings(&[
+                            "public.png",
+                            "public.jpeg",
+                            "public.tiff",
+                            "com.adobe.photoshop-image",
+                            "com.adobe.photoshop-large-image",
+                            "org.webmproject.webp",
+                            "com.ilm.openexr-image",
+                            "com.apple.quicktime-movie",
+                            "public.mpeg-4",
+                            "com.microsoft.waveform-audio",
+                            "public.aiff-audio",
+                            "public.mp3",
+                            "org.xiph.flac",
+                        ]),
+                    ),
+                ]),
             ]),
         ),
         (
@@ -444,36 +500,22 @@ fn xml_escape(s: &str) -> String {
 // Zip
 // ---------------------------------------------------------------------------
 
-/// Zips `src` recursively. Entries are named `<prefix>/<relative path>` (`prefix` may be
-/// empty), sorted for reproducibility, with directories stored and unix permissions set:
-/// 0o755 for executables (anything in `Contents/MacOS/`, `.exe`, or executable on disk).
-fn zip_dir(src: &Path, prefix: &str, zip_path: &Path, stamp: DateTime) -> Result<()> {
+/// Zips the Windows package at the archive root in sorted order.
+fn zip_dir(src: &Path, zip_path: &Path, stamp: DateTime) -> Result<()> {
     let file = File::create(zip_path)
         .with_context(|| format!("failed to create {}", zip_path.display()))?;
     let mut zip = ZipWriter::new(BufWriter::new(file));
     let base = SimpleFileOptions::default()
         .system(System::Unix)
         .last_modified_time(stamp);
-    if !prefix.is_empty() {
-        zip.add_directory(prefix, base.unix_permissions(0o755))?;
-    }
     let mut entries = Vec::new();
     collect_entries(src, "", &mut entries)?;
-    for (rel, path, is_dir) in entries {
-        let name = if prefix.is_empty() {
-            rel
-        } else {
-            format!("{prefix}/{rel}")
-        };
+    for (name, path, is_dir) in entries {
         if is_dir {
             zip.add_directory(name, base.unix_permissions(0o755))?;
             continue;
         }
-        let mode = if is_executable(&name, &path)? {
-            0o755
-        } else {
-            0o644
-        };
+        let mode = if name.ends_with(".exe") { 0o755 } else { 0o644 };
         zip.start_file(
             name,
             base.compression_method(CompressionMethod::Deflated)
@@ -512,24 +554,6 @@ fn collect_entries(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf, bool)>
         }
     }
     Ok(())
-}
-
-fn is_executable(name: &str, path: &Path) -> Result<bool> {
-    let by_name = name
-        .rsplit_once('/')
-        .is_some_and(|(dir, _)| dir.ends_with("Contents/MacOS"))
-        || name.ends_with(".exe");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        let mode = fs::metadata(path)?.permissions().mode();
-        Ok(by_name || mode & 0o111 != 0)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(by_name)
-    }
 }
 
 /// Entry timestamp: `SOURCE_DATE_EPOCH` when set (reproducible builds), otherwise now (UTC).
@@ -641,6 +665,11 @@ mod tests {
         plutil(&["-lint"]);
         let get = |key: &str| plutil(&["-extract", key, "raw", "-o", "-"]);
         assert_eq!(get("CFBundleIconFile"), "bae");
+        assert_eq!(get("CFBundleDocumentTypes.2.LSHandlerRank"), "Alternate");
+        assert_eq!(
+            get("CFBundleDocumentTypes.2.LSItemContentTypes.0"),
+            "public.png"
+        );
         assert_eq!(
             get("CFBundleDocumentTypes.0.LSItemContentTypes.0"),
             PROJECT_UTI
@@ -745,92 +774,25 @@ mod tests {
     }
 
     #[test]
-    fn macos_package_layout_and_modes() {
+    fn macos_bundle_layout() {
         let tmp = scratch_dir("mac");
         let binary = tmp.join("bae-input");
         fs::write(&binary, b"binary").unwrap();
-        let target = Target {
-            triple: "aarch64-apple-darwin".into(),
-            explicit: false,
-        };
-        let stamp = dos_datetime(1_700_000_000);
-        let (app, zip) = package_macos(
-            &test_workspace(&tmp),
-            &binary,
-            "0.1.0",
-            &target,
-            &tmp,
-            stamp,
-            Signing::None,
-        )
-        .unwrap();
+        let app = assemble_macos_bundle(&test_workspace(&tmp), &binary, "0.1.0", &tmp).unwrap();
         assert_eq!(file_name(&app), "BAE.app");
-        assert_eq!(file_name(&zip), "BAE-0.1.0-aarch64-macos.zip");
+        let contents = app.join("Contents");
+        assert_eq!(fs::read(contents.join("MacOS/bae")).unwrap(), b"binary");
         assert_eq!(
-            fs::read_to_string(app.join("Contents/Info.plist")).unwrap(),
+            fs::read_to_string(contents.join("Info.plist")).unwrap(),
             info_plist("0.1.0")
         );
-        let entries = zip_entries(&zip);
-        fs::remove_dir_all(&tmp).unwrap();
-
-        let dir = |name: &str| (name.to_owned(), true, 0o040_755);
-        let file = |name: &str, mode: u32| (name.to_owned(), false, 0o100_000 | mode);
-        assert_eq!(
-            entries,
-            [
-                dir("BAE.app/"),
-                dir("BAE.app/Contents/"),
-                file("BAE.app/Contents/Info.plist", 0o644),
-                dir("BAE.app/Contents/MacOS/"),
-                file("BAE.app/Contents/MacOS/bae", 0o755),
-                dir("BAE.app/Contents/Resources/"),
-                file("BAE.app/Contents/Resources/LICENSE", 0o644),
-                file("BAE.app/Contents/Resources/bae.icns", 0o644),
-            ]
-        );
-    }
-
-    /// The signed bundle verifies, and still verifies after a round trip through our zip
-    /// writer and `ditto` (what Archive Utility does with a downloaded zip), #105.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_package_is_signed_and_survives_the_zip() {
-        let tmp = scratch_dir("mac-sign");
-        // Any Mach-O will do; a copy of a tiny system tool keeps the test fast.
-        let binary = tmp.join("bae-input");
-        fs::copy("/usr/bin/true", &binary).unwrap();
-        let target = Target {
-            triple: "aarch64-apple-darwin".into(),
-            explicit: false,
-        };
-        let (app, zip) = package_macos(
-            &test_workspace(&tmp),
-            &binary,
-            "0.1.0",
-            &target,
-            &tmp,
-            dos_datetime(1_700_000_000),
-            Signing::AdHoc,
-        )
-        .unwrap();
-        verify_bundle_signature(&app).unwrap();
-        let names: Vec<String> = zip_entries(&zip).into_iter().map(|e| e.0).collect();
-        assert!(
-            names.contains(&"BAE.app/Contents/_CodeSignature/CodeResources".to_owned()),
-            "{names:?}"
-        );
-
-        let unpacked = tmp.join("unpacked");
-        let status = Command::new("ditto")
-            .args(["-x", "-k"])
-            .arg(&zip)
-            .arg(&unpacked)
-            .status()
-            .unwrap();
-        assert!(status.success());
-        let result = verify_bundle_signature(&unpacked.join("BAE.app"));
-        fs::remove_dir_all(&tmp).unwrap();
-        result.unwrap();
+        let resources = contents.join("Resources");
+        assert!(resources.join("bae.icns").is_file());
+        assert!(resources.join("LICENSE").is_file());
+        for (_, license) in THIRD_PARTY_NOTICES {
+            assert!(resources.join("ThirdPartyNotices").join(license).is_file());
+        }
+        fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]
@@ -855,6 +817,19 @@ mod tests {
         assert_eq!(file_name(&zip), "BAE-0.1.0-x86_64-windows.zip");
         let names: Vec<String> = zip_entries(&zip).into_iter().map(|e| e.0).collect();
         fs::remove_dir_all(&tmp).unwrap();
-        assert_eq!(names, ["LICENSE", "README.md", "bae.exe"]);
+        assert_eq!(
+            names,
+            [
+                "LICENSE",
+                "README.md",
+                "ThirdPartyNotices/",
+                "ThirdPartyNotices/Spectrum-Icons/",
+                "ThirdPartyNotices/Spectrum-Icons/COPYRIGHT",
+                "ThirdPartyNotices/Spectrum-Icons/LICENSE",
+                "ThirdPartyNotices/Spectrum-Icons/NOTICE",
+                "ThirdPartyNotices/Spectrum-Icons/README.md",
+                "bae.exe",
+            ]
+        );
     }
 }

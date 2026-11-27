@@ -10,6 +10,7 @@
 //! [`Transform::opacity`] keeps AE's percent.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bae_model::{BezierPath, FrameRate, LayerKind, PrimPath, PrimType, TextDocument, Time, Value};
 use glam::{DMat4, DVec3};
@@ -31,6 +32,8 @@ pub struct EvaluatedComp {
     pub duration: Time,
     pub bg_color: [f64; 4],
     pub motion_blur: MotionBlur,
+    /// The comp's Enable Frame Blending switch.
+    pub frame_blending: bool,
     /// Layers in AE stacking order: `layers[0]` is the top layer (AE index 1). The
     /// renderer composites from the last to the first. Every layer is listed, including
     /// invisible ones (track mattes, parents, cameras), so indices are stable.
@@ -60,7 +63,7 @@ impl EvaluatedComp {
 pub struct EvaluatedLayer {
     pub path: PrimPath,
     /// Display name (`name` attribute, falling back to the prim name).
-    pub name: String,
+    pub name: Arc<str>,
     pub kind: LayerKind,
     pub timing: LayerTiming,
     /// The layer time that was evaluated (keyframe time base, see [`crate::time`]).
@@ -77,6 +80,10 @@ pub struct EvaluatedLayer {
     /// Comp times at which to sample this layer for motion blur (AE-ANI-103), in
     /// shutter order. Empty when motion blur is off for the comp or the layer.
     pub motion_blur_times: Vec<Time>,
+    /// Frame blending (AE-CMP-065): the source time one comp frame spans around
+    /// now (remapped or stretched speed × frame duration) when the comp and layer
+    /// switches are on and the layer shows footage; `None` otherwise.
+    pub frame_blend_span: Option<Time>,
     /// Index of the parent layer in [`EvaluatedComp::layers`].
     pub parent: Option<usize>,
     pub transform: Transform,
@@ -87,20 +94,26 @@ pub struct EvaluatedLayer {
     /// 0–1, not inherited from parents.
     pub opacity: f64,
     /// Blend mode token (`bae_model::schema::BLEND_MODES`).
-    pub blend_mode: String,
+    pub blend_mode: Arc<str>,
     pub track_matte: TrackMatte,
     /// Index of the matte layer (the layer above when the attribute is unset).
     pub track_matte_layer: Option<usize>,
     pub masks: Vec<EvaluatedMask>,
     pub effects: Vec<EvaluatedEffect>,
+    /// The animated Photoshop styles on the transformed layer.
+    pub layer_styles: Option<EvaluatedEffect>,
     /// Shape layer contents (groups, paths, fills, operators …), in order.
-    pub contents: Vec<EvaluatedPrim>,
+    pub contents: Arc<[EvaluatedPrim]>,
     /// Text layers: the source text at this time (`text:source`).
     pub text: Option<Box<TextDocument>>,
     /// Text layers: animators with their selectors (`animators` folder), evaluated.
-    pub text_animators: Vec<EvaluatedPrim>,
+    pub text_animators: Arc<[EvaluatedPrim]>,
+    /// Text layers on a path (AE: Text > Path Options with a mask chosen).
+    pub text_path: Option<TextPathOptions>,
     pub camera: Option<CameraState>,
     pub light: Option<LightState>,
+    /// 3D layers' Material Options.
+    pub material: Option<MaterialState>,
     /// Other layers this layer's expressions read at this time (`thisComp.layer(…)`,
     /// `parent`, `comp(…)`), so caches can invalidate it when they change.
     pub depends_on: Vec<PrimPath>,
@@ -111,6 +124,10 @@ pub struct EvaluatedLayer {
 pub struct LayerSwitches {
     /// Video switch (eye).
     pub enabled: bool,
+    /// Sampling quality of this layer.
+    pub quality: LayerQuality,
+    /// Effect switch (fx): the layer's effects render (AE default on).
+    pub effects: bool,
     pub solo: bool,
     pub shy: bool,
     pub guide: bool,
@@ -120,6 +137,40 @@ pub struct LayerSwitches {
     pub collapse_transformation: bool,
     /// AE "Preserve Underlying Transparency" (T switch).
     pub preserve_transparency: bool,
+    /// The layer's Frame Blending switch (AE-CMP-065).
+    pub frame_blending: FrameBlending,
+}
+
+/// Quality in increasing sampling order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayerQuality {
+    Wireframe,
+    Draft,
+    #[default]
+    Best,
+}
+
+impl LayerQuality {
+    pub fn from_token(token: Option<&str>) -> Self {
+        match token {
+            Some("wireframe") => Self::Wireframe,
+            Some("draft") => Self::Draft,
+            _ => Self::Best,
+        }
+    }
+}
+
+/// A layer's Frame Blending switch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameBlending {
+    #[default]
+    Off,
+    /// Weighted mix of the neighbouring source frames.
+    FrameMix,
+    /// Optical-flow interpolation (AE Pixel Motion).
+    PixelMotion,
 }
 
 /// Where a layer's pixels come from.
@@ -161,6 +212,10 @@ pub struct AssetInfo {
     pub duration: Option<Time>,
     /// Solids: the fill colour.
     pub solid_color: Option<[f64; 4]>,
+    /// The footage has pictures (AE's `hasVideo`).
+    pub has_video: bool,
+    /// The footage has sound (AE's `hasAudio`).
+    pub has_audio: bool,
 }
 
 /// Track matte mode.
@@ -203,6 +258,21 @@ pub struct EvaluatedMask {
     pub expansion: f64,
 }
 
+/// AE's Path Options of a text layer at one time: the mask the text runs along
+/// (one of [`EvaluatedLayer::masks`]) and how.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TextPathOptions {
+    pub mask: PrimPath,
+    pub reverse: bool,
+    /// Characters turn with the path (AE default on).
+    pub perpendicular: bool,
+    /// The characters spread between the margins.
+    pub force_alignment: bool,
+    /// Pixels along the path.
+    pub first_margin: f64,
+    pub last_margin: f64,
+}
+
 /// An effect instance at one time.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct EvaluatedEffect {
@@ -211,6 +281,8 @@ pub struct EvaluatedEffect {
     pub enabled: bool,
     /// Every `param:NNNN` attribute, evaluated, keyed by its numeric ID (`"0001"`).
     pub params: BTreeMap<String, Value>,
+    /// Child prims, generically evaluated (the Paint effect's strokes).
+    pub children: Vec<EvaluatedPrim>,
 }
 
 impl EvaluatedEffect {
@@ -227,8 +299,9 @@ impl EvaluatedEffect {
 pub struct EvaluatedPrim {
     pub path: PrimPath,
     pub prim_type: Option<PrimType>,
-    pub attrs: BTreeMap<String, Value>,
-    pub children: Vec<EvaluatedPrim>,
+    /// Shared between frames when nothing in the prim animates.
+    pub attrs: Arc<BTreeMap<String, Value>>,
+    pub children: Arc<[EvaluatedPrim]>,
 }
 
 impl EvaluatedPrim {
@@ -239,6 +312,29 @@ impl EvaluatedPrim {
     pub fn f64(&self, attr: &str) -> Option<f64> {
         self.attrs.get(attr).and_then(Value::as_f64)
     }
+}
+
+/// A 3D layer's Material Options, evaluated (keyframe easing and expressions
+/// apply).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct MaterialState {
+    /// AE's 0 Off, 1 On, 2 Only.
+    pub casts_shadows: u8,
+    /// Percent.
+    pub light_transmission: f64,
+    /// AE's 0 Off, 1 On, 2 Only.
+    pub accepts_shadows: u8,
+    pub accepts_lights: bool,
+    /// Percent.
+    pub ambient: f64,
+    /// Percent.
+    pub diffuse: f64,
+    /// Percent.
+    pub specular_intensity: f64,
+    /// Percent.
+    pub specular_shininess: f64,
+    /// Percent.
+    pub metal: f64,
 }
 
 /// Camera layer state (AE-ANI-009/022).
@@ -253,11 +349,49 @@ pub struct CameraState {
     pub aperture: f64,
     /// Percent.
     pub blur_level: f64,
+    /// The lens's iris and highlights (the depth-of-field blur's shape).
+    pub iris: Iris,
     /// In the camera's parent space.
     pub point_of_interest: DVec3,
     /// Camera space → comp space. The camera looks along local +z, local +y is
     /// screen-down. The view matrix is its inverse.
     pub world_matrix: DMat4,
+}
+
+/// A camera's iris and highlight options (AE's Camera Options): the shape and
+/// brightness of the depth-of-field blur.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Iris {
+    /// 1 Fast Rectangle, 3–10 the polygon's blade count (AE's menu values).
+    pub shape: u32,
+    /// Degrees.
+    pub rotation: f64,
+    /// Percent: 0 the polygon, 100 a circle.
+    pub roundness: f64,
+    pub aspect_ratio: f64,
+    /// Percent: brighter rim of the blur's disc.
+    pub diffraction_fringe: f64,
+    /// 0–100.
+    pub highlight_gain: f64,
+    /// 0–1: brightness above which highlights are boosted.
+    pub highlight_threshold: f64,
+    /// 0–100.
+    pub highlight_saturation: f64,
+}
+
+impl Default for Iris {
+    fn default() -> Self {
+        Self {
+            shape: 1,
+            rotation: 0.0,
+            roundness: 0.0,
+            aspect_ratio: 1.0,
+            diffraction_fringe: 0.0,
+            highlight_gain: 0.0,
+            highlight_threshold: 1.0,
+            highlight_saturation: 0.0,
+        }
+    }
 }
 
 /// Light layer state.

@@ -48,6 +48,62 @@ pub const TEXT_EDIT_ACTIONS: &[&str] = &[
     "motion.select_all",
 ];
 
+/// The modifiers of the key press that fired a native key equivalent (`None`
+/// when the menu was used with the mouse). AppKit fires a key equivalent on extra
+/// modifiers too (the ⌃8 item on ⌃⌥8, issue #281): the shell then hands the press
+/// to the UI, whose keymap runs the command bound to the chord pressed.
+#[cfg(target_os = "macos")]
+pub fn key_equivalent_modifiers() -> Option<egui::Modifiers> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    const KEY_DOWN: usize = 10; // NSEventTypeKeyDown
+    // NSEventModifierFlagShift, Control, Option, Command.
+    let (shift, ctrl, alt, cmd) = (1 << 17, 1 << 18, 1 << 19, 1 << 20);
+    // SAFETY: muda calls the menu event handler on the main thread, from the
+    // item's action; these are plain NSApplication / NSEvent getters.
+    let flags: usize = unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let event: *mut AnyObject = msg_send![app, currentEvent];
+        if event.is_null() {
+            return None;
+        }
+        let kind: usize = msg_send![event, type];
+        if kind != KEY_DOWN {
+            return None;
+        }
+        msg_send![event, modifierFlags]
+    };
+    Some(egui::Modifiers {
+        alt: flags & alt != 0,
+        ctrl: flags & ctrl != 0,
+        shift: flags & shift != 0,
+        mac_cmd: flags & cmd != 0,
+        command: flags & cmd != 0,
+    })
+}
+
+/// Windows menus match accelerators exactly.
+#[cfg(not(target_os = "macos"))]
+pub fn key_equivalent_modifiers() -> Option<egui::Modifiers> {
+    None
+}
+
+/// The key press to hand to the UI instead of running the item: its key
+/// equivalent (`chord`) fired on a press with other modifiers (`keys`).
+pub fn key_press_for_ui(
+    chord: Option<Chord>,
+    keys: Option<egui::Modifiers>,
+) -> Option<egui::Event> {
+    let (chord, mods) = (chord?, keys?);
+    (!chord.matches_modifiers(mods)).then_some(egui::Event::Key {
+        key: chord.key,
+        physical_key: Some(chord.key),
+        pressed: true,
+        repeat: false,
+        modifiers: mods,
+    })
+}
+
 /// BAE's own entries, beyond AE's menus: the History and Agent panels (a group
 /// after AE's panels in Window) and the Agent workspace (sorted among AE's
 /// workspaces in Window ▸ Workspace).
@@ -116,6 +172,8 @@ struct Contributed {
     enabled: bool,
     checked: bool,
     chord: Option<Chord>,
+    /// The state-following title last shown ([`MenuItemSpec::label_when`]).
+    label: Option<String>,
 }
 
 /// The application menu bar.
@@ -127,6 +185,10 @@ pub struct AppMenu {
     /// Registry ids of the Edit menu's Undo and Redo items.
     undo: Option<String>,
     redo: Option<String>,
+    /// Window ▸ Workspace ▸ Reset "<workspace>" to Saved Layout: id and text.
+    reset: Option<(String, String)>,
+    assign: Option<Submenu>,
+    assign_slots: Vec<(String, &'static str, Chord)>,
     /// Action ids modules handle (`bae_ui::menu::handled_actions`).
     actions: HashSet<String>,
     /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
@@ -139,18 +201,24 @@ impl AppMenu {
     pub fn new(contributed: &MenuTree, actions: HashSet<String>) -> muda::Result<Self> {
         let menu = Menu::new();
         let mut items: HashMap<String, Contributed> = HashMap::new();
+        let mut assign = None;
         for (title, entries) in &contributed.menus {
             if title == APP_MENU {
                 // The macOS application menu, under the application's name.
                 if cfg!(target_os = "macos") {
                     let app = Submenu::new(bae_platform::APP_NAME, true);
-                    append_entries(&app, entries, &mut items)?;
+                    append_entries(&app, entries, &mut items, &mut assign)?;
                     menu.append(&app)?;
                 }
                 continue;
             }
-            let sub = Submenu::new(native_text(tr(title)), true);
-            append_entries(&sub, entries, &mut items)?;
+            let sub = Submenu::new(menu_text(tr(title), menu_mnemonic(title)), true);
+            append_entries(&sub, entries, &mut items, &mut assign)?;
+            #[cfg(target_os = "macos")]
+            if title == "View" {
+                sub.append(&PredefinedMenuItem::separator())?;
+                sub.append(&PredefinedMenuItem::fullscreen(Some(tr("Full Screen"))))?;
+            }
             menu.append(&sub)?;
         }
         let find = |action: &str| {
@@ -161,12 +229,25 @@ impl AppMenu {
         };
         let undo = find(ids::UNDO);
         let redo = find(ids::REDO);
+        let reset = find(ids::RESET_WORKSPACE).map(|id| (id, String::new()));
+        let assign_slots = items
+            .iter()
+            .filter(|(_, c)| c.spec.action == ids::ASSIGN_WORKSPACE_SHORTCUT)
+            .filter_map(|(id, c)| {
+                let slot = usize::try_from(c.spec.params["slot"].as_u64()?).ok()?;
+                let key = *bae_ui::presets::WORKSPACE_KEYS.get(slot)?;
+                Some((id.clone(), key, Chord::parse(key).ok()?))
+            })
+            .collect();
         let mut menu = Self {
             menu,
             undo_state: (Some(String::new()), None),
             contributed: items,
             undo,
             redo,
+            reset,
+            assign,
+            assign_slots,
             actions,
             generation: 0,
         };
@@ -179,6 +260,12 @@ impl AppMenu {
     pub fn contributed_invocation(&self, menu_id: &str) -> Option<Invocation> {
         let id = menu_id.strip_prefix(CONTRIBUTED)?;
         self.contributed.get(id).map(|c| c.spec.invocation())
+    }
+
+    /// The shortcut shown on a contributed item (its native key equivalent).
+    pub fn contributed_chord(&self, menu_id: &str) -> Option<Chord> {
+        let id = menu_id.strip_prefix(CONTRIBUTED)?;
+        self.contributed.get(id).and_then(|c| c.chord)
     }
 
     /// Updates the items: enabled state, check marks, and the shortcut the
@@ -215,10 +302,58 @@ impl AppMenu {
                     c.checked = checked;
                 }
             }
+            let label = c.spec.label(&cx);
+            if label.is_some() && label != c.label {
+                c.item
+                    .set_text(&native_text(label.as_deref().unwrap_or_default()));
+                c.label = label;
+            }
             let chord = shell_chord(keymap, &c.spec.invocation());
             if chord != c.chord {
                 c.item.set_accelerator(chord.as_ref().and_then(accelerator));
                 c.chord = chord;
+            }
+        }
+    }
+
+    /// Names the active workspace in Window ▸ Workspace ▸ Reset “<name>” to Saved
+    /// Layout, as AE does (`title`: its English title).
+    pub fn sync_workspace_titles(&mut self, workspace: &crate::ui::Workspace) {
+        let Some((id, shown)) = &mut self.reset else {
+            return;
+        };
+        let title = workspace.active_workspace_title();
+        let text = tr("Reset “{name}” to Saved Layout").replace("{name}", tr(title));
+        if text != *shown {
+            if let Some(c) = self.contributed.get(id.as_str()) {
+                c.item.set_text(&native_text(&text));
+            }
+            if let Some(sub) = &self.assign {
+                sub.set_text(native_text(
+                    &tr("Assign Shortcut to “{name}” Workspace").replace("{name}", tr(title)),
+                ));
+            }
+            *shown = text;
+        }
+        for (id, key, chord) in &self.assign_slots {
+            let Some(c) = self.contributed.get_mut(id) else {
+                continue;
+            };
+            let target = workspace
+                .keymap()
+                .lookup(chord, None)
+                .filter(|b| b.action == ids::SWITCH_WORKSPACE)
+                .and_then(|b| b.params["id"].as_str())
+                .and_then(|id| workspace.workspace_title(id));
+            let label = match target {
+                Some(name) => tr("{key} (replaces “{name}”)")
+                    .replace("{key}", key)
+                    .replace("{name}", tr(name)),
+                None => (*key).to_owned(),
+            };
+            if c.label.as_ref() != Some(&label) {
+                c.item.set_text(&native_text(&label));
+                c.label = Some(label);
             }
         }
     }
@@ -238,6 +373,32 @@ impl AppMenu {
             }
         }
         self.undo_state = state;
+    }
+
+    /// Takes the menu bar off before another one replaces it (a language change).
+    pub fn detach(&self, window: &winit::window::Window) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = window;
+            self.menu.remove_for_nsapp();
+        }
+        #[cfg(windows)]
+        {
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = window.window_handle()
+                && let RawWindowHandle::Win32(win32) = handle.as_raw()
+            {
+                // SAFETY: `hwnd` is the live window this menu was attached to, on
+                // the thread that owns it.
+                if let Err(error) = unsafe { self.menu.remove_for_hwnd(win32.hwnd.get()) } {
+                    tracing::warn!("cannot remove the native menu: {error}");
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = window;
+        }
     }
 
     /// Attaches the menu bar: the global NSApp menu on macOS, the window's menu
@@ -272,6 +433,42 @@ impl AppMenu {
 /// A title as the native menu needs it: muda reads a single `&` as a mnemonic
 /// marker and drops it (Windows and macOS), so "Effects & Presets" showed as
 /// "Effects  Presets" (#226); `&&` shows one `&`.
+/// AE's Windows mnemonic of a menu or submenu (Alt+letter).
+fn menu_mnemonic(title: &str) -> Option<char> {
+    bae_ui_motion::catalog::menu_mnemonic(title)
+}
+
+/// A title as the native menu shows it, with AE's mnemonic on Windows
+/// (`文件(&F)`, `&File`); macOS menus have none.
+fn menu_text(text: &str, mnemonic: Option<char>) -> String {
+    let zh = bae_ui::i18n::lang() == bae_ui::Lang::Zh;
+    mnemonic_text(text, mnemonic.filter(|_| cfg!(windows)), zh)
+}
+
+/// `text` (escaped for the native menu) with `mnemonic`: AE's Chinese menus
+/// put `(&X)` after the title, before a trailing `...`; English ones mark the
+/// letter in the word (`Effec&t`), else add ` (&X)`.
+fn mnemonic_text(text: &str, mnemonic: Option<char>, zh: bool) -> String {
+    let escaped = native_text(text);
+    let Some(c) = mnemonic else {
+        return escaped;
+    };
+    if zh {
+        let (base, tail) = match escaped.strip_suffix("...") {
+            Some(base) => (base, "..."),
+            None => (escaped.as_str(), ""),
+        };
+        return format!("{base}(&{c}){tail}");
+    }
+    match escaped
+        .char_indices()
+        .find(|(_, ch)| ch.eq_ignore_ascii_case(&c))
+    {
+        Some((i, _)) => format!("{}&{}", &escaped[..i], &escaped[i..]),
+        None => format!("{escaped} (&{c})"),
+    }
+}
+
 fn native_text(text: &str) -> String {
     text.replace('&', "&&")
 }
@@ -281,7 +478,7 @@ fn predefined(spec: &MenuItemSpec) -> Option<PredefinedMenuItem> {
     if !cfg!(target_os = "macos") || spec.path.first().map(String::as_str) != Some(APP_MENU) {
         return None;
     }
-    let owned = native_text(tr(&spec.title));
+    let owned = native_text(spec.display_title());
     let text = Some(owned.as_str());
     Some(match spec.action.as_str() {
         ids::ABOUT => PredefinedMenuItem::about(text, Some(about_metadata())),
@@ -298,6 +495,7 @@ fn append_entries(
     menu: &Submenu,
     entries: &[MenuEntry],
     items: &mut HashMap<String, Contributed>,
+    assign: &mut Option<Submenu>,
 ) -> muda::Result<()> {
     for e in entries {
         match e {
@@ -311,7 +509,7 @@ fn append_entries(
                 let item = if spec.is_checkable() {
                     let item = CheckMenuItem::with_id(
                         menu_id,
-                        native_text(tr(&spec.title)),
+                        menu_text(spec.display_title(), spec.mnemonic),
                         true,
                         false,
                         None,
@@ -319,7 +517,12 @@ fn append_entries(
                     menu.append(&item)?;
                     Native::Check(item)
                 } else {
-                    let item = MenuItem::with_id(menu_id, native_text(tr(&spec.title)), true, None);
+                    let item = MenuItem::with_id(
+                        menu_id,
+                        menu_text(spec.display_title(), spec.mnemonic),
+                        true,
+                        None,
+                    );
                     menu.append(&item)?;
                     Native::Plain(item)
                 };
@@ -331,13 +534,20 @@ fn append_entries(
                         enabled: true,
                         checked: false,
                         chord: None,
+                        label: None,
                     },
                 );
             }
             MenuEntry::Submenu { title, entries } => {
                 // AE shows a submenu with nothing in it (History) greyed.
-                let sub = Submenu::new(native_text(tr(title)), !entries.is_empty());
-                append_entries(&sub, entries, items)?;
+                let sub = Submenu::new(
+                    menu_text(tr(title), menu_mnemonic(title)),
+                    !entries.is_empty(),
+                );
+                if title == "Assign Shortcut to Workspace" {
+                    *assign = Some(sub.clone());
+                }
+                append_entries(&sub, entries, items, assign)?;
                 menu.append(&sub)?;
             }
         }
@@ -431,6 +641,9 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         K::Enter => Code::Enter,
         K::Escape => Code::Escape,
         K::Tab => Code::Tab,
+        #[cfg(target_os = "macos")]
+        key => mac_extended_key(key)?,
+        #[cfg(not(target_os = "macos"))]
         _ => return None,
     };
     let mut mods = Modifiers::empty();
@@ -451,6 +664,38 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         mods |= Modifiers::SHIFT;
     }
     Some(Accelerator::new(mods, code))
+}
+
+/// NumericPad is part of an AppKit key equivalent, so the main digits stay distinct.
+#[cfg(target_os = "macos")]
+fn mac_extended_key(key: egui::Key) -> Option<Code> {
+    use egui::Key as K;
+    Some(match key {
+        K::F13 => Code::F13,
+        K::F14 => Code::F14,
+        K::F15 => Code::F15,
+        K::F16 => Code::F16,
+        K::F17 => Code::F17,
+        K::F18 => Code::F18,
+        K::F19 => Code::F19,
+        K::F20 => Code::F20,
+        K::F21 => Code::NumpadMultiply,
+        K::F22 => Code::NumpadDivide,
+        K::F23 => Code::NumpadAdd,
+        K::F24 => Code::NumpadSubtract,
+        K::F25 => Code::NumpadDecimal,
+        K::F26 => Code::Numpad0,
+        K::F27 => Code::Numpad1,
+        K::F28 => Code::Numpad2,
+        K::F29 => Code::Numpad3,
+        K::F30 => Code::Numpad4,
+        K::F31 => Code::Numpad5,
+        K::F32 => Code::Numpad6,
+        K::F33 => Code::Numpad7,
+        K::F34 => Code::Numpad8,
+        K::F35 => Code::Numpad9,
+        _ => return None,
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -619,6 +864,38 @@ mod tests {
     /// #226: titles with `&` (Effects & Presets, Blur & Sharpen, Startup & Repair…)
     /// keep it in the native menu.
     #[test]
+    fn windows_menus_get_ae_mnemonics() {
+        assert_eq!(mnemonic_text("文件", Some('F'), true), "文件(&F)");
+        assert_eq!(
+            mnemonic_text("打开项目...", Some('O'), true),
+            "打开项目(&O)..."
+        );
+        assert_eq!(mnemonic_text("Effect", Some('T'), false), "Effec&t");
+        assert_eq!(mnemonic_text("File", Some('F'), false), "&File");
+        assert_eq!(
+            mnemonic_text("Effects & Presets", None, false),
+            "Effects && Presets"
+        );
+        // Every top-level AE menu has its letter (the Chinese Window menu has
+        // none in AE 26).
+        let _app = crate::acceptance::build_app();
+        crate::i18n::register_tables();
+        assert_eq!(menu_mnemonic("Window"), None);
+        for (title, letter) in [
+            ("File", 'F'),
+            ("Edit", 'E'),
+            ("Composition", 'C'),
+            ("Layer", 'L'),
+            ("Effect", 'T'),
+            ("Animation", 'A'),
+            ("View", 'V'),
+            ("Help", 'H'),
+        ] {
+            assert_eq!(menu_mnemonic(title), Some(letter), "{title}");
+        }
+    }
+
+    #[test]
     fn ampersands_survive_the_native_menu() {
         assert_eq!(native_text("Effects & Presets"), "Effects && Presets");
         assert_eq!(native_text("效果和预设"), "效果和预设");
@@ -639,6 +916,30 @@ mod tests {
                 "{t}"
             );
         }
+    }
+
+    /// ⌃⌥8 fires the ⌃8 item (Add Marker) on macOS: the press goes to the UI,
+    /// whose keymap runs Add Marker with Dialog. The exact chord, a mouse click
+    /// and items without a shortcut run the item.
+    #[test]
+    fn a_key_equivalent_with_other_modifiers_goes_to_the_ui() {
+        let ctrl_8 = Chord::parse("Ctrl+8").ok();
+        let mods = |ctrl, alt| egui::Modifiers {
+            ctrl,
+            alt,
+            ..Default::default()
+        };
+        let press = key_press_for_ui(ctrl_8, Some(mods(true, true)));
+        assert!(matches!(
+            press,
+            Some(egui::Event::Key { key: egui::Key::Num8, pressed: true, modifiers, .. })
+                if modifiers == mods(true, true)
+        ));
+        if cfg!(target_os = "macos") {
+            assert!(key_press_for_ui(ctrl_8, Some(mods(true, false))).is_none());
+        }
+        assert!(key_press_for_ui(ctrl_8, None).is_none());
+        assert!(key_press_for_ui(None, Some(mods(true, true))).is_none());
     }
 
     #[test]

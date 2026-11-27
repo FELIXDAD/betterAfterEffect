@@ -139,7 +139,11 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "edit.paste" => return Paste,
         "motion.select_all" | "motion.deselect_all" => return Comp,
         "motion.duplicate" | "motion.split" | "motion.order" => return Layers,
-        "motion.ease" | "motion.toggle_hold" | "motion.reverse_keys" => return Keys,
+        "motion.ease"
+        | "motion.toggle_hold"
+        | "motion.reverse_keys"
+        | "motion.anim.exponential_scale" => return Keys,
+        "motion.anim.sequence_layers" => return Layers,
         "motion.new_comp" => return Nothing,
         "motion.new_layer"
         | "motion.trim_comp"
@@ -186,6 +190,7 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "Layer" if path.get(1) == Some(&"New") => Comp,
         "Layer" | "Effect" => Layers,
         "Animation" => match item.action {
+            "motion.anim.convert_audio_to_keyframes" => Comp,
             a if a.starts_with("motion.anim.recent_animation_preset")
                 || a == "motion.anim.browse_presets"
                 || a == "motion.anim.apply_animation_preset" =>
@@ -338,7 +343,11 @@ impl Builder {
                     path.push(sub.title);
                     let mut at = levels.to_vec();
                     at.push(pos);
-                    if sub.children.is_empty() {
+                    if sub.title == "Layer Styles" {
+                        for (id, spec) in crate::layer_styles::menu(&at) {
+                            self.push(id, spec);
+                        }
+                    } else if sub.children.is_empty() {
                         // AE shows the submenu (History, Team Project) greyed.
                         self.placeholder(path, &at);
                     } else {
@@ -348,12 +357,18 @@ impl Builder {
                 }
                 Node::Effects => {
                     // One submenu per category, sorted by its localized name like
-                    // AE; the effects are listed once `motion.effect.apply` exists.
+                    // AE, listing AE's effects (greyed unless BAE implements them).
                     for category in catalog::effect_categories() {
                         path.push(category);
                         let mut at = levels.to_vec();
                         at.push(pos.sorted());
-                        self.placeholder(path, &at);
+                        let items = crate::effects::menu_items(path, &at, category, WORKSPACE);
+                        if items.is_empty() {
+                            self.placeholder(path, &at);
+                        }
+                        for (title, spec) in items {
+                            self.push(item_id(path, title), spec);
+                        }
                         path.pop();
                     }
                 }
@@ -378,7 +393,8 @@ impl Builder {
 fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpec {
     let mut spec = MenuItemSpec::new(path, catalog::shown_title(item.title), item.action)
         .workspace(WORKSPACE)
-        .at(levels);
+        .at(levels)
+        .mnemonic(catalog::item_mnemonic(item.ae));
     if !item.params.is_empty() {
         spec = spec.params(serde_json::from_str(item.params).expect("catalog params are JSON"));
     }
@@ -411,6 +427,11 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        actions::ids::CACHE_WHEN_IDLE => spec.checked_when(|cx| {
+            crate::prefs::current(cx.resources).bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
+        }),
+        crate::effects::LAST_EFFECT => spec.enabled_when(crate::effects::last_effect_enabled),
+        crate::effects::REMOVE_ALL => spec.enabled_when(crate::effects::remove_all_enabled),
         actions::ids::LAYER_SWITCH => {
             let attr = spec_param(item.params, "switch").unwrap_or_default();
             let bit = actions::SWITCHES
@@ -427,8 +448,86 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
         }
+        crate::viewer::view_options::ids::PANEL_BACKGROUND => {
+            let key = spec_param(item.params, "color")
+                .unwrap_or_default()
+                .to_owned();
+            spec.checked_when(move |cx| {
+                crate::viewer::view_options::background_checked(cx.resources, &key)
+            })
+        }
+        actions::ids::SEPARATE_DIMENSIONS => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let layers = session.lock().selected_layers.clone();
+            actions::all_separated(cx.stage, &layers)
+        }),
+        crate::viewer::view3d::ids::CREATE_CAMERA => {
+            spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
+        }
+
+        id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
+            && id != "motion.view.clear_guides" =>
+        {
+            spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
+        }
+
+        crate::viewer::view3d::ids::LAYOUT => {
+            let n = item
+                .params
+                .trim_start_matches("{\"views\":")
+                .trim_end_matches('}');
+            let n: usize = n.parse().unwrap_or(1);
+            spec.checked_when(move |cx| crate::viewer::view3d::layout(cx.resources) == n)
+        }
+
+        "motion.view.look_at_selected_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, false))
+        }
+        "motion.view.look_at_all_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, true))
+        }
+        crate::viewer::view3d::ids::SWITCH => {
+            let view = spec_param(item.params, "view").unwrap_or_default();
+            spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
+        }
+        crate::masks::ids::MASK_MODE => {
+            let mode = spec_param(item.params, "mode").unwrap_or_default();
+            spec.checked_when(move |cx| {
+                let session = common::session(cx.resources);
+                crate::masks::first_target(cx.stage, &session)
+                    .is_some_and(|m| crate::masks::mode(cx.stage, &m) == mode)
+            })
+        }
+        crate::masks::ids::MASK_INVERTED | crate::masks::ids::MASK_LOCKED => {
+            let locked = item.action == crate::masks::ids::MASK_LOCKED;
+            spec.checked_when(move |cx| {
+                let session = common::session(cx.resources);
+                crate::masks::first_target(cx.stage, &session).is_some_and(|m| {
+                    if locked {
+                        crate::masks::locked(cx.stage, &m)
+                    } else {
+                        crate::masks::inverted(cx.stage, &m)
+                    }
+                })
+            })
+        }
+        actions::ids::TIME_REMAP => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let first = session.lock().selected_layers.first().cloned();
+            first.is_some_and(|l| actions::switch_on(cx.stage, &l, "time_remap_enabled"))
+        }),
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
+            let title = item.title;
+            let spec = match panel.as_str() {
+                // AE: "Composition: Comp 1", "Timeline: Comp 1" ("（无）" without).
+                "composition" | "timeline" | "layer" | "footage" | "flowchart"
+                | "effect_controls" => {
+                    let which = panel.clone();
+                    spec.label_when(move |cx| Some(panel_label(cx, title, &which)))
+                }
+                _ => spec,
+            };
             spec.checked_when(move |cx| cx.panel_open(&panel))
         }
         bae_ui::action::ids::SWITCH_WORKSPACE => {
@@ -437,6 +536,26 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         }
         _ => spec,
     }
+}
+
+/// The Window menu title of a viewer-like panel: "<panel>: <what it shows>".
+fn panel_label(cx: &MenuContext<'_>, title: &str, panel: &str) -> String {
+    let session = common::session(cx.resources);
+    let shown = match panel {
+        "composition" | "timeline" => common::active_comp(cx.stage, &session).map(|c| c.name),
+        "effect_controls" | "layer" => session
+            .lock()
+            .selected_layers
+            .first()
+            .map(|l| bae_motion::query::display_name_of(cx.stage, l)),
+        _ => None,
+    };
+    let none = bae_ui::tr("(none)");
+    format!(
+        "{}: {}",
+        bae_ui::tr(title),
+        shown.as_deref().unwrap_or(none)
+    )
 }
 
 /// A string parameter of a catalog entry's parameter text.
@@ -482,4 +601,27 @@ impl ActionHandler for MotionActions {
         let session = common::session(cx.resources);
         actions::handle(inv, cx, &session)
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // New layer menu
+    ("New", "新建"),
+    ("Text", "文本"),
+    ("Shape Layer", "形状图层"),
+    ("Null Object", "空对象"),
+    ("Null", "空"),
+    ("Camera", "摄像机"),
+    ("Light", "灯光"),
+    ("Adjustment Layer", "调整图层"),
+    ("Rectangle", "矩形"),
+    ("Ellipse", "椭圆"),
+    ("Star", "星形"),
+    ("Pre-comp", "预合成"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
 }

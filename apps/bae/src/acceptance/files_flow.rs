@@ -34,13 +34,15 @@ fn animated_project(h: &mut Ui) {
         ],
     );
     // Rename the text layer (selected, on top) through the timeline.
-    let head = find_text(h, "Layer Name").expect("timeline");
+    let head = timeline_header(h).expect("timeline");
     let name = h.state().layer_names()[0].clone();
     let row = find_texts(h, |t| t == name)
         .into_iter()
         .find(|r| r.top() > head.bottom() && r.left() < head.left() + 400.0)
         .expect("text layer row");
-    double_click_at(h, row.center());
+    // AE: Enter renames the selected layer (a double-click opens the Layer panel).
+    click_at(h, row.center());
+    key(h, Modifiers::NONE, Key::Enter);
     press(h, Modifiers::COMMAND, Key::A);
     ime_compose(h, &["biao", "biao ti"], "标题");
     send(h, Event::Text(" 01".into()));
@@ -190,12 +192,13 @@ fn cmd_s_while_renaming_saves_the_typed_name() {
     no_surprises(&h);
 
     // Rename field open, a new name typed, Cmd+S before Enter.
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     let row = find_texts(&h, |t| t == "Dark Gray Solid 1")
         .into_iter()
         .find(|r| r.top() > head.bottom())
         .unwrap();
-    double_click_at(&mut h, row.center());
+    click_at(&mut h, row.center());
+    key(&mut h, Modifiers::NONE, Key::Enter);
     press(&mut h, Modifiers::COMMAND, Key::A);
     send(&mut h, Event::Text("Typed".into()));
     press(&mut h, Modifiers::COMMAND, Key::S);
@@ -343,6 +346,18 @@ fn finder_open_goes_through_the_open_flow() {
     }
     let opened_export = export_file(&folder);
     assert!(open_files_invocation(&[]).is_none());
+
+    // Finder delivers OpenFiles after startup may already have drawn Home.
+    let mut home = gui();
+    home.state_mut().workspace.start_without_project(false);
+    settle(&mut home);
+    assert!(find_text(&home, "Welcome to BAE").is_some());
+    home.state_mut()
+        .invoke(open_files_invocation(std::slice::from_ref(&folder)).unwrap());
+    settle(&mut home);
+    assert_eq!(home.state().doc.location(), Some(folder.as_path()));
+    assert!(home.state().active_comp().is_some());
+    assert!(find_text(&home, "Welcome to BAE").is_none());
 
     for (i, (target, choice)) in [
         (&folder, UnsavedChoice::Cancel),
@@ -1460,5 +1475,48 @@ fn closing_the_project_empties_the_comp_and_timeline_tabs() {
         // A new comp shows its name again.
         new_comp(&mut h);
         assert_eq!(tabs(&h, "Comp 1"), (true, true), "{away}: new comp");
+    }
+}
+
+/// #231: the render queue belongs to the project. Closing it, starting a new
+/// one or opening another empties the queue; the next project's items are
+/// its own.
+#[test]
+fn render_queue_belongs_to_the_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let other = tricky_dir(tmp.path()).join("另一个 工程.bae");
+    {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        save_as(&mut h, other.clone());
+        no_surprises(&h);
+    }
+    let queued = |h: &Ui| h.state().render_queue().lock().items().len();
+    for away in [Away::Close, Away::New, Away::Open] {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+        assert_eq!(queued(&h), 1, "{away:?}: queued");
+        h.state_mut()
+            .dialogs
+            .answers
+            .push_back(UnsavedChoice::DontSave);
+        go_away(&mut h, away, &other);
+        assert_eq!(queued(&h), 0, "{away:?}: the old project's items stay");
+        // The new project queues its own comp as item 1.
+        if matches!(away, Away::Open) {
+            assert!(h.state().active_comp().is_some(), "opened comp");
+        } else {
+            comp_with(&mut h, &[]);
+        }
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+        let q = h.state().render_queue();
+        let q = q.lock();
+        assert_eq!(q.items().len(), 1, "{away:?}");
+        assert_eq!(
+            Some(&q.items()[0].comp),
+            h.state().active_comp().as_ref(),
+            "{away:?}"
+        );
     }
 }

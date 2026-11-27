@@ -14,7 +14,7 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use bae_model::Value;
+use bae_model::{PrimPath, Value};
 use bae_motion::query;
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
@@ -24,8 +24,8 @@ use egui::{Align2, Color32, Id, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
 use super::{
-    AxisMode, FillRequest, Group, Paint, PaintKind, SharedTools, Tool, ToolOptions, ViewRequest,
-    ids,
+    AxisMode, FillRequest, GizmoMode, Group, Paint, PaintKind, SharedTools, Tool, ToolOptions,
+    ViewRequest, ids,
 };
 use crate::common;
 
@@ -286,7 +286,7 @@ impl AeToolbar {
         }
     }
 
-    fn options(&self, ui: &mut Ui, cx: &PanelContext<'_>) {
+    fn options(&self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let tool = self.tools.lock().current();
         let mut o = self.tools.lock().options.clone();
         let before = o.clone();
@@ -303,6 +303,16 @@ impl AeToolbar {
             | Group::Pan
             | Group::Dolly => {
                 axis_modes(ui, &mut o);
+                if tool == Tool::Selection {
+                    let items = [tr("Position"), tr("Scale"), tr("Rotation")];
+                    let mut i = o.gizmo as usize;
+                    if widgets::dropdown(ui, "gizmo", &mut i, &items, 74.0)
+                        .on_hover_text(tr("Toggle 3D Gizmo Mode"))
+                        .changed()
+                    {
+                        o.gizmo = [GizmoMode::Position, GizmoMode::Scale, GizmoMode::Rotation][i];
+                    }
+                }
                 if tool == Tool::Rotation {
                     let items = [tr("Orientation"), tr("Rotation")];
                     let mut i = usize::from(!o.rotation_sets_orientation);
@@ -324,9 +334,7 @@ impl AeToolbar {
                 ui.add_enabled_ui(shape_target, |ui| {
                     paint_controls(ui, &mut o);
                 });
-                ui.add_enabled_ui(false, |ui| {
-                    widgets::link(ui, tr("Add")).on_disabled_hover_text(tr("Add"));
-                });
+                add_menu(ui, cx, &o);
                 if tool.is_pen() {
                     widgets::checkbox(ui, &mut o.roto_bezier, tr("RotoBezier"));
                 } else {
@@ -354,6 +362,94 @@ impl AeToolbar {
             self.tools.lock().options = o;
         }
     }
+}
+
+/// AE's Add menu of the shape and pen tools: `(item id, English title)`;
+/// `None` is a separator.
+const ADD_MENU: &[Option<(&str, &str)>] = &[
+    Some(("group", "Group (empty)")),
+    Some(("rect", "Rectangle")),
+    Some(("ellipse", "Ellipse")),
+    Some(("polystar", "Polystar")),
+    Some(("path", "Path")),
+    None,
+    Some(("fill", "Fill")),
+    Some(("stroke", "Stroke")),
+    Some(("gradient_fill", "Gradient Fill")),
+    Some(("gradient_stroke", "Gradient Stroke")),
+    None,
+    Some(("merge", "Merge Paths")),
+    Some(("offset", "Offset Paths")),
+    Some(("pucker_bloat", "Pucker & Bloat")),
+    Some(("repeater", "Repeater")),
+    Some(("round_corners", "Round Corners")),
+    Some(("trim", "Trim Paths")),
+    Some(("twist", "Twist")),
+    Some(("wiggle_paths", "Wiggle Paths")),
+    Some(("wiggle_transform", "Wiggle Transform")),
+    Some(("zig_zag", "Zig Zag")),
+];
+
+/// Where Add puts an item: the shape groups or items selected in the
+/// Timeline, else the selected shape layers.
+fn add_targets(stage: &bae_model::Stage, session: &crate::session::SharedSession) -> Vec<PrimPath> {
+    let s = session.lock();
+    let in_shape = |p: &PrimPath| {
+        query::owning_layer(stage, p)
+            .is_some_and(|l| query::layer_kind(stage, &l).as_deref() == Some("shape"))
+    };
+    let rows: Vec<PrimPath> = s
+        .selected_groups
+        .iter()
+        .filter_map(|id| crate::session::group_prim(id))
+        .filter(|p| in_shape(p) && query::layer_kind(stage, p).is_none())
+        .collect();
+    if !rows.is_empty() {
+        return rows;
+    }
+    s.selected_layers
+        .iter()
+        .filter(|l| query::layer_kind(stage, l).as_deref() == Some("shape"))
+        .cloned()
+        .collect()
+}
+
+/// The Add link and its menu (AE): one `shape.add_item` per pick.
+fn add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, o: &ToolOptions) {
+    let session = common::session(cx.resources);
+    let targets = add_targets(cx.stage, &session);
+    let mut picked = None;
+    ui.add_enabled_ui(!targets.is_empty(), |ui| {
+        let resp = widgets::link(ui, tr("Add")).on_disabled_hover_text(tr("Add"));
+        common::popup_menu(&resp, &mut |ui| {
+            for entry in ADD_MENU {
+                match entry {
+                    None => {
+                        ui.separator();
+                    }
+                    Some((id, title)) => {
+                        if ui.button(tr(title)).clicked() {
+                            picked = Some(*id);
+                            ui.close();
+                        }
+                    }
+                }
+            }
+        });
+    });
+    let Some(item) = picked else {
+        return;
+    };
+    let mut params = json!({"targets": targets, "item": item});
+    match item {
+        "fill" => params["color"] = json!(o.fill.color),
+        "stroke" => {
+            params["color"] = json!(o.stroke.color);
+            params["width"] = json!(o.stroke_width);
+        }
+        _ => {}
+    }
+    cx.invoke_with("shape.add_item", params);
 }
 
 fn small(text: &str) -> egui::RichText {
@@ -422,9 +518,29 @@ fn axis_modes(ui: &mut Ui, o: &mut ToolOptions) {
 /// snap to features of collapsed and text layers) are not available yet.
 fn snapping(ui: &mut Ui, o: &mut ToolOptions) {
     widgets::checkbox(ui, &mut o.snapping, tr("Snapping"));
-    ui.add_enabled_ui(false, |ui| {
-        icons::button(ui, Icon::SnapEdges, 20.0, false);
-        icons::button(ui, Icon::SnapFeatures, 20.0, false);
+    // AE's two snapping options, usable while Snapping is on.
+    ui.add_enabled_ui(o.snapping, |ui| {
+        for (flag, icon, name) in [
+            (
+                &mut o.snap_edges,
+                Icon::SnapEdges,
+                "Snap to edges extended beyond layer bounds",
+            ),
+            (
+                &mut o.snap_features,
+                Icon::SnapFeatures,
+                "Snap to features inside collapsed compositions and text layers",
+            ),
+        ] {
+            let on = *flag;
+            if icons::button(ui, icon, 20.0, on)
+                .labeled_toggle(egui::WidgetType::Checkbox, tr(name), on)
+                .on_hover_text(tr(name))
+                .clicked()
+            {
+                *flag = !on;
+            }
+        }
     });
 }
 
@@ -490,38 +606,36 @@ fn paint_control(
 ) {
     // The label opens Fill / Stroke Options (type, blend mode, opacity).
     let lr = widgets::link(ui, tr(label)).on_hover_text(tr(options));
-    egui::Popup::menu(&lr)
-        .id(Id::new(("paint_options", id)))
-        .show(|ui| {
-            ui.set_min_width(180.0);
-            ui.label(egui::RichText::new(tr(options)).strong());
-            for (kind, name, available) in [
-                (PaintKind::None, "None", true),
-                (PaintKind::Solid, "Solid Color", true),
-                (PaintKind::LinearGradient, "Linear Gradient", false),
-                (PaintKind::RadialGradient, "Radial Gradient", false),
-            ] {
-                ui.add_enabled_ui(available, |ui| {
-                    if ui.radio(paint.kind == kind, tr(name)).clicked() {
-                        paint.kind = kind;
-                    }
-                });
-            }
-            ui.horizontal(|ui| {
-                ui.label(tr("Opacity"));
-                ui.add(
-                    egui::DragValue::new(&mut paint.opacity)
-                        .range(0.0..=100.0)
-                        .suffix("%"),
-                );
+    common::popup_menu(&lr, &mut |ui| {
+        ui.set_min_width(180.0);
+        ui.label(egui::RichText::new(tr(options)).strong());
+        for (kind, name, available) in [
+            (PaintKind::None, "None", true),
+            (PaintKind::Solid, "Solid Color", true),
+            (PaintKind::LinearGradient, "Linear Gradient", false),
+            (PaintKind::RadialGradient, "Radial Gradient", false),
+        ] {
+            ui.add_enabled_ui(available, |ui| {
+                if ui.radio(paint.kind == kind, tr(name)).clicked() {
+                    paint.kind = kind;
+                }
             });
-            ui.add_enabled_ui(false, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(tr("Blend Mode"));
-                    ui.label(tr("Normal"));
-                });
+        }
+        ui.horizontal(|ui| {
+            ui.label(tr("Opacity"));
+            ui.add(
+                egui::DragValue::new(&mut paint.opacity)
+                    .range(0.0..=100.0)
+                    .suffix("%"),
+            );
+        });
+        ui.add_enabled_ui(false, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(tr("Blend Mode"));
+                ui.label(tr("Normal"));
             });
         });
+    });
     // The swatch: Alt/Option-click cycles the type, click picks the color.
     let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 16.0), Sense::click());
     let hex = {

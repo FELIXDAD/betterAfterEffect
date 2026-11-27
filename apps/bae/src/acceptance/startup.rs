@@ -137,8 +137,27 @@ fn version_line_and_about() {
 
 #[test]
 fn controls_have_accessibility_labels() {
-    // VoiceOver reads accesskit labels; icon buttons (toolbar tools, panel
-    // close / menu buttons, stopwatches), tabs and timeline rows have none.
+    if in_child(
+        "acceptance::startup::controls_have_accessibility_labels",
+        &[("BAE_LANG", "en")],
+    ) {
+        assert_control_labels();
+    }
+}
+
+#[test]
+fn controls_have_chinese_accessibility_labels() {
+    if in_child(
+        "acceptance::startup::controls_have_chinese_accessibility_labels",
+        &[("BAE_LANG", "zh")],
+    ) {
+        assert_control_labels();
+    }
+}
+
+fn assert_control_labels() {
+    use egui::accesskit::Role;
+    crate::i18n::init_from_env();
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
     let mut labelled = 0;
@@ -146,6 +165,17 @@ fn controls_have_accessibility_labels() {
     for n in h.root().children_recursive() {
         let a = n.accesskit_node();
         if a.bounding_box().is_none() || a.role() == egui::accesskit::Role::GenericContainer {
+            continue;
+        }
+        // An empty TextEdit exposes its insertion point as a zero-width TextRun.
+        // VoiceOver names the field, while its text run contains the editable value.
+        if a.role() == Role::TextRun
+            && a.bounding_box().is_some_and(|b| b.width() == 0.0)
+            && a.parent().is_some_and(|parent| {
+                matches!(parent.role(), Role::TextInput | Role::SearchInput)
+                    && parent.label().is_some_and(|name| !name.is_empty())
+            })
+        {
             continue;
         }
         if a.label().is_some_and(|l| !l.is_empty()) || a.value().is_some_and(|v| !v.is_empty()) {
@@ -164,11 +194,16 @@ fn controls_have_accessibility_labels() {
         }
     }
     println!("accessibility: {labelled} labelled, {unlabelled} unlabelled widgets");
-    assert!(
-        unlabelled * 10 <= labelled + unlabelled,
-        "{unlabelled} of {} widgets have no label",
-        labelled + unlabelled
-    );
+    assert_eq!(unlabelled, 0, "accessibility names missing at startup");
+    for name in [
+        "Scroll Project Columns",
+        "Timeline Layer Pane Width",
+        "Timeline Columns",
+        "Timeline Layer List",
+    ] {
+        let label = bae_ui::tr(name);
+        assert!(h.query_by_label(label).is_some(), "missing {label}");
+    }
 }
 
 // ---- Retest of #116 (dev d23a328): find controls by accessible name ----
@@ -193,8 +228,17 @@ fn busy_window() -> Ui {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
     key(&mut h, Modifiers::NONE, Key::P);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     h
+}
+
+/// Labels with the Render Queue in front of the Timeline (where AE opens it),
+/// then with the Timeline in front again.
+fn busy_labels(h: &mut Ui) -> Vec<String> {
+    let mut all = labels(h);
+    to_front(h, "timeline");
+    all.extend(labels(h));
+    all
 }
 
 /// English labels that must be in the tree (with at least this many nodes).
@@ -214,7 +258,7 @@ const MAIN_CONTROLS: &[(&str, usize)] = &[
 #[test]
 fn main_controls_are_found_by_accessible_name() {
     let mut h = busy_window();
-    let all = labels(&h);
+    let all = busy_labels(&mut h);
     let mut missing = Vec::new();
     for (label, min) in MAIN_CONTROLS {
         let n = all.iter().filter(|l| names(l, label)).count();
@@ -224,7 +268,7 @@ fn main_controls_are_found_by_accessible_name() {
     }
     // Names shown in the UI: layers (timeline rows carry the layer number,
     // "Layer 1 “Text”", #128), comp tab, workspaces.
-    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Motion", "Review"] {
+    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Default", "Review"] {
         let quoted = format!("“{label}”");
         if !all.iter().any(|l| l == label || l.ends_with(&quoted)) {
             missing.push(label.to_owned());
@@ -260,7 +304,7 @@ fn main_controls_are_found_by_accessible_name() {
         .query_all_by_label("Layer 1 “Text”")
         .map(|n| n.rect())
         .collect();
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     let row = rows
         .into_iter()
         .find(|r| r.top() > head.bottom())
@@ -308,8 +352,8 @@ fn accessible_names_are_chinese_in_the_chinese_ui() {
         return;
     }
     crate::i18n::init_from_env();
-    let h = busy_window();
-    let all = labels(&h);
+    let mut h = busy_window();
+    let all = busy_labels(&mut h);
     let mut wrong = Vec::new();
     if !labels(&gui()).iter().any(|l| l == "搜索") {
         wrong.push("Search → 搜索 not in the tree".to_owned());
@@ -668,18 +712,36 @@ fn inputs_are_named_apart_from_their_values() {
 fn render_queue_items_are_told_apart() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     settle(&mut h);
     let all = labels(&h);
     for n in [1, 2] {
-        for what in ["Remove", "Output To", "Format"] {
+        for what in [
+            "Remove",
+            "Output To",
+            "Format",
+            "Log",
+            "File Name and Location Templates",
+        ] {
             let name = format!("Render Item {n} “Comp 1” · {what}");
             assert!(all.contains(&name), "no {name:?}: {all:?}");
         }
     }
     let dupes = repeated_names(&h);
     assert!(dupes.is_empty(), "{dupes:#?}");
+
+    let first = h.state().render_queue().lock().items()[0].id;
+    h.state_mut().invoke(Invocation::with_params(
+        "motion.comp.add_output_module",
+        serde_json::json!({"queue_item": first}),
+    ));
+    settle(&mut h);
+    for module in [1, 2] {
+        let name = format!("Output Module {module} · File Name and Location Templates");
+        assert!(queue_control(&h, 1, &name).is_some(), "{name}");
+    }
+    assert!(repeated_names(&h).is_empty(), "{:#?}", repeated_names(&h));
 }
 
 // ---- Retest of #128 (dev dbdbb7c): numbered names ----
@@ -740,7 +802,7 @@ fn layer_numbers_in_names_follow_reorder_and_delete() {
     );
     // Delete the middle one: 1, 2, still unique.
     let middle = h.state().layers()[1].clone();
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(
         &mut h,
         egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
@@ -772,9 +834,11 @@ fn numbered_names_in_chinese() {
     for l in h.state().layers() {
         rename(&mut h, &l, "同名");
     }
-    key(&mut h, Modifiers::COMMAND, Key::M);
-    key(&mut h, Modifiers::COMMAND, Key::M);
-    let all = labels(&h);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    let mut all = labels(&h);
+    to_front(&mut h, "timeline");
+    all.extend(labels(&h));
     let english: Vec<&String> = all
         .iter()
         .filter(|l| l.starts_with("Layer ") || l.starts_with("Render Item"))
@@ -818,7 +882,7 @@ fn render_queue_items_of_one_comp_stay_distinct_after_removing_one() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
     for _ in 0..3 {
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     }
     assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
     for n in 1..=3 {

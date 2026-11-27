@@ -1,0 +1,86 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "strobe"
+name = "Strobe Light"
+category = "Stylize"
+implementation = "wgsl"
+ae_match_names = ["ADBE Strobe"]
+keywords = ["strobe", "flash"]
+shader = "shaders/strobe.wgsl"
+identity_when = "params.blend == 100"
+
+[[effect.param]]
+id = 1
+key = "color"
+type = "color"
+name = "Strobe Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 2
+key = "blend"
+type = "float"
+name = "Blend With Original"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 3
+key = "duration"
+type = "float"
+name = "Strobe Duration (secs)"
+default = 0.5
+range = [0, 32000]
+slider = [0, 5]
+
+[[effect.param]]
+id = 4
+key = "period"
+type = "float"
+name = "Strobe Period (secs)"
+default = 1
+range = [0, 32000]
+slider = [0, 5]
+
+[[effect.param]]
+id = 5
+key = "probability"
+type = "float"
+# AE uses this spelling for the script-visible English name.
+name = "Random Strobe Probablity"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 6
+key = "mode"
+type = "popup"
+name = "Strobe"
+default = 1
+choices = ["Operates On Color Only", "Makes Layer Transparent"]
+
+[[effect.param]]
+id = 7
+key = "operation"
+type = "popup"
+name = "Strobe Operator"
+default = 1
+choices = ["Copy", "Add", "Subtract", "Multiply", "Difference", "And", "Or", "Xor", "Lighter", "Darker", "Minimum", "Maximum", "Screen"]
+
+[[effect.param]]
+id = 8
+key = "random_seed"
+type = "int"
+name = "Random Seed"
+default = 0
+range = [0, 100000]

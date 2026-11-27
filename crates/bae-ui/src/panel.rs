@@ -64,6 +64,11 @@ pub trait Panel: 'static {
         let _ = (ui, cx);
     }
 
+    /// Draw related-document commands in Close Other Panels and return true when supplied.
+    fn related_tabs_menu(&mut self, _ui: &mut Ui, _cx: &mut PanelContext<'_>) -> bool {
+        false
+    }
+
     /// Handle a command routed to this panel while it is focused (view actions such
     /// as zoom). Return `true` if handled; otherwise the shell tries its own
     /// actions and then the model command registry.
@@ -215,6 +220,8 @@ pub struct PanelContext<'a> {
     pub kind_title: &'a str,
     /// Whether this panel is the active panel of the focused frame (AE's blue box).
     pub focused: bool,
+    /// The focused dock panel while drawing the workbench.
+    pub focused_panel: Option<&'a PanelId>,
     /// The open project's composed stage (read-only; change it with [`Self::invoke`]).
     pub stage: &'a Stage,
     /// The local user; undo/redo and new commands are attributed to it.
@@ -238,6 +245,7 @@ impl<'a> PanelContext<'a> {
             panel,
             kind_title,
             focused: false,
+            focused_panel: None,
             stage,
             author,
             resources,
@@ -273,6 +281,7 @@ impl<'a> PanelContext<'a> {
             panel: self.panel,
             kind_title: self.kind_title,
             focused: self.focused,
+            focused_panel: self.focused_panel,
             stage: self.stage,
             author: self.author,
             resources: self.resources,

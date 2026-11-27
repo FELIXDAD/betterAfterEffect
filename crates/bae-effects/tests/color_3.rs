@@ -1,0 +1,696 @@
+//! GPU pixel and parameter checks for Color Correction and Utility.
+mod common;
+use bae_gpu::wgpu::TextureFormat::Rgba32Float;
+use bae_model::{ParamKind, Value};
+use bae_render::IRect;
+use common::*;
+
+#[test]
+fn ae_disk_ids_and_nested_groups() {
+    let selective = builtin("ADBE SelectiveColor").def();
+    assert_eq!(selective.params.len(), 62);
+    assert!((2..=6).all(|id| selective.param(id).unwrap().flags.cannot_time_vary));
+    assert_eq!(selective.param(62).unwrap().kind, ParamKind::GroupEnd);
+    let wheel = builtin("APC Colorama").def();
+    assert_eq!(wheel.params[0].id, 3);
+    assert!(wheel.param(10).unwrap().flags.cannot_time_vary);
+    assert_eq!(wheel.param(12).unwrap().kind, ParamKind::ArbitraryData);
+    assert_eq!(wheel.param(38).unwrap().default, Some(Value::Float(1.)));
+    assert_eq!(builtin("ADBE Apply Color LUT2").info.category, "Utility");
+}
+
+#[test]
+fn embedded_luts_use_the_same_transform_as_bae_color() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-2, 7, 35, 27);
+    let input = test_image(rect);
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bae-color/tests/data/ocio");
+    for name in ["curve1d.cube", "shaper3d.cube", "gamma.spi1d", "look.spi3d"] {
+        let bytes = bae_color::lutfile::embed(&fixtures.join(name)).unwrap();
+        assert_eq!(bae_color::lutfile::embedded_name(&bytes), Some(name));
+        let transform = bae_color::lutfile::from_embedded(&bytes).unwrap();
+        let expected = input.map(|mut c| {
+            transform.apply_premultiplied(std::slice::from_mut(&mut c));
+            c
+        });
+        for identity in ["ADBE Apply Color LUT2", "ADBE Apply Color LUT"] {
+            let got = run(
+                &gpu,
+                Rgba32Float,
+                builtin(identity),
+                vec![(1, Value::Bytes(bytes.clone()))],
+                &input,
+                rect,
+                1.,
+            );
+            assert_close(&got, &expected, rect, 0.0001, name);
+        }
+    }
+}
+
+#[test]
+fn lumetri_input_and_creative_look_use_straight_color_in_order() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-2, 7, 35, 27);
+    let input = test_image(rect);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bae-color/tests/data/ocio");
+    let assets = ["curve1d.cube", "look.spi3d"]
+        .map(|name| bae_color::lutfile::embed(&dir.join(name)).unwrap());
+    let [first, look] = assets
+        .each_ref()
+        .map(|b| bae_color::lutfile::from_embedded(b).unwrap());
+    let expected = input.map(|mut pixel| {
+        first.apply_premultiplied(std::slice::from_mut(&mut pixel));
+        let mut graded = pixel;
+        look.apply_premultiplied(std::slice::from_mut(&mut graded));
+        std::array::from_fn(|i| pixel[i] + 0.35 * (graded[i] - pixel[i]))
+    });
+    let [first, look] = assets;
+    let params = vec![
+        (127, Value::Int(2)),
+        (25, Value::Int(2)),
+        (125, Value::Bytes(first.clone())),
+        (126, Value::Bytes(look.clone())),
+        (26, Value::Float(35.)),
+    ];
+    let got = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Lumetri"),
+        params,
+        &input,
+        rect,
+        1.,
+    );
+    assert_close(
+        &got,
+        &expected,
+        rect,
+        0.0001,
+        "Lumetri LUT order and intensity",
+    );
+    // A retained asset cannot silently substitute for a named vendor preset or None.
+    for choice in [1, 5, 69] {
+        let got = run(
+            &gpu,
+            Rgba32Float,
+            builtin("ADBE Lumetri"),
+            vec![
+                (128, Value::Int(choice)),
+                (126, Value::Bytes(look.clone())),
+                (5, Value::Int(1)),
+                (125, Value::Bytes(first.clone())),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&got, &input, rect, 0., "unavailable LUT bypass");
+    }
+}
+
+#[test]
+fn lumetri_hdr_white_separates_diffuse_and_specular_and_scales_rgb_curves() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(2, 1);
+    let input = Pixels::new(rect, |x, _| {
+        let energy: f32 = if x == 0 { 0.5 } else { 2. };
+        let level = energy.powf(1. / 2.4);
+        [level, level, level, 1.]
+    });
+    let render = |values| {
+        run_depth(
+            &gpu,
+            F32,
+            builtin("ADBE Lumetri"),
+            values,
+            &input,
+            rect,
+            1.,
+            true,
+        )
+    };
+    let hdr = (62, Value::Bool(true));
+    let boost = (64, Value::Float(100.));
+    let boosted = render(vec![hdr.clone(), boost.clone()]);
+    assert!((boosted.get(0, 0)[0] - input.get(0, 0)[0]).abs() < 0.0001);
+    assert!((boosted.get(1, 0)[0] - 3_f32.powf(1. / 2.4)).abs() < 0.0001);
+    let raised_white = render(vec![hdr.clone(), boost.clone(), (63, Value::Float(400.))]);
+    assert_close(
+        &raised_white,
+        &input,
+        rect,
+        0.0001,
+        "diffuse white above source",
+    );
+    assert_close(&render(vec![boost]), &input, rect, 0.0001, "HDR switch off");
+
+    let identity_red = (39, Value::FloatList(vec![1., 0., 0., 1., 1., 1.]));
+    let sdr_range = render(vec![hdr.clone(), identity_red.clone()]);
+    let hdr_range = render(vec![hdr.clone(), identity_red, (65, Value::Float(400.))]);
+    assert!((sdr_range.get(1, 0)[0] - 1.).abs() < 0.001);
+    assert_close(&hdr_range, &input, rect, 0.001, "HDR RGB curve domain");
+
+    let lift = (1013, Value::Float(60.));
+    let normal = render(vec![hdr.clone(), lift.clone()]);
+    let white4 = render(vec![hdr, lift, (66, Value::Float(400.))]);
+    let white = 4_f32.powf(1. / 2.4);
+    for x in 0..2 {
+        let c = input.get(x, 0)[0];
+        assert!((normal.get(x, 0)[0] - (c + 0.15 * (1. - c))).abs() < 0.0001);
+        assert!((white4.get(x, 0)[0] - (c + 0.15 * (white - c))).abs() < 0.0001);
+    }
+}
+
+#[test]
+fn lumetri_sampled_white_uses_editable_sliders_and_preserves_alpha() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(2, 2);
+    let sample = [0.6, 0.4, 0.2, 1.];
+    let input = Pixels::new(rect, |_, _| [0.3, 0.2, 0.1, 0.5]);
+    let [temp, tint] = bae_effects::lumetri_white_balance_settings(sample).unwrap();
+    let params = vec![(7, Value::Float(temp)), (8, Value::Float(tint))];
+    let render = |values| run(&gpu, F32, builtin("ADBE Lumetri"), values, &input, rect, 1.);
+    let output = render(params.clone());
+    let [r, g, b, a] = output.get(0, 0);
+    assert!((r - g).abs() < 0.0001 && (g - b).abs() < 0.0001);
+    assert_eq!(a, 0.5);
+    let mut imported = params;
+    imported.push((94, Value::Color(sample)));
+    assert_close(
+        &render(imported),
+        &output,
+        rect,
+        0.0001,
+        "one correction after import",
+    );
+}
+
+#[test]
+fn sampled_lumetri_ranges_preserve_knots_and_grade_the_picked_hue() {
+    use bae_effects::LumetriCurve;
+    for (picker, id, center) in [
+        (113, 42, 0.),
+        (114, 106, 0.),
+        (115, 108, 0.),
+        (116, 110, 0.2126),
+        (117, 112, 1.),
+    ] {
+        let curve = LumetriCurve::from_param(picker).unwrap();
+        assert_eq!(curve.id(), id);
+        let added = curve.pick([1., 0., 0.], None);
+        let knots = curve.points(Some(&added));
+        assert_eq!(knots.len(), 3);
+        assert!(knots.iter().any(|p| (p[0] - center).abs() < 1e-8));
+        assert!(knots.iter().all(|p| p[1] == 0.));
+        assert_eq!(curve.pick([1., 0., 0.], Some(&added)), added);
+    }
+    let Some(gpu) = context() else { return };
+    let curve = LumetriCurve::from_param(113).unwrap();
+    let mut knots = curve.points(Some(&curve.pick([1., 0., 0.], None)));
+    knots[0][1] = -1.;
+    let curve_value = LumetriCurve::value(&knots);
+    let more = curve.pick([0., 1., 0.], Some(&curve_value));
+    assert!(knots.iter().all(|p| curve.points(Some(&more)).contains(p)));
+    let rect = IRect::new(0, 0, 2, 1);
+    let input = Pixels::new(rect, |x, _| {
+        if x == 0 {
+            [0.5, 0., 0., 0.5]
+        } else {
+            [0., 0.5, 0., 0.5]
+        }
+    });
+    let got = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Lumetri"),
+        vec![(42, more)],
+        &input,
+        rect,
+        1.,
+    );
+    let mut want = input.clone();
+    let gray = 0.5 * 0.2126_f32.powf(1. / 2.4);
+    want.data[0] = [gray, gray, gray, 0.5];
+    assert_close(
+        &got,
+        &want,
+        rect,
+        0.0006,
+        "red range wraps at the hue seam; green stays green",
+    );
+    let curve = LumetriCurve::from_param(114).unwrap();
+    let orange = [1., 0.5, 0.];
+    let mut knots = curve.points(Some(&curve.pick(orange, None)));
+    let orange_x = 0.5_f64.powf(2.4) / 6.;
+    knots
+        .iter_mut()
+        .find(|p| (p[0] - orange_x).abs() < 1e-7)
+        .unwrap()[1] = 1. / 3.;
+    let input = Pixels::new(rect, |_, _| [0.5, 0.25, 0., 0.5]);
+    let got = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Lumetri"),
+        vec![(106, LumetriCurve::value(&knots))],
+        &input,
+        rect,
+        1.,
+    );
+    assert_close(
+        &got,
+        &input.map(|_| [0., 0.5, 0.25, 0.5]),
+        rect,
+        0.003,
+        "the picked orange hue rotates by one third of a turn",
+    );
+}
+
+#[test]
+fn lumetri_secondary_curves_change_only_enabled_channels() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(0, 0, 3, 2);
+    let input = test_image(rect).map(|_| [0.25, 0., 0., 0.5]);
+    let gray = 0.25 * 0.2126_f32.powf(1. / 2.4);
+    for (id, enable, amount, expected) in [
+        (106, 105, 1. / 3., [0., 0.25, 0., 0.5]),
+        (108, 107, 1., [0.25 * 2_f32.powf(1. / 2.4), 0., 0., 0.5]),
+        (110, 109, -1., [gray, gray, gray, 0.5]),
+        (112, 111, -1., [gray, gray, gray, 0.5]),
+    ] {
+        for enabled in [true, false] {
+            let params = vec![
+                (id, Value::FloatList(vec![0., 0., amount])),
+                (enable, Value::Bool(enabled)),
+            ];
+            let got = run(
+                &gpu,
+                Rgba32Float,
+                builtin("ADBE Lumetri"),
+                params,
+                &input,
+                rect,
+                1.,
+            );
+            let want = input.map(|p| if enabled { expected } else { p });
+            assert_close(
+                &got,
+                &want,
+                rect,
+                0.0006,
+                "Lumetri secondary curve and bypass",
+            );
+        }
+    }
+}
+
+#[test]
+fn lumetri_secondary_curves_sample_before_hue_and_luma_adjustments() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(1, 1);
+    let input = Pixels::new(rect, |_, _| [0.5, 0., 0., 0.5]);
+    let fx = builtin("ADBE Lumetri");
+    let render = |values| run(&gpu, Rgba32Float, fx, values, &input, rect, 1.);
+    let rotation = (106, Value::FloatList(vec![0., 0., 1. / 3.]));
+    let brighter = (108, Value::FloatList(vec![0., 0., 1.]));
+    let adjusted = render(vec![rotation.clone(), brighter.clone()]);
+    // Red is below 0.25 in linear Rec.709 luma. Rotated, brighter green is above 0.75.
+    // A ramp between those thresholds must leave the source red's saturation alone.
+    let luma_sat = (110, Value::FloatList(vec![0., 0.25, 0., 0., 0.75, -1.]));
+    let combined = render(vec![rotation, brighter, luma_sat]);
+    assert!(adjusted.get(0, 0)[1] > 0.6);
+    assert_close(&combined, &adjusted, rect, 0.0001, "secondary input luma");
+}
+
+#[test]
+fn lumetri_add_and_remove_update_the_rendered_key_across_red() {
+    let Some(gpu) = context() else { return };
+    let fx = builtin("ADBE Lumetri");
+    let colors = [[1., 0., 0.2, 1.], [1., 0.5, 0., 1.], [0., 1., 0., 1.]];
+    let rect = IRect::from_size(3, 1);
+    let input = Pixels::new(rect, |x, _| colors[x as usize].map(|v| v as f32));
+    let mut params =
+        std::collections::BTreeMap::from([(74, Value::Bool(true)), (75, Value::Int(3))]);
+    for (id, sample, expected) in [
+        (70, 0, [1., 0., 0.]),
+        (71, 1, [1., 1., 0.]),
+        (72, 1, [1., 0., 0.]),
+        (70, 1, [0., 1., 0.]),
+        (72, 1, [0., 0., 0.]),
+        (71, 0, [1., 0., 0.]),
+    ] {
+        let edits =
+            bae_effects::lumetri_key_edits(id, colors[sample], |id| params.get(&id).cloned());
+        params.extend(edits);
+        let mask = run(
+            &gpu,
+            F32,
+            fx,
+            params.iter().map(|(&id, v)| (id, v.clone())).collect(),
+            &input,
+            rect,
+            1.,
+        );
+        for (x, weight) in expected.into_iter().enumerate() {
+            assert!(
+                (mask.get(x as i32, 0)[0] - weight).abs() < 0.001,
+                "picker {id}, sample {x}: {:?}",
+                mask.get(x as i32, 0)
+            );
+        }
+    }
+}
+
+#[test]
+fn lumetri_mask_refinement_and_sharpen_match_full_frame_on_a_tile() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-11, 6, 89, 58);
+    let roi = IRect::new(12, 17, 54, 35);
+    let input = test_image(rect);
+    let fx = builtin("ADBE Lumetri");
+    let params = vec![
+        (11, Value::Float(-0.5)),
+        (29, Value::Float(-67.)),
+        (70, Value::Color([0.4, 0.6, 0.5, 1.])),
+        (1007, Value::Float(80.)),
+        (1008, Value::Float(80.)),
+        (81, Value::Float(40.)),
+        (82, Value::Float(5.)),
+        (89, Value::Float(50.)),
+        (90, Value::Float(45.)),
+        (51, Value::Float(-2.)),
+    ];
+    let full = run(&gpu, Rgba32Float, fx, params.clone(), &input, rect, 1.);
+    let tile = run(&gpu, Rgba32Float, fx, params, &input, roi, 1.);
+    assert_close(&tile, &full, roi, 0.0001, "Lumetri tile");
+}
+
+#[test]
+fn full_layer_histogram_is_stable_across_tiles() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-7, 3, 92, 54);
+    let roi = IRect::new(5, 10, 50, 32);
+    let input = Pixels::new(rect, |x, y| {
+        let f = (x + 7) as f32 / 100.;
+        let a = if y < 10 { 0. } else { 0.5 };
+        [
+            (0.1 + 0.6 * f) * a,
+            (0.2 + 0.6 * f) * a,
+            (0.15 + 0.35 * f) * a,
+            a,
+        ]
+    });
+    for name in [
+        "ADBE AutoLevels",
+        "ADBE AutoContrast",
+        "ADBE AutoColor",
+        "ADBE Equalize",
+    ] {
+        let fx = builtin(name);
+        let full = run(&gpu, Rgba32Float, fx, vec![], &input, rect, 1.);
+        let tile = run(&gpu, Rgba32Float, fx, vec![], &input, roi, 1.);
+        assert_close(&tile, &full, roi, 1e-6, name);
+        assert!(max_diff(&full, &input, rect).0 > 0.05, "{name}");
+        assert_eq!(full.get(15, 5), [0.; 4]);
+        assert_eq!(full.get(15, 25)[3], 0.5);
+    }
+}
+
+#[test]
+fn snap_neutral_uses_the_bottom_right_of_complete_areas() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(128, 64);
+    let fx = builtin("ADBE AutoColor");
+    for spacing in [4, 16] {
+        let input = Pixels::new(rect, |x, y| {
+            let rgb = if y < 6 {
+                [0, 0, 0]
+            } else if y < 12 {
+                [255, 255, 255]
+            } else if y >= 16 && x % spacing < 2 && y % spacing < 2 {
+                if x % spacing == 1 && y % spacing == 1 {
+                    [143, 114, 126]
+                } else {
+                    [130, 137, 117]
+                }
+            } else {
+                [240, 25, 235]
+            };
+            [
+                rgb[0] as f32 / 255.,
+                rgb[1] as f32 / 255.,
+                rgb[2] as f32 / 255.,
+                1.,
+            ]
+        });
+        let render = |snap| {
+            run(
+                &gpu,
+                Rgba32Float,
+                fx,
+                vec![
+                    (3, Value::Float(0.)),
+                    (4, Value::Float(0.)),
+                    (5, Value::Bool(snap)),
+                ],
+                &input,
+                rect,
+                1.,
+            )
+        };
+        let on = render(true);
+        if spacing == 16 {
+            assert_close(&on, &render(false), rect, 1e-6, "under one percent");
+        } else {
+            let [r, g, b, _] = on.get(1, 17);
+            assert!(r.max(g).max(b) - r.min(g).min(b) < 2. / 255.);
+            let [r, g, _, _] = on.get(0, 16);
+            assert!((r - g).abs() > 15. / 255.);
+        }
+    }
+}
+
+#[test]
+fn wheel_uses_custom_stops_and_phase_wraps() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(8, 4);
+    let input = Pixels::new(rect, |_, _| [0.25, 0.25, 0.25, 1.0]);
+    let render = |angle| {
+        run(
+            &gpu,
+            Rgba32Float,
+            builtin("APC Colorama"),
+            vec![
+                (2, Value::Int(2)),
+                (8, Value::Float(angle)),
+                (12, Value::Bytes(b"[[0,1,0,0,1],[0.5,0,0,1,1]]".to_vec())),
+            ],
+            &input,
+            rect,
+            1.,
+        )
+    };
+    let a = render(0.);
+    assert_close(&a, &render(360.), rect, 1e-6, "phase wraps");
+    assert_close(
+        &a,
+        &Pixels::new(rect, |_, _| [0.5, 0., 0.5, 1.]),
+        rect,
+        0.006,
+        "interpolated custom wheel",
+    );
+}
+
+#[test]
+fn colorama_reads_phase_and_mask_from_a_hidden_layer() {
+    use bae_model::PrimPath;
+    use bae_render::{LayerContent, RenderComp, RenderLayer, RenderRequest, Renderer};
+
+    let Some(gpu) = context() else { return };
+    let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 8, 8);
+    let solid = |name: &str, color| {
+        RenderLayer::new(
+            PrimPath::new(&format!("/comps/main/layers/{name}")).unwrap(),
+            LayerContent::Solid {
+                color,
+                width: 8,
+                height: 8,
+            },
+        )
+    };
+    let mut layer = solid("a", [0.0, 0.0, 0.0, 1.0]);
+    let mut control = solid("control", [0.25, 0.0, 0.0, 0.5]);
+    control.visible = false;
+    layer.effects.push(instance(
+        "APC Colorama",
+        vec![
+            (2, Value::Int(10)),
+            (4, Value::PrimRef(control.path.clone())),
+            (6, Value::Int(2)),
+            (28, Value::PrimRef(control.path.clone())),
+            (30, Value::Int(3)),
+            (32, Value::Bool(false)),
+        ],
+    ));
+    comp.layers = vec![layer, control];
+    let mut renderer = Renderer::new(gpu.clone());
+    bae_effects::register(
+        &mut bae_model::EffectRegistry::new(),
+        renderer.effects_mut(),
+    );
+    let frame = renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    let image = bae_gpu::transfer::read_texture(&gpu, &frame.image.texture).unwrap();
+    for (channel, expected) in image
+        .pixel(4, 4)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip([0.25, 0.5, 0.0, 0.5])
+    {
+        let actual = half::f16::from_le_bytes(*channel).to_f32();
+        assert!((actual - expected).abs() < 0.01, "{actual} vs {expected}");
+    }
+}
+
+#[test]
+fn legacy_corrections_clip_straight_hdr_before_premultiplying() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(3, 2);
+    let input = Pixels::new(rect, |_, _| [-0.25, 0.75, 0.25, 0.5]);
+    let expected = Pixels::new(rect, |_, _| [0.0, 0.5, 0.25, 0.5]);
+    for name in [
+        "ADBE Gamma/Pedestal/Gain2",
+        "ADBE Leave Color",
+        "ADBE SelectiveColor",
+    ] {
+        let actual = run(&gpu, Rgba32Float, builtin(name), vec![], &input, rect, 1.);
+        assert_close(&actual, &expected, rect, 1e-5, name);
+    }
+    for (name, id, value) in [
+        ("APC Colorama", 36, 100.),
+        ("ADBE AutoLevels", 5, 100.),
+        ("ADBE AutoContrast", 5, 100.),
+        ("ADBE AutoColor", 6, 100.),
+        ("ADBE Equalize", 2, 0.),
+    ] {
+        let original = run(
+            &gpu,
+            Rgba32Float,
+            builtin(name),
+            vec![(id, Value::Float(value))],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&original, &expected, rect, 0.005, name);
+    }
+    let overwhite = Pixels::new(rect, |_, _| [0.75, 0.75, 0.75, 0.5]);
+    let white = Pixels::new(rect, |_, _| [0.5; 4]);
+    let actual = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Broadcast Colors"),
+        vec![],
+        &overwhite,
+        rect,
+        1.,
+    );
+    assert_close(&actual, &white, rect, 1e-5, "broadcast white");
+}
+
+#[test]
+fn cineon_reuses_the_pass_with_the_current_white_point() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(1, 1);
+    let input = Pixels::new(rect, |_, _| [1.; 4]);
+    let cineon = builtin("ADBE Cineon Converter2");
+    for white in [500., 800., 500.] {
+        let out = run(
+            &gpu,
+            F32,
+            cineon,
+            vec![
+                (1, Value::Int(1)),
+                (4, Value::Float(white)),
+                (8, Value::Float(0.)),
+                (9, Value::Float(1.)),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        let expected = white as f32 / 1023.;
+        assert!((out.get(0, 0)[0] - expected).abs() < 0.0001);
+    }
+}
+
+#[test]
+fn ocio_file_and_cdl_apply_embedded_grades_on_gpu() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(4, 4);
+    let pixels = Pixels::new(rect, |_, _| [0.15, 0.1, 0.05, 0.5]);
+    let cdl =
+        b"test.cc\0<ColorCorrection><SOPNode><Slope>2 1 1</Slope></SOPNode></ColorCorrection>"
+            .to_vec();
+    let cube = b"test.cube\0LUT_1D_SIZE 2\n0 0 0\n2 1 1\n".to_vec();
+    for (name, id, bytes) in [
+        ("ADBE OCIO CDL Transform", 6, cdl),
+        ("ADBE OCIO FILE Transform", 5, cube),
+    ] {
+        let out = run(
+            &gpu,
+            F32,
+            builtin(name),
+            vec![(id, Value::Bytes(bytes))],
+            &pixels,
+            rect,
+            1.,
+        );
+        for (actual, expected) in out.get(2, 2).into_iter().zip([0.3, 0.1, 0.05, 0.5]) {
+            assert!((actual - expected).abs() < 0.0001, "{name}: {actual}");
+        }
+    }
+}
+
+#[test]
+fn three_way_preserves_alpha_and_limits_saturation_to_the_selected_range() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(12, 7);
+    let input = Pixels::new(rect, |x, _| {
+        if x < 6 {
+            [0.1, 0.05, 0., 0.5]
+        } else {
+            [0.5, 0.45, 0.4, 0.5]
+        }
+    });
+    let fx = builtin("ADBE Three-Way Color Corrector");
+    let neutral = run(&gpu, Rgba32Float, fx, vec![], &input, rect, 1.);
+    assert_close(&neutral, &input, rect, 0.00001, "neutral correction");
+    let changed = run(
+        &gpu,
+        Rgba32Float,
+        fx,
+        vec![(41, Value::Float(0.))],
+        &input,
+        rect,
+        1.,
+    );
+    assert!(
+        (changed.data[0][0] - changed.data[0][2]).abs() < 0.00001,
+        "shadow pixel {:?}",
+        changed.data[0]
+    );
+    assert_eq!(changed.data[0][3], 0.5);
+    assert_close(
+        &changed,
+        &input,
+        IRect::new(6, 0, 12, 7),
+        0.00001,
+        "highlights",
+    );
+}

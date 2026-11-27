@@ -1,0 +1,53 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "shift-channels"
+name = "Shift Channels"
+category = "Channel"
+implementation = "wgsl"
+ae_match_names = ["ADBE Shift Channels"]
+flags = ["pixel-independent"]
+shader = "shaders/shift_channels.wgsl"
+includes = ["shaders/channel_math.wgsl"]
+identity_when = "params.alpha == 1 && params.red == 2 && params.green == 3 && params.blue == 4"
+
+[[effect.param]]
+id = 1
+key = "alpha"
+type = "popup"
+name = "Take Alpha From"
+default = 1
+choices = ["Alpha", "Red", "Green", "Blue", "Luminance", "Hue", "Lightness", "Saturation", "Full On", "Full Off"]
+
+[[effect.param]]
+id = 2
+key = "red"
+type = "popup"
+name = "Take Red From"
+default = 2
+choices = ["Alpha", "Red", "Green", "Blue", "Luminance", "Hue", "Lightness", "Saturation", "Full On", "Full Off"]
+
+[[effect.param]]
+id = 3
+key = "green"
+type = "popup"
+name = "Take Green From"
+default = 3
+choices = ["Alpha", "Red", "Green", "Blue", "Luminance", "Hue", "Lightness", "Saturation", "Full On", "Full Off"]
+
+[[effect.param]]
+id = 4
+key = "blue"
+type = "popup"
+name = "Take Blue From"
+default = 4
+choices = ["Alpha", "Red", "Green", "Blue", "Luminance", "Hue", "Lightness", "Saturation", "Full On", "Full Off"]

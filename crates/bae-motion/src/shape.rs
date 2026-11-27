@@ -188,6 +188,8 @@ pub struct AddShape;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct AddShapeParams {
+    #[serde(flatten)]
+    pub defaults: crate::layer::NewLayerDefaults,
     /// Shape layer to add the shape to (as a new group at the top of its
     /// contents). Omit to create a new shape layer in `comp`.
     #[serde(default)]
@@ -201,10 +203,7 @@ pub struct AddShapeParams {
     /// New layer: position in the layer stack, 0 = top (default 0).
     #[serde(default)]
     pub index: Option<usize>,
-    /// New layer with a parametric shape: put the layer's Anchor Point at the
-    /// shape's center and Position there in the comp, so the shape stays put (AE
-    /// preference "Center Anchor Point in New Shape Layers"; default false: the
-    /// anchor stays at the comp center, as AE's tutorials show).
+    /// Center the anchor on the first shape in a new layer (AE preference).
     #[serde(default)]
     pub center_anchor: Option<bool>,
     #[serde(flatten)]
@@ -248,6 +247,7 @@ impl Command for AddShape {
         // Check the geometry before creating anything.
         let outline = p.geometry.to_path([0.0, 0.0])?;
         let parametric = p.geometry.kind != ShapeKind::Path && !p.bezier;
+        let mut group_position = p.geometry.position;
         let layer = match &p.layer {
             Some(layer) => {
                 if query::layer_kind(tx.stage(), layer).as_deref() != Some("shape") {
@@ -263,6 +263,23 @@ impl Command for AddShape {
                     .ok_or_else(|| fail("give `layer` or `comp`"))?;
                 let info = query::comp_info(tx.stage(), &comp)
                     .ok_or_else(|| fail(format!("{comp} is not a comp")))?;
+                let mut path_anchor = None;
+                let mut position = None;
+                if p.center_anchor.unwrap_or(false) {
+                    let [x, y] = if p.geometry.kind == ShapeKind::Path {
+                        // Pen vertices keep their original layer coordinates.
+                        let center = crate::path::drawing_center(&outline);
+                        path_anchor = Some(center);
+                        center
+                    } else {
+                        group_position = [0.0; 2];
+                        p.geometry.position
+                    };
+                    position = Some([
+                        f64::from(info.width) / 2.0 + x,
+                        f64::from(info.height) / 2.0 + y,
+                    ]);
+                }
                 let out = CreateLayer.run(
                     tx,
                     CreateLayerParams {
@@ -272,32 +289,28 @@ impl Command for AddShape {
                         source: None,
                         index: p.index,
                         color: None,
+                        solids_folder_name: None,
+                        solids_folder_label: None,
                         size: None,
                         text: None,
                         font_size: None,
                         shape: None,
-                        position: None,
-                        start: None,
+                        position,
+                        defaults: p.defaults,
                         pixel_aspect: None,
                         camera: None,
                         light: None,
-                        label: None,
+
+                        position_3d: None,
+                        point_of_interest: None,
                     },
                 )?;
-                let center = [f64::from(info.width) / 2.0, f64::from(info.height) / 2.0];
-                if p.center_anchor.unwrap_or(false) && p.geometry.kind != ShapeKind::Path {
-                    let [x, y] = p.geometry.position;
+                if let Some([x, y]) = path_anchor {
                     set(
                         tx,
                         &out.path,
                         "transform:anchor_point",
                         Value::Vec3([x, y, 0.0]),
-                    )?;
-                    set(
-                        tx,
-                        &out.path,
-                        "transform:position",
-                        Value::Vec3([center[0] + x, center[1] + y, 0.0]),
                     )?;
                 }
                 out.path
@@ -321,7 +334,7 @@ impl Command for AddShape {
         create(tx, &group, PrimType::SHAPE_GROUP, Some(0))?;
         set(tx, &group, "name", Value::String(group_name))?;
         if p.geometry.kind != ShapeKind::Path {
-            let [x, y] = p.geometry.position;
+            let [x, y] = group_position;
             set(tx, &group, "transform:position", Value::Vec2([x, y]))?;
         }
         let inner = child(&group, query::CONTENTS)?;
@@ -404,6 +417,165 @@ impl Command for AddShape {
 }
 
 // ---------------------------------------------------------------------------
+
+/// The items of AE's shape Add menu: `(id, English base name, prim type,
+/// operator)`; the base name is numbered ("Trim Paths 1").
+const ADD_ITEMS: &[(&str, &str, &str, Option<&str>)] = &[
+    ("group", "Group", "ShapeGroup", None),
+    ("rect", "Rectangle Path", "Rect", None),
+    ("ellipse", "Ellipse Path", "Ellipse", None),
+    ("polystar", "Polystar Path", "Star", None),
+    ("path", "Path", "Path", None),
+    ("fill", "Fill", "Fill", None),
+    ("stroke", "Stroke", "Stroke", None),
+    ("gradient_fill", "Gradient Fill", "GradientFill", None),
+    ("gradient_stroke", "Gradient Stroke", "GradientStroke", None),
+    ("merge", "Merge Paths", "ShapeOperator", Some("merge")),
+    ("offset", "Offset Paths", "ShapeOperator", Some("offset")),
+    (
+        "pucker_bloat",
+        "Pucker & Bloat",
+        "ShapeOperator",
+        Some("pucker_bloat"),
+    ),
+    ("repeater", "Repeater", "ShapeOperator", Some("repeater")),
+    (
+        "round_corners",
+        "Round Corners",
+        "ShapeOperator",
+        Some("round_corners"),
+    ),
+    ("trim", "Trim Paths", "ShapeOperator", Some("trim")),
+    ("twist", "Twist", "ShapeOperator", Some("twist")),
+    (
+        "wiggle_paths",
+        "Wiggle Paths",
+        "ShapeOperator",
+        Some("wiggle_paths"),
+    ),
+    (
+        "wiggle_transform",
+        "Wiggle Transform",
+        "ShapeOperator",
+        Some("wiggle_transform"),
+    ),
+    ("zig_zag", "Zig Zag", "ShapeOperator", Some("zig_zag")),
+];
+
+/// The ids [`AddShapeItem`] takes, in AE's Add menu order.
+pub fn add_item_ids() -> impl Iterator<Item = &'static str> {
+    ADD_ITEMS.iter().map(|(id, ..)| *id)
+}
+
+pub struct AddShapeItem;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AddShapeItemParams {
+    /// Where to add: a shape layer (at the end of its contents), a shape group
+    /// (at the end of its contents) or a shape item (right after it, AE: below
+    /// the selected item). One item is added per target.
+    pub targets: Vec<PrimPath>,
+    /// group, rect, ellipse, polystar, path, fill, stroke, gradient_fill,
+    /// gradient_stroke, merge, offset, pucker_bloat, repeater, round_corners,
+    /// trim, twist, wiggle_paths, wiggle_transform, zig_zag.
+    pub item: String,
+    /// Fill and Stroke: straight RGBA 0–1 (default the schema's).
+    #[serde(default)]
+    pub color: Option<[f64; 4]>,
+    /// Stroke: width in pixels.
+    #[serde(default)]
+    pub width: Option<f64>,
+}
+
+/// Output of `shape.add_item`: the new items, one per target.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AddShapeItemOutput {
+    pub items: Vec<PrimPath>,
+}
+
+/// The folder an item goes into for `target`, and its index there (`None`:
+/// at the end).
+fn add_place(
+    stage: &bae_model::Stage,
+    target: &PrimPath,
+) -> Result<(PrimPath, Option<usize>), CommandError> {
+    if query::layer_kind(stage, target).as_deref() == Some("shape") {
+        return Ok((child(target, query::CONTENTS)?, None));
+    }
+    let view = stage
+        .prim(target)
+        .ok_or_else(|| fail(format!("{target} does not exist")))?;
+    if view.is_a(&PrimType::SHAPE_GROUP) {
+        return Ok((child(target, query::CONTENTS)?, None));
+    }
+    let folder = target
+        .parent()
+        .ok_or_else(|| fail(format!("{target} is not in a shape layer")))?;
+    let index = stage
+        .children(&folder)
+        .iter()
+        .position(|c| c == target)
+        .map(|i| i + 1);
+    Ok((folder, index))
+}
+
+impl Command for AddShapeItem {
+    type Params = AddShapeItemParams;
+    type Output = AddShapeItemOutput;
+    const ID: &'static str = "shape.add_item";
+    const TITLE: &'static str = "Add Shape Item";
+    const DESCRIPTION: &'static str = "AE's shape Add menu: add a group, path, fill, stroke or path operator (Trim Paths, Repeater …) to shape layers or groups, or right after a shape item.";
+
+    fn run(
+        &self,
+        tx: &mut bae_model::Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<AddShapeItemOutput, CommandError> {
+        let &(_, base_en, ty, operator) = ADD_ITEMS
+            .iter()
+            .find(|(id, ..)| *id == p.item)
+            .ok_or_else(|| fail(format!("unknown shape item {:?}", p.item)))?;
+        if p.targets.is_empty() {
+            return Err(fail("give at least one target"));
+        }
+        let mut items = Vec::new();
+        for target in &p.targets {
+            let layer = query::owning_layer(tx.stage(), target)
+                .ok_or_else(|| fail(format!("{target} is not in a shape layer")))?;
+            ensure_unlocked(tx.stage(), [&layer])?;
+            let (folder, index) = add_place(tx.stage(), target)?;
+            if !tx.stage().has_prim(&folder) {
+                create(tx, &folder, PrimType::FOLDER, None)?;
+            }
+            let base = crate::names::localized(base_en);
+            let name = query::next_numbered_name(tx.stage(), &folder, base);
+            let path = child(
+                &folder,
+                &query::unique_child_name(tx.stage(), &folder, &name),
+            )?;
+            create(tx, &path, PrimType::new(ty), index)?;
+            set(tx, &path, "name", Value::String(name))?;
+            if let Some(op) = operator {
+                set(tx, &path, "operator", Value::Enum(op.into()))?;
+            }
+            if ty == "ShapeGroup" {
+                create(tx, &child(&path, query::CONTENTS)?, PrimType::FOLDER, None)?;
+            }
+            if matches!(ty, "Fill" | "Stroke")
+                && let Some(c) = p.color
+            {
+                set(tx, &path, "color", Value::Color(c))?;
+            }
+            if ty == "Stroke"
+                && let Some(w) = p.width
+            {
+                set(tx, &path, "width", Value::Float(w))?;
+            }
+            items.push(path);
+        }
+        Ok(AddShapeItemOutput { items })
+    }
+}
 
 /// AE 26's default label colors in label order (1 Red … 16 Dark Green).
 const LABEL_RGB: [[u8; 3]; 16] = [

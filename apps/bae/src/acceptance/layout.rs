@@ -1,9 +1,9 @@
 //! #133 / #134: the default workspace and the Keyboard Shortcuts window at
 //! common screens and display scales. Sizes are window client areas in
-//! logical points (physical pixels / scale): every widget of a panel must lie
-//! inside the panel, and no panel may need more room than it gets.
+//! logical points (physical pixels / scale). Panel contents fit their frame,
+//! including the scrollable contents of an expanded Render Queue.
 
-use bae_ui::dock::{PanelArea, panel_areas};
+use bae_ui::dock::{Dock, PanelArea, panel_areas};
 use bae_ui_motion::render_queue::ItemStatus;
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, vec2};
@@ -70,7 +70,22 @@ fn layout_problems(h: &Ui) -> Vec<String> {
     let mut out = Vec::new();
     for a in &areas {
         let panel = a.panel.as_str();
-        if a.overflows() {
+        let Some(pane) = find_pane(root.accesskit_node(), panel) else {
+            out.push(format!("{panel}: no accessibility pane"));
+            continue;
+        };
+        let mut nodes = Vec::new();
+        widgets(pane, &mut nodes);
+        let ppp = h.ctx.pixels_per_point();
+        // Expanded output modules can be taller than the Timeline frame. Only
+        // a vertical scrollbar inside the queue makes that extra height reachable.
+        let inside = a.rect.expand(1.0);
+        let queue_scrolls = panel == "render_queue"
+            && nodes.iter().any(|n| {
+                let r = rect_of(n, ppp);
+                n.role() == Role::ScrollBar && r.height() > r.width() && inside.contains_rect(r)
+            });
+        if a.overflows() && (!queue_scrolls || a.content.x > a.rect.width() + 0.5) {
             out.push(format!(
                 "{panel}: needs {:.0}×{:.0}, has {:.0}×{:.0}",
                 a.content.x,
@@ -79,16 +94,17 @@ fn layout_problems(h: &Ui) -> Vec<String> {
                 a.rect.height()
             ));
         }
-        let Some(pane) = find_pane(root.accesskit_node(), panel) else {
-            out.push(format!("{panel}: no accessibility pane"));
-            continue;
-        };
-        let mut nodes = Vec::new();
-        widgets(pane, &mut nodes);
-        let inside = a.rect.expand(1.0);
         for n in nodes {
-            let r = rect_of(&n, h.ctx.pixels_per_point());
-            if r.width() <= 0.0 || r.height() <= 0.0 || inside.contains_rect(r) {
+            let r = rect_of(&n, ppp);
+            let mut bounds = inside;
+            if queue_scrolls
+                && std::iter::successors(n.parent(), |p| p.parent())
+                    .take_while(|p| p.role() != Role::Pane)
+                    .any(|p| p.role() == Role::ScrollView)
+            {
+                bounds.max.y = bounds.max.y.max(a.rect.top() + a.content.y + 1.0);
+            }
+            if r.width() <= 0.0 || r.height() <= 0.0 || bounds.contains_rect(r) {
                 continue;
             }
             out.push(format!(
@@ -112,15 +128,21 @@ fn layout_problems(h: &Ui) -> Vec<String> {
 /// The tab of a docked panel (its hit area spans the tab bar's height),
 /// when it is shown in the tab bar rather than only in the » menu.
 fn tab(h: &Ui, title: &str) -> Option<Rect> {
-    h.query_all_by_label(bae_ui::tr(title))
+    h.query_all_by_role_and_label(Role::Button, title)
         .map(|n| n.rect())
         .find(|r| (r.height() - bae_ui::theme::metrics::TAB_BAR_H).abs() < 1.0 && r.width() >= 30.0)
 }
 
-fn click_tab(h: &mut Ui, title: &str) {
+fn click_tab(h: &mut Ui, title: &str, panel: &str) {
     let r = tab(h, title).unwrap_or_else(|| panic!("no {title} tab"));
     click_at(h, r.center());
     settle(h);
+    assert!(
+        panel_areas(&h.ctx)
+            .iter()
+            .any(|area| area.panel.as_str() == panel),
+        "{title} did not show panel {panel}"
+    );
 }
 
 /// The default workspace with a comp, a solid and a Render Queue item in
@@ -139,14 +161,38 @@ fn check_default_workspace_at(screen: &str, size: [f32; 2], ppp: f32) -> Vec<Str
         }
     };
     check(&mut h, "empty project", &mut problems);
+    let layout = h
+        .state_mut()
+        .workspace
+        .state()
+        .current
+        .remove("motion")
+        .unwrap();
+    let dock = Dock::from_layout(layout);
+    let project_frame = dock
+        .frame_of(&"project".into())
+        .expect("Project in the default workspace");
+    assert_eq!(
+        dock.frame_of(&"effect_controls".into()),
+        Some(project_frame)
+    );
+    let project = bae_ui::tr("Project");
+    let effects = bae_ui::tr("Effect Controls");
+    assert!(
+        tab(&h, effects).is_some(),
+        "{screen}: no empty Effect Controls tab"
+    );
     comp_with(&mut h, &["motion.layer.new.solid"]);
     check(&mut h, "comp with a solid", &mut problems);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     check(&mut h, "render queue: queued", &mut problems);
     // Project, Effect Controls and Render Queue share the left column: all
     // three tabs stay in the tab bar (shortened if need be), none only in ».
-    for title in ["Project", "Effect Controls", "Render Queue"] {
+    // Effect Controls names the selected layer even before its tab is activated.
+    let solid = h.state().layers().into_iter().next().expect("solid layer");
+    let effects = format!("{effects} {}", h.state().name(&solid));
+    for title in [project, &effects, bae_ui::tr("Render Queue")] {
         if tab(&h, title).is_none() {
             problems.push(format!("{screen} {size:?}: the {title} tab is hidden"));
         }
@@ -183,9 +229,9 @@ fn check_default_workspace_at(screen: &str, size: [f32; 2], ppp: f32) -> Vec<Str
         h.state().render_queue().lock().item_mut(id).unwrap().status = status;
         check(&mut h, &format!("render queue: {what}"), &mut problems);
     }
-    click_tab(&mut h, "Effect Controls");
+    click_tab(&mut h, &effects, "effect_controls");
     check(&mut h, "effect controls", &mut problems);
-    click_tab(&mut h, "Project");
+    click_tab(&mut h, project, "project");
     check(&mut h, "project", &mut problems);
     // The other built-in workspaces, with the same project.
     for ws in ["review", "agent"] {
@@ -224,8 +270,10 @@ fn default_workspace_fits_common_screens_in_chinese() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// The Keyboard Shortcuts window: command names on one line, the column as
-/// wide as they need, the window resizable and closed by Escape (#134).
+/// The Keyboard Shortcuts window as AE's (docs/reference/ae/mac/ui/keyboard-shortcuts.json):
+/// AE's size within the screen; the Preset and Commands menus, the preset
+/// buttons, search, the command tree left of the Key table, Undo / Clear,
+/// Cancel / OK; command names on one line (#134); resizable; Escape closes it.
 #[test]
 fn keyboard_shortcuts_window_columns() {
     let mut h = gui_sized(Gui::new(), vec2(1440.0, 880.0));
@@ -238,33 +286,46 @@ fn keyboard_shortcuts_window_columns() {
             .map(|n| n.rect())
     };
     let before = window(&h).expect("Keyboard Shortcuts window");
-    let line = |h: &Ui, text: &str| {
-        h.query_all_by_label(text)
-            .map(|n| n.rect())
-            .min_by(|a, b| a.top().total_cmp(&b.top()))
-            .unwrap_or_else(|| panic!("no row {text}"))
-    };
-    // Long names, from the #134 screenshots (since #140 the keyframe toggle is
-    // listed per property: Alt+Shift+A is the longest).
-    let names = ["Anchor Point: Add or Remove Keyframe", "Accept Proposal"];
-    for name in names {
-        let r = line(&h, name);
-        assert!(r.height() < 20.0, "{name} wraps: {r:?}");
-    }
-    // The shortcut column starts right of the longest name and uses the rest.
-    let plus: Vec<Rect> = h
-        .query_all_by_label("+")
-        .map(|n| n.rect())
-        .filter(|r| before.contains_rect(*r))
-        .collect();
-    assert!(!plus.is_empty(), "no + buttons");
-    let name_right = line(&h, names[0]).right();
-    let first_plus = plus.iter().map(|r| r.left()).fold(f32::MAX, f32::min);
     assert!(
-        first_plus > name_right && first_plus < before.center().x + before.width() * 0.25,
-        "shortcut column at {first_plus}, names end at {name_right}, window {before:?}"
+        before.width() > 1350.0 && before.height() > 800.0,
+        "not AE's size (1520×887) within the screen: {before:?}"
     );
-    // Resizable: drag the bottom-right corner.
+    for label in [
+        "Preset:",
+        "Commands:",
+        "Save As...",
+        "Delete",
+        "Copy To Clipboard",
+        "Search",
+        "Undo",
+        "Clear",
+        "Cancel",
+        "OK",
+        "Application",
+    ] {
+        assert!(
+            h.query_all_by_label(label)
+                .any(|n| before.contains_rect(n.rect())),
+            "no {label} in the window"
+        );
+    }
+    // The search field has the focus: a long name, found, on one row of the
+    // tree, left of the Key table.
+    type_text(&mut h, "anchor point: add");
+    settle(&mut h);
+    let name = "Anchor Point: Add or Remove Keyframe";
+    let row = h
+        .query_all_by_label(name)
+        .map(|n| n.rect())
+        .find(|r| before.contains_rect(*r))
+        .unwrap_or_else(|| panic!("no row {name}"));
+    assert!(row.height() < 24.0, "{name} is not one row: {row:?}");
+    let modifiers = find_text(&h, "Modifiers").expect("the Key table");
+    assert!(
+        row.right() < modifiers.left() && row.width() > before.width() * 0.4,
+        "tree {row:?}, Key table at {modifiers:?}"
+    );
+    // Resizable: drag the bottom-right corner in.
     let corner = before.right_bottom() - vec2(3.0, 3.0);
     h.input_mut().events.extend([
         Event::PointerMoved(corner),
@@ -277,13 +338,13 @@ fn keyboard_shortcuts_window_columns() {
     ]);
     frame(&mut h);
     for i in 1..=10 {
-        let p = corner + vec2(20.0 * i as f32, 10.0 * i as f32);
+        let p = corner - vec2(20.0 * i as f32, 10.0 * i as f32);
         send(&mut h, Event::PointerMoved(p));
     }
     send(
         &mut h,
         Event::PointerButton {
-            pos: corner + vec2(200.0, 100.0),
+            pos: corner - vec2(200.0, 100.0),
             button: PointerButton::Primary,
             pressed: false,
             modifiers: Modifiers::NONE,
@@ -292,7 +353,7 @@ fn keyboard_shortcuts_window_columns() {
     settle(&mut h);
     let after = window(&h).expect("window after resize");
     assert!(
-        after.width() > before.width() + 150.0 && after.height() > before.height() + 50.0,
+        after.width() < before.width() - 150.0 && after.height() < before.height() - 50.0,
         "not resizable: {before:?} → {after:?}"
     );
     // Escape closes it.
@@ -355,7 +416,7 @@ fn narrow_windows_scroll_instead_of_clipping() {
     for size in [[1280.0, 720.0], [1024.0, 640.0], [900.0, 600.0]] {
         let mut h = gui_scaled(Gui::new(), vec2(size[0], size[1]), 2.0);
         comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         settle(&mut h);
         let areas = panel_areas(&h.ctx);
         // More than rounding (a 152-point column holding 153.4 points of
@@ -458,26 +519,92 @@ fn keyboard_shortcuts_window_in_chinese_in_a_small_retina_window() {
         screen.expand(1.0).contains_rect(w),
         "window {w:?} outside the screen {screen:?}"
     );
-    // Long Chinese command names stay on one line.
+    // Long Chinese command names stay on one row (found with the search field,
+    // which has the focus).
     let mut checked = 0;
-    // (Since #140 the keyframe toggle is listed per property; Opacity's row sorts
-    // near the top in Chinese.)
     for en in [
         "Opacity: Add or Remove Keyframe",
         "Accept Proposal",
         "Go to Previous Keyframe",
     ] {
         let zh = bae_ui::tr(en);
+        type_text(&mut h, zh);
+        settle(&mut h);
         if let Some(r) = h
             .query_all_by_label(zh)
             .map(|n| n.rect())
             .find(|r| w.contains_rect(*r))
         {
-            assert!(r.height() < 20.0, "{zh} wraps: {r:?}");
+            assert!(r.height() < 24.0, "{zh} is not one row: {r:?}");
             checked += 1;
+        }
+        for _ in zh.chars() {
+            key(&mut h, Modifiers::NONE, Key::Backspace);
         }
     }
     assert!(checked >= 1, "no command rows found in the window");
     key(&mut h, Modifiers::NONE, Key::Escape);
     assert!(window(&h).is_none(), "Escape did not close it");
+}
+
+/// #228: the Render Queue's controls keep the panel padding from its left
+/// and right edges (the Output To field no longer touches the border).
+#[test]
+fn render_queue_content_is_inset_from_the_panel_edges() {
+    let pad = bae_ui::theme::metrics::PANEL_PADDING;
+    for size in [[1440.0, 880.0], [1920.0, 1009.0]] {
+        let mut h = gui_sized(Gui::new(), vec2(size[0], size[1]));
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+        settle(&mut h);
+        let area = panel_areas(&h.ctx)
+            .into_iter()
+            .find(|a| a.panel.as_str() == "render_queue")
+            .expect("render queue drawn");
+        let pane = find_pane(h.root().accesskit_node(), "render_queue").expect("pane");
+        let mut nodes = Vec::new();
+        widgets(pane, &mut nodes);
+        let ppp = h.ctx.pixels_per_point();
+        let mut touching = Vec::new();
+        for n in &nodes {
+            let r = rect_of(n, ppp);
+            // Scrollbars belong at the viewport edge. Padding is for content.
+            if n.role() == Role::ScrollBar || r.width() <= 0.0 {
+                continue;
+            }
+            if r.left() < area.rect.left() + pad - 0.5 || r.right() > area.rect.right() - pad + 0.5
+            {
+                touching.push(format!(
+                    "{:?} {:?} {r:?}",
+                    n.role(),
+                    n.label().unwrap_or_default()
+                ));
+            }
+        }
+        assert!(!nodes.is_empty());
+        assert!(
+            touching.is_empty(),
+            "{size:?}: panel {:?}, within {pad} pt of an edge: {touching:#?}",
+            area.rect
+        );
+        // A frame-range field below the fold must be reachable with the wheel.
+        let frames_end = |h: &Ui| queue_control(h, 1, "Frames · End").unwrap().rect();
+        if !area.rect.contains_rect(frames_end(&h)) {
+            send(&mut h, Event::PointerMoved(area.rect.center()));
+            send(
+                &mut h,
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(0.0, -area.content.y),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                },
+            );
+            settle(&mut h);
+            assert!(
+                area.rect.contains_rect(frames_end(&h)),
+                "{size:?}: frame end unreachable"
+            );
+        }
+    }
 }

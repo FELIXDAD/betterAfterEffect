@@ -97,6 +97,50 @@ fn at(img: &Image, rect: IRect, x: i32, y: i32) -> [u8; 4] {
     img.texel((x - rect.x0) as u32, (y - rect.y0) as u32)
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn identical_drawings_share_a_texture_and_keep_each_layers_scale() {
+    use bae_render::{CustomContent, SourceProvider};
+    use bae_vector::render::ShapeProvider;
+    let Some(gpu) = gpu() else { return };
+    let provider = ShapeProvider::new();
+    let source = |index: u64, color| {
+        let root = ShapeGroup::new()
+            .with(rect(40.0, 20.0, 0.0, 0.0))
+            .with(fill(color));
+        provider
+            .source(&CustomContent {
+                provider: bae_vector::SHAPE_PROVIDER.into(),
+                prim: bae_model::PrimPath::new(&format!("/shape_{index}")).unwrap(),
+                size: None,
+                hash: index,
+                data: Arc::new(VectorScene::from_group(&root)),
+            })
+            .unwrap()
+    };
+    let raster = |s: &dyn LayerSource, scale| {
+        testing::render_source(
+            &gpu,
+            s,
+            &SourceRequest {
+                roi: s.bounds(),
+                scale,
+                time: Time::ZERO,
+            },
+        )
+        .unwrap()
+        .texture
+    };
+    let a = source(1, RED);
+    let b = source(2, RED);
+    let c = source(3, BLUE);
+    let first = raster(&*a, 1.0);
+    assert_eq!(raster(&*b, 1.0), first);
+    assert_ne!(raster(&*b, 0.5), first);
+    assert_eq!(raster(&*a, 1.0), first);
+    assert_ne!(raster(&*c, 1.0), first);
+}
+
 #[test]
 fn filled_rectangle_around_the_layer_origin() {
     let Some(gpu) = gpu() else { return };
@@ -258,6 +302,9 @@ fn linear_gradient_in_group_space() {
 fn shared_renderer_is_reused() {
     let Some(gpu) = gpu() else { return };
     let a = VelloRenderer::shared(&gpu).unwrap();
+    let kept = Arc::downgrade(&a);
+    drop(a);
+    // Kept for the context's lifetime, not just while someone holds it.
     let b = VelloRenderer::shared(&gpu).unwrap();
-    assert!(Arc::ptr_eq(&a, &b));
+    assert!(std::ptr::eq(kept.as_ptr(), Arc::as_ptr(&b)));
 }

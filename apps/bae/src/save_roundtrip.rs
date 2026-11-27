@@ -285,6 +285,7 @@ fn ctrl_s_right_after_the_second_keyframe_writes_it() {
             &mut doc,
             &mut NoQuestions,
             &Invocation::new(bae_ui::action::ids::SAVE),
+            None,
         );
         assert_eq!(saved, Some(FileOutcome::Saved), "{name}");
         assert!(!doc.is_dirty());
@@ -683,8 +684,8 @@ mod ui_flow {
     }
 
     /// The 5090 final acceptance: keys go to the focused widget before the
-    /// motion shortcuts. Space plays with nothing focused; in the Render Queue's
-    /// output field it types a space (paths with spaces) and does not play.
+    /// motion shortcuts. Space plays with nothing focused; in a focused text
+    /// field it enters a space and leaves playback stopped.
     #[test]
     fn space_types_in_text_fields_and_plays_otherwise() {
         let mut ui = Ui::new();
@@ -708,46 +709,45 @@ mod ui_flow {
         ui.press(Key::Space, Modifiers::NONE);
         assert!(!session.lock().is_playing());
 
-        // Composition > Add to Render Queue, then Tab to its output field.
-        ui.press(Key::M, Modifiers::COMMAND);
+        // Add to Render Queue uses Ctrl+M on Windows and Control+Command+M on macOS.
+        ui.press(Key::M, Modifiers::COMMAND | Modifiers::CTRL);
         let queue = ui
             .app
             .resource::<bae_ui_motion::SharedRenderQueue>()
             .unwrap()
             .clone();
         assert_eq!(queue.lock().items().len(), 1);
-        let before = queue.lock().items()[0].output.clone();
-        let mut typed = false;
+        // The output link uses a native save dialog. Tab to a workspace text field.
         for _ in 0..300 {
             ui.press(Key::Tab, Modifiers::NONE);
-            if !ui.ctx.text_edit_focused() {
-                continue;
-            }
-            ui.frame(vec![
-                Event::Key {
-                    key: Key::Space,
-                    physical_key: Some(Key::Space),
-                    pressed: true,
-                    repeat: false,
-                    modifiers: Modifiers::NONE,
-                },
-                Event::Text(" ".into()),
-                Event::Text("v2".into()),
-            ]);
-            assert!(
-                !session.lock().is_playing(),
-                "Space in a text field must not play"
-            );
-            if queue.lock().items()[0].output != before {
-                typed = true;
+            if ui.ctx.text_edit_focused() {
                 break;
             }
         }
-        assert!(typed, "Tab reaches the Render Queue output field");
         assert!(
-            queue.lock().items()[0].output.contains(" v2"),
-            "{}",
-            queue.lock().items()[0].output
+            ui.ctx.text_edit_focused(),
+            "Tab reaches a workspace text field"
+        );
+        let field = ui.ctx.memory(|m| m.focused()).unwrap();
+        ui.press(Key::A, Modifiers::COMMAND);
+        ui.frame(vec![
+            Event::Key {
+                key: Key::Space,
+                physical_key: Some(Key::Space),
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            },
+            Event::Text(" v2".into()),
+        ]);
+        assert!(
+            !session.lock().is_playing(),
+            "Space types in a focused text field"
+        );
+        let state = egui::TextEdit::load_state(&ui.ctx, field).unwrap();
+        assert_eq!(
+            state.cursor.char_range().unwrap().primary.index,
+            egui::text::CharIndex(3)
         );
     }
 }

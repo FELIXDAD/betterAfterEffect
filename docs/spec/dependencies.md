@@ -201,6 +201,8 @@ wgpu v30.0.2
 | notify | 8.2.2 | 关默认，只开 `macos_fsevent` | 09（`bae-sync` 的可选 feature `watch`，共享目录模式的文件监听） | 8.x 最新稳定版（9.0 还是 rc）；macOS 走 FSEvents（objc2-core-services，和已 pin 的 objc2 0.3 同一套），Windows 走 ReadDirectoryChangesW |
 | tungstenite | 0.30.0 | 关默认，只开 `handshake`（不带 TLS） | 09（`bae-sync` 的可选 feature `hub`，连协作服务的 WebSocket 客户端）；10（bae-hub 经 `bae-sync` 的 `HubTransport::accept` 用它做服务端） | 最新；同步 API，放在 `ThreadedTransport` 的后台线程里跑；axum 的 WebSocket 底层也是它。局域网 Hub 暂不需要 TLS |
 
+08 在 Windows 上按需加载系统的 Media Foundation。渲染队列通过 `media_foundation::encoder_available` 查询 H.264 和硬件 HEVC 编码器。导入遇到不可用的 HEVC 解码器时，`MediaError::HevcDecoderUnavailable` 让界面能提示用户检查 HEVC 视频扩展。
+
 ### 插件、打包、哈希
 
 | crate | 版本 | features | 使用方 | 版本原因 |
@@ -296,7 +298,7 @@ ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum
 - **macOS 缩放抖动**：egui-wgpu 的 `macos-window-resize-jitter-fix` 只在 `egui_wgpu::winit::Painter` 里生效，BAE 不用这个 Painter。`bae-gpu` 的表面管理需要自己在拖动缩放期间打开 `CAMetalLayer.presentsWithTransaction` 并把帧延迟提到 2（参考 egui-wgpu 0.36.2 `src/winit.rs`）。
 - **读屏（accesskit）**：已开启（#116）。窗口先隐藏创建，accesskit 适配器建好后再显示（适配器必须在窗口第一次显示前创建）；设备丢失重建时把适配器移到新的 egui 状态。体积见 PR。
 - **浮动面板的原生多窗口**：见第 10 节。
-- **0.0.1 之后的第一项体积工作：`panic = "abort"`**（协调人 2026-11-21 决定 0.0.1 不做；同一天可执行文件预算临时从 30 MiB 放宽到 32 MiB，只在 M1 和 0.0.1 期间有效，做完这一项后回到 30 MiB 以下，见 `docs/ARCHITECTURE.md` 第 11 节）。可省 Windows 7.1 MiB、macOS 3.2 MiB（PR #89 实测：Windows 27.98 → 20.86 MiB，macOS 21.65 → 18.44 MiB；Windows 省得多，是因为 MSVC 的 unwind 要给每个析构清理生成单独的 funclet）。前提是下面两处依赖 unwind 的地方有了替代方案：`bae-platform` 崩溃处理里用 `catch_unwind` 兜住保存回调（`run_emergency_saves`），以及 Agent / MCP（tokio 任务）、插件的 panic 隔离，防止一个工具调用拖垮整个应用。具体要先做到三件事：自动保存加崩溃恢复（panic hook 里不再需要 unwind 也能保存，重启后能恢复）；MCP 和 Agent 的代码路径不 panic（错误都变成返回值）；原生插件放到进程外隔离。不能只为了体积改。
+- **0.0.1 之后的第一项体积工作：`panic = "abort"`**（协调人 2026-11-21 决定 0.0.1 不做；0.0.1 已于 2026-11-22 发布。2026-11-23 用户把可执行文件预算放宽到 Windows 50 MiB、macOS 38 MiB，这一项和按 `cargo bloat` 清理大块仍在队列里，做完后按实测重新评估预算，见 `docs/ARCHITECTURE.md` 第 11 节）。可省 Windows 7.1 MiB、macOS 3.2 MiB（PR #89 实测：Windows 27.98 → 20.86 MiB，macOS 21.65 → 18.44 MiB；Windows 省得多，是因为 MSVC 的 unwind 要给每个析构清理生成单独的 funclet）。前提是下面两处依赖 unwind 的地方有了替代方案：`bae-platform` 崩溃处理里用 `catch_unwind` 兜住保存回调（`run_emergency_saves`），以及 Agent / MCP（tokio 任务）、插件的 panic 隔离，防止一个工具调用拖垮整个应用。具体要先做到三件事：自动保存加崩溃恢复（panic hook 里不再需要 unwind 也能保存，重启后能恢复）；MCP 和 Agent 的代码路径不 panic（错误都变成返回值）；原生插件放到进程外隔离。不能只为了体积改。
 
 ## 10. ui/shell（PR #1）迁移说明
 

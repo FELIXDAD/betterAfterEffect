@@ -550,6 +550,13 @@ impl MediaInfo {
                     attrs.push(("duration", Value::Time(duration)));
                 }
             }
+            if let (Some(tc), Some(rate)) = (self.timecode, video.frame_rate) {
+                attrs.push((
+                    "timecode:start_frame",
+                    Value::Int(tc.to_frame_number(rate) as i64),
+                ));
+                attrs.push(("timecode:drop_frame", Value::Bool(tc.drop_frame)));
+            }
             let alpha = match video.alpha {
                 AlphaMode::Straight => Some("straight"),
                 AlphaMode::Premultiplied => Some("premultiplied"),
@@ -559,6 +566,18 @@ impl MediaInfo {
             if let Some(alpha) = alpha {
                 attrs.push(("alpha_mode", Value::Enum(alpha.into())));
             }
+        }
+        if self.video.is_none()
+            && let Some(track) = self.audio.first()
+            && let Some(frames) = track.frame_count
+        {
+            attrs.push((
+                "duration",
+                Value::Time(crate::audio::sample_to_time(
+                    frames as i64,
+                    track.sample_rate,
+                )),
+            ));
         }
         if let Some(sequence) = &self.sequence {
             attrs.push(("sequence:first_frame", Value::Int(sequence.first)));

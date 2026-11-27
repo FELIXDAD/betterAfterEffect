@@ -17,6 +17,8 @@ use super::*;
 pub enum KeyDialog {
     Interpolation(InterpolationDialog),
     Velocity(VelocityDialog),
+    Marker(Box<super::markers::MarkerDialog>),
+    Sequence(SequenceDialog),
 }
 
 /// What closing a dialog body asks for.
@@ -465,6 +467,82 @@ fn velocity_body(ui: &mut Ui, d: &mut VelocityDialog) {
 }
 
 // ---------------------------------------------------------------------------
+// Sequence Layers (Animation > Keyframe Assistant).
+
+/// Transition menu, in AE's order, with the `layer.sequence` names.
+pub(crate) const TRANSITIONS: [(&str, &str); 3] = [
+    ("Off", "off"),
+    ("Dissolve Front Layer", "dissolve_front"),
+    ("Cross Dissolve Front and Back Layers", "cross_dissolve"),
+];
+
+#[derive(Clone, Debug)]
+pub struct SequenceDialog {
+    /// In playing order (the selection order).
+    pub layers: Vec<PrimPath>,
+    pub info: CompInfo,
+    pub overlap: bool,
+    /// The Duration field's text (timecode).
+    pub duration: String,
+    /// Index into [`TRANSITIONS`].
+    pub transition: usize,
+}
+
+impl SequenceDialog {
+    pub fn new(layers: Vec<PrimPath>, info: CompInfo) -> Self {
+        let duration = common::duration_code(&info, Time::from_seconds(1.0));
+        Self {
+            layers,
+            info,
+            overlap: false,
+            duration,
+            transition: 0,
+        }
+    }
+
+    fn command(&self) -> (&'static str, serde_json::Value) {
+        let overlap = if self.overlap {
+            super::markers::parse_timecode(&self.info, &self.duration)
+                .map_or(Time::ZERO, |f| self.info.frame_rate.frame_to_time(f.max(0)))
+        } else {
+            Time::ZERO
+        };
+        let transition = if self.overlap {
+            TRANSITIONS[self.transition].1
+        } else {
+            "off"
+        };
+        (
+            "layer.sequence",
+            json!({"layers": self.layers, "overlap": overlap, "transition": transition}),
+        )
+    }
+}
+
+fn sequence_body(ui: &mut Ui, d: &mut SequenceDialog) {
+    widgets::checkbox(ui, &mut d.overlap, tr("Overlap"));
+    ui.add_enabled_ui(d.overlap, |ui| {
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.add_sized(vec2(80.0, 18.0), egui::Label::new(tr("Duration:")));
+            ui.add(egui::TextEdit::singleline(&mut d.duration).desired_width(90.0))
+                .labeled(egui::WidgetType::TextEdit, tr("Duration:"));
+        });
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.add_sized(vec2(80.0, 18.0), egui::Label::new(tr("Transition:")));
+            let names: Vec<&str> = TRANSITIONS.iter().map(|(t, _)| tr(t)).collect();
+            widgets::dropdown(ui, "sequence_transition", &mut d.transition, &names, 240.0)
+                .labeled_value(
+                    egui::WidgetType::ComboBox,
+                    tr("Transition:"),
+                    names[d.transition],
+                );
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Host (temporary: a modal window over the Timeline).
 
 impl KeyDialog {
@@ -472,14 +550,20 @@ impl KeyDialog {
         match self {
             KeyDialog::Interpolation(_) => "Keyframe Interpolation",
             KeyDialog::Velocity(_) => "Keyframe Velocity",
+            KeyDialog::Marker(d) => d.title(),
+            KeyDialog::Sequence(_) => "Sequence Layers",
         }
     }
 
-    fn edits(&self, stage: &Stage) -> Vec<KeyEdit> {
-        match self {
+    /// The command OK runs, if any.
+    fn command(&self, stage: &Stage) -> Option<(&'static str, serde_json::Value)> {
+        let edits = match self {
             KeyDialog::Interpolation(d) => interpolation_edits(stage, d),
             KeyDialog::Velocity(d) => velocity_edits(stage, d),
-        }
+            KeyDialog::Marker(d) => return Some(d.command(stage)),
+            KeyDialog::Sequence(d) => return Some(d.command()),
+        };
+        (!edits.is_empty()).then(|| ("key.edit", json!({ "edits": edits })))
     }
 }
 
@@ -542,15 +626,18 @@ pub(super) fn show(ctx: &egui::Context, cx: &mut PanelContext<'_>, session: &Sha
             match &mut dialog {
                 KeyDialog::Interpolation(d) => interpolation_body(ui, stage, d),
                 KeyDialog::Velocity(d) => velocity_body(ui, d),
+                KeyDialog::Marker(d) => {
+                    super::markers::marker_body(ui, d, &crate::prefs::current(cx.resources))
+                }
+                KeyDialog::Sequence(d) => sequence_body(ui, d),
             }
             ui.add_space(10.0);
             close = buttons(ui);
         });
     match close {
         Some(Close::Ok) => {
-            let edits = dialog.edits(stage);
-            if !edits.is_empty() {
-                cx.invoke_with("key.edit", json!({ "edits": edits }));
+            if let Some((id, params)) = dialog.command(stage) {
+                cx.invoke_with(id, params);
             }
             session.lock().key_dialog = None;
         }

@@ -298,6 +298,28 @@ impl MediaLibrary {
         Ok(frame)
     }
 
+    /// Look up the already decoded channel metadata for exactly this source frame.
+    pub fn cached_channels(
+        &self,
+        path: &Path,
+        options: &OpenOptions,
+        request: &FrameRequest,
+        time: Time,
+    ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+        let key = SourceKey {
+            path: path.to_owned(),
+            options: *options,
+        };
+        let source = self.sources.lock().slots.get(&key)?.source.clone();
+        let source = source.lock();
+        let index = clamp_index(&source.info, source.source.frame_at(time));
+        let frame = self.cache.get(&FrameKey::new(
+            source.id,
+            &FrameRequest { index, ..*request },
+        ))?;
+        Some(frame.channels?.info.clone())
+    }
+
     /// Frame `request.index` decoded to the CPU (thumbnails, packaging, Agent
     /// previews without a GPU). Not cached.
     pub fn frame_cpu(
@@ -403,6 +425,14 @@ fn extract_range(container: &Path, offset: u64, len: u64, dest: &Path) -> Result
 /// Whether `path` is a frame of the sequence opened under `key`.
 fn same_sequence(key: &SourceKey, path: &Path) -> bool {
     use crate::sequence::parse_numbered_name;
+    if key.options.sequence == crate::source::SequenceMode::Alphabetical {
+        return key.path.parent() == path.parent()
+            && key
+                .path
+                .extension()
+                .zip(path.extension())
+                .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
+    }
     if key.options.sequence != crate::source::SequenceMode::Sequence
         || key.path.parent() != path.parent()
     {

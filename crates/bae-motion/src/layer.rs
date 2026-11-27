@@ -3,8 +3,8 @@
 
 use bae_anim::glam::{DMat4, DVec3};
 use bae_model::{
-    AttrSpec, Command, CommandError, LayerKind, ModelError, Op, PrimPath, PrimType, Stage,
-    TextDocument, Time, Transaction, Value,
+    AttrSpec, Command, CommandError, Keyframe, LayerKind, ModelError, Op, PrimPath, PrimType,
+    Stage, TextDocument, Time, Transaction, Value,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -69,6 +69,42 @@ fn default_base_name(kind: LayerKind) -> &'static str {
 
 pub struct CreateLayer;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema)]
+pub struct NewLayerDefaults {
+    /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
+    #[serde(default)]
+    pub start: Option<Time>,
+    /// Label color index (default AE's per kind; the UI passes the
+    /// Preferences > Labels default).
+    #[serde(default)]
+    pub label: Option<i64>,
+    /// Initial duration of synthetic layers in flicks.
+    #[serde(default)]
+    pub duration: Option<Time>,
+    /// Separate the final initial position into its component properties.
+    #[serde(default)]
+    pub separate_position: bool,
+}
+
+impl NewLayerDefaults {
+    pub(crate) fn split_position(
+        self,
+        tx: &mut Transaction<'_>,
+        layer: &PrimPath,
+    ) -> Result<(), CommandError> {
+        if self.separate_position {
+            crate::dimensions::SeparateDimensions.run(
+                tx,
+                crate::dimensions::SeparateDimensionsParams {
+                    layers: vec![layer.clone()],
+                    separated: Some(true),
+                },
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateLayerParams {
     /// The comp to add the layer to.
@@ -90,6 +126,12 @@ pub struct CreateLayerParams {
     /// Solid size in pixels (default the comp size).
     #[serde(default)]
     pub size: Option<[u32; 2]>,
+    /// Display name assigned only when this layer creates the solids folder.
+    #[serde(default)]
+    pub solids_folder_name: Option<String>,
+    /// Label assigned when creating that folder.
+    #[serde(default)]
+    pub solids_folder_label: Option<i64>,
     /// Solid pixel aspect ratio (default the comp's).
     #[serde(default)]
     pub pixel_aspect: Option<f64>,
@@ -105,19 +147,21 @@ pub struct CreateLayerParams {
     /// Position in comp pixels (default the comp center).
     #[serde(default)]
     pub position: Option<[f64; 2]>,
-    /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
-    #[serde(default)]
-    pub start: Option<Time>,
+    #[serde(flatten)]
+    pub defaults: NewLayerDefaults,
     /// Camera layers: Camera Settings (type, zoom, depth of field …).
     #[serde(default)]
     pub camera: Option<crate::camera::CameraSettings>,
     /// Light layers: Light Settings (type, color, intensity …).
     #[serde(default)]
     pub light: Option<crate::camera::LightSettings>,
-    /// Label color index (default AE's per kind; the UI passes the
-    /// Preferences > Labels default).
+    /// Camera and light layers: position in comp space (default `zoom` in
+    /// front of `position`, or the light's AE place).
     #[serde(default)]
-    pub label: Option<i64>,
+    pub position_3d: Option<[f64; 3]>,
+    /// Camera and light layers: point of interest (default `position` at z = 0).
+    #[serde(default)]
+    pub point_of_interest: Option<[f64; 3]>,
 }
 
 impl CreateLayerParams {
@@ -132,20 +176,29 @@ impl CreateLayerParams {
             index: None,
             color: None,
             size: None,
+            solids_folder_name: None,
+            solids_folder_label: None,
             pixel_aspect: None,
             text: None,
             font_size: None,
             shape: None,
             position: None,
-            start: Some(start),
+            defaults: NewLayerDefaults {
+                start: Some(start),
+                ..Default::default()
+            },
             camera: None,
             light: None,
-            label: None,
+            position_3d: None,
+            point_of_interest: None,
         }
     }
 }
 
-fn source_size_and_duration(stage: &Stage, source: &PrimPath) -> Option<([f64; 2], Option<Time>)> {
+pub(crate) fn source_size_and_duration(
+    stage: &Stage,
+    source: &PrimPath,
+) -> Option<([f64; 2], Option<Time>)> {
     if let Some(info) = query::comp_info(stage, source) {
         return Some((
             [f64::from(info.width), f64::from(info.height)],
@@ -193,10 +246,13 @@ impl Command for CreateLayer {
             }
             None => None,
         };
-        if let (LayerKind::PreComp, Some(src)) = (kind, &p.source)
-            && (src == &p.comp || query::comp_info(tx.stage(), src).is_none())
-        {
-            return Err(fail("a pre-comp layer's source must be another comp"));
+        if let (LayerKind::PreComp, Some(src)) = (kind, &p.source) {
+            if query::comp_info(tx.stage(), src).is_none() {
+                return Err(fail("a pre-comp layer's source must be another comp"));
+            }
+            if query::would_nest_recursively(tx.stage(), &p.comp, src) {
+                return Err(fail("a composition cannot contain itself"));
+            }
         }
         let name = match p.name.filter(|n| !n.trim().is_empty()) {
             Some(n) => n,
@@ -229,11 +285,12 @@ impl Command for CreateLayer {
         set(tx, &path, "kind", Value::Enum(kind.as_str().to_owned()))?;
         set(tx, &path, "name", Value::String(name.clone()))?;
         let label = p
+            .defaults
             .label
             .filter(|l| (0..=16).contains(l))
             .unwrap_or(default_label(kind));
         set(tx, &path, "label", Value::Int(label))?;
-        let start = p.start.unwrap_or(Time::ZERO);
+        let start = p.defaults.start.unwrap_or(Time::ZERO);
         if start != Time::ZERO {
             set(tx, &path, "start_time", Value::Time(start))?;
             set(tx, &path, "in_point", Value::Time(start))?;
@@ -270,7 +327,16 @@ impl Command for CreateLayer {
                     [0.5, 0.5, 0.5, 1.0]
                 });
                 let solids = PrimPath::new(SOLIDS_FOLDER).expect("valid");
-                ensure_folder(tx, &solids)?;
+                if !tx.stage().has_prim(&solids) {
+                    ensure_folder(tx, &solids)?;
+                    if let Some(name) = p.solids_folder_name.filter(|name| !name.trim().is_empty())
+                    {
+                        set(tx, &solids, "name", Value::String(name))?;
+                    }
+                    if let Some(label) = p.solids_folder_label.filter(|l| (0..=16).contains(l)) {
+                        set(tx, &solids, "label", Value::Int(label))?;
+                    }
+                }
                 let asset = child(
                     &solids,
                     &query::unique_child_name(tx.stage(), &solids, &name),
@@ -312,7 +378,7 @@ impl Command for CreateLayer {
                 let text = p.text.clone().filter(|t| !t.is_empty()).unwrap_or(name);
                 let mut doc = TextDocument::new(text, "Arial", p.font_size.unwrap_or(72.0));
                 if let Some(c) = p.color {
-                    doc.fill_color = c;
+                    doc.style.fill_color = c;
                 }
                 set(tx, &path, "text:source", Value::TextDocument(Box::new(doc)))?;
             }
@@ -351,12 +417,11 @@ impl Command for CreateLayer {
                         position = [pos[0] + 80.0, pos[1] - 80.0, -2000.0 / 3.0];
                     }
                 }
-                set(
-                    tx,
-                    &path,
-                    "transform:point_of_interest",
-                    Value::Vec3([pos[0], pos[1], 0.0]),
-                )?;
+                if let Some(p3) = p.position_3d {
+                    position = p3;
+                }
+                let poi = p.point_of_interest.unwrap_or([pos[0], pos[1], 0.0]);
+                set(tx, &path, "transform:point_of_interest", Value::Vec3(poi))?;
             }
         }
         if anchor != [0.0, 0.0] {
@@ -368,6 +433,18 @@ impl Command for CreateLayer {
             )?;
         }
         set(tx, &path, "transform:position", Value::Vec3(position))?;
+        if !needs_source && let Some(duration) = p.defaults.duration {
+            if duration <= Time::ZERO {
+                return Err(fail("duration must be positive"));
+            }
+            set(
+                tx,
+                &path,
+                "out_point",
+                Value::Time(start.saturating_add(duration)),
+            )?;
+        }
+        p.defaults.split_position(tx, &path)?;
         Ok(LayerOutput { path })
     }
 }
@@ -430,7 +507,7 @@ fn same_comp(stage: &Stage, layers: &[PrimPath]) -> Result<PrimPath, CommandErro
 
 /// Reorder the specs under `folder` in every local sublayer so that the composed
 /// order follows `order` (paths not in `order` keep their relative order at the end).
-fn apply_order(
+pub(crate) fn apply_order(
     tx: &mut Transaction<'_>,
     folder: &PrimPath,
     order: &[PrimPath],
@@ -599,6 +676,10 @@ pub struct PasteLayersParams {
     /// Paste directly above this layer of `comp`; default the top of the comp.
     #[serde(default)]
     pub above: Option<PrimPath>,
+    /// Move the pasted layers in time so the earliest in point is here (comp
+    /// flicks; AE: Paste at Current Time, Ctrl+Alt+V).
+    #[serde(default)]
+    pub time: Option<Time>,
 }
 
 impl Command for PasteLayers {
@@ -663,6 +744,30 @@ impl Command for PasteLayers {
             })?;
             set(tx, new_path, "name", Value::String(new_name.clone()))?;
             paths.push(new_path.clone());
+        }
+        if let Some(at) = p.time
+            && let Some(first) = paths
+                .iter()
+                .map(|l| {
+                    let t = query::layer_timing(tx.stage(), l);
+                    t.in_point.min(t.out_point)
+                })
+                .min()
+            && at != first
+        {
+            let delta = at - first;
+            for l in &paths {
+                let t = query::layer_timing(tx.stage(), l);
+                let has_out = tx
+                    .stage()
+                    .prim(l)
+                    .is_some_and(|v| v.value("out_point").is_some());
+                set(tx, l, "start_time", Value::Time(t.start_time + delta))?;
+                set(tx, l, "in_point", Value::Time(t.in_point + delta))?;
+                if has_out {
+                    set(tx, l, "out_point", Value::Time(t.out_point + delta))?;
+                }
+            }
         }
         Ok(LayersOutput { paths })
     }
@@ -832,6 +937,10 @@ pub struct SetParentParams {
     /// Comp time (flicks) whose transforms are matched when keep_transform is on (default 0).
     #[serde(default)]
     pub time: Time,
+    /// Move the layers to the parent's location: their Position becomes the
+    /// parent's Anchor Point (AE: Shift while parenting). Keyframes shift with it.
+    #[serde(default)]
+    pub move_to_parent: bool,
 }
 
 fn parent_of(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
@@ -916,6 +1025,9 @@ impl Command for SetParent {
                 let delta = new_world.inverse() * world(&old_parent);
                 compensate(tx, layer, &delta)?;
             }
+            if let (true, Some(parent)) = (p.move_to_parent, &p.parent) {
+                move_to(tx, layer, parent, p.time)?;
+            }
             match &p.parent {
                 Some(parent) => set(tx, layer, "parent", Value::PrimRef(parent.clone()))?,
                 None => {
@@ -935,6 +1047,40 @@ impl Command for SetParent {
         }
         Ok(())
     }
+}
+
+/// Shift `layer`'s Position (value and keyframes) so that at comp time `time`
+/// it equals `parent`'s Anchor Point: once parented it sits on the parent.
+fn move_to(
+    tx: &mut Transaction<'_>,
+    layer: &PrimPath,
+    parent: &PrimPath,
+    time: Time,
+) -> Result<(), CommandError> {
+    const POSITION: &str = "transform:position";
+    let stage = tx.stage();
+    let xyz = |v: Option<Value>| match v {
+        Some(Value::Vec3(p)) => DVec3::from_array(p),
+        Some(Value::Vec2(p)) => DVec3::new(p[0], p[1], 0.0),
+        _ => DVec3::ZERO,
+    };
+    let anchor =
+        xyz(bae_anim::evaluate_attribute(stage, parent, "transform:anchor_point", time).ok());
+    let at = xyz(bae_anim::evaluate_attribute(stage, layer, POSITION, time).ok());
+    let d = anchor - at;
+    let view = stage
+        .prim(layer)
+        .ok_or_else(|| ModelError::NoSuchPrim(layer.clone()))?;
+    let mut position = view.attr(POSITION).cloned().unwrap_or_else(|| AttrSpec {
+        value: query::static_value(&view, POSITION),
+        ..Default::default()
+    });
+    map_values(&mut position, |v| match v {
+        Value::Vec3(p) => Some(Value::Vec3((DVec3::from_array(*p) + d).to_array())),
+        Value::Vec2(p) => Some(Value::Vec2([p[0] + d.x, p[1] + d.y])),
+        _ => None,
+    });
+    write_attr(tx, layer, POSITION, position)
 }
 
 /// Rewrite a layer's position, rotation and scale (static values and keyframes) by
@@ -1039,9 +1185,222 @@ impl Command for ShiftLayers {
 
 // ---------------------------------------------------------------------------
 
+/// How Sequence Layers blends overlapping layers (AE's Transition menu).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceTransition {
+    /// 关
+    #[default]
+    Off,
+    /// 溶解前景图层: the upper layer of each overlapping pair fades.
+    DissolveFront,
+    /// 交叉溶解前景与背景图层: the ending layer fades out, the next fades in.
+    CrossDissolve,
+}
+
+pub struct SequenceLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SequenceLayersParams {
+    /// Layers of one comp in playing order (AE: the selection order); the
+    /// first stays where it is.
+    pub layers: Vec<PrimPath>,
+    /// How long each layer overlaps the one before (flicks; 0 butts them).
+    #[serde(default)]
+    pub overlap: Time,
+    /// Opacity keyframes over each overlap.
+    #[serde(default)]
+    pub transition: SequenceTransition,
+}
+
+impl Command for SequenceLayers {
+    type Params = SequenceLayersParams;
+    type Output = ();
+    const ID: &'static str = "layer.sequence";
+    const TITLE: &'static str = "Sequence Layers";
+    const DESCRIPTION: &'static str = "Keyframe assistant: move layers in time so each starts where the previous ends, optionally overlapping by a duration with opacity dissolves (AE: Animation > Keyframe Assistant > Sequence Layers). Keyframes move with the layers. One undo step.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
+        same_comp(tx.stage(), &p.layers)?;
+        let overlap = p.overlap.max(Time::ZERO);
+        let stack = p
+            .layers
+            .first()
+            .and_then(|l| query::owning_comp(tx.stage(), l))
+            .map(|c| query::comp_layers(tx.stage(), &c))
+            .unwrap_or_default();
+        let depth = |l: &PrimPath| stack.iter().position(|x| x == l).unwrap_or(usize::MAX);
+        let span = |tx: &Transaction<'_>, l: &PrimPath| {
+            let t = query::layer_timing(tx.stage(), l);
+            (t.in_point.min(t.out_point), t.in_point.max(t.out_point))
+        };
+        for pair in p.layers.windows(2) {
+            let (prev, next) = (&pair[0], &pair[1]);
+            let (_, end) = span(tx, prev);
+            let (start, _) = span(tx, next);
+            let delta = end - overlap - start;
+            if delta != Time::ZERO {
+                let t = query::layer_timing(tx.stage(), next);
+                let has_out = tx
+                    .stage()
+                    .prim(next)
+                    .is_some_and(|v| v.value("out_point").is_some());
+                set(tx, next, "start_time", Value::Time(t.start_time + delta))?;
+                set(tx, next, "in_point", Value::Time(t.in_point + delta))?;
+                if has_out {
+                    set(tx, next, "out_point", Value::Time(t.out_point + delta))?;
+                }
+            }
+            if overlap == Time::ZERO || p.transition == SequenceTransition::Off {
+                continue;
+            }
+            let (s, e) = (end - overlap, end);
+            let front_is_prev = depth(prev) < depth(next);
+            let fades: Vec<(&PrimPath, bool)> = match p.transition {
+                SequenceTransition::DissolveFront => {
+                    vec![(if front_is_prev { prev } else { next }, front_is_prev)]
+                }
+                _ => vec![(prev, true), (next, false)],
+            };
+            for (layer, out) in fades {
+                fade(tx, layer, s, e, out)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Opacity keys on `layer` from comp time `s` to `e`: from its opacity to 0
+/// (`out`) or from 0 up to it.
+fn fade(
+    tx: &mut Transaction<'_>,
+    layer: &PrimPath,
+    s: Time,
+    e: Time,
+    out: bool,
+) -> Result<(), CommandError> {
+    const OPACITY: &str = "transform:opacity";
+    let timing = query::key_timing(tx.stage(), layer);
+    let full = tx
+        .stage()
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, OPACITY))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0);
+    let (a, b) = if out { (full, 0.0) } else { (0.0, full) };
+    let mut spec = query::attr_spec(tx.stage(), layer, OPACITY)
+        .cloned()
+        .unwrap_or_default();
+    for (t, v) in [(s, a), (e, b)] {
+        spec.keyframes
+            .insert(timing.layer_time(t), Keyframe::linear(Value::Float(v)));
+    }
+    write_attr(tx, layer, OPACITY, spec)
+}
+
+// ---------------------------------------------------------------------------
+
+pub struct SlipLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SlipLayersParams {
+    /// Layers of one comp with a time-based source (pre-comp, video or audio footage).
+    pub layers: Vec<PrimPath>,
+    /// Comp-time offset of the source (flicks; clamped so the In / Out span stays
+    /// inside the source).
+    pub delta: Time,
+    /// Keyframes that move with the source (AE: the selected ones); every other
+    /// keyframe of the layers keeps its comp time.
+    #[serde(default)]
+    pub keys: Vec<crate::keys::KeyRef>,
+}
+
+/// The slip offset `delta` clamped so `layer`'s In / Out span stays inside its source.
+pub fn slip_limit(stage: &bae_model::Stage, layer: &PrimPath, delta: Time) -> Time {
+    let Some((a, b)) = query::source_span(stage, layer) else {
+        return Time::ZERO;
+    };
+    let t = query::layer_timing(stage, layer);
+    let (lo, hi) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
+    // The source may move right until its start reaches In, left until its end
+    // reaches Out.
+    let min = (hi - b).min(Time::ZERO);
+    let max = (lo - a).max(Time::ZERO);
+    delta.clamp(min, max)
+}
+
+impl Command for SlipLayers {
+    type Params = SlipLayersParams;
+    type Output = ();
+    const ID: &'static str = "layer.slip";
+    const TITLE: &'static str = "Slip Edit";
+    const DESCRIPTION: &'static str = "Slip edit: move which source frames play between a trimmed layer's fixed In and Out points (dragging the pale part of the layer bar). Listed keyframes move with the source, the others keep their comp time.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
+        same_comp(tx.stage(), &p.layers)?;
+        for l in &p.layers {
+            if query::source_duration(tx.stage(), l).is_none() {
+                return Err(fail(format!("{l} has no time-based source to slip")));
+            }
+        }
+        for l in &p.layers {
+            let d = slip_limit(tx.stage(), l, p.delta);
+            if d == Time::ZERO {
+                continue;
+            }
+            let t = query::layer_timing(tx.stage(), l);
+            let factor = if t.stretch.abs() < 1.0 {
+                1.0
+            } else {
+                t.stretch / 100.0
+            };
+            // Layer-time shift that keeps a keyframe's comp time.
+            let shift = Time(-(d.0 as f64 / factor).round() as i64);
+            set(tx, l, "start_time", Value::Time(t.start_time + d))?;
+            let mut stack = vec![l.clone()];
+            while let Some(path) = stack.pop() {
+                let names: Vec<String> = tx
+                    .stage()
+                    .prim(&path)
+                    .map(|v| v.attr_names().into_iter().map(str::to_owned).collect())
+                    .unwrap_or_default();
+                for attr in names {
+                    let Some(spec) = query::attr_spec(tx.stage(), &path, &attr).cloned() else {
+                        continue;
+                    };
+                    if spec.keyframes.is_empty() {
+                        continue;
+                    }
+                    let mut out = spec.clone();
+                    out.keyframes = spec
+                        .keyframes
+                        .into_iter()
+                        .map(|(kt, k)| {
+                            let kept = p
+                                .keys
+                                .iter()
+                                .any(|r| r.path == path && r.attr == attr && r.time == kt);
+                            (if kept { kt } else { kt + shift }, k)
+                        })
+                        .collect();
+                    write_attr(tx, &path, &attr, out)?;
+                }
+                if path.name() != query::MARKERS {
+                    stack.extend(tx.stage().children(&path));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 /// Delete prims from every sublayer that has them. Layers parented to a deleted
 /// layer are unparented first, keeping their on-screen transform (at `time`).
-fn delete_prims(
+pub(crate) fn delete_prims(
     tx: &mut Transaction<'_>,
     paths: &[PrimPath],
     time: Time,
@@ -1073,6 +1432,7 @@ fn delete_prims(
                     parent: None,
                     keep_transform: true,
                     time,
+                    move_to_parent: false,
                 },
             )
         })?;
@@ -1104,19 +1464,24 @@ fn delete_prims(
     Ok(())
 }
 
-/// Attributes [`SetLayerAttr`] writes: the layer switches, quality and label.
+/// Attributes [`SetLayerAttr`] writes: the layer switches, quality, label and
+/// blending mode.
 pub const LAYER_SWITCH_ATTRS: &[&str] = &[
     "shy",
     "locked",
     "enabled",
+    "effects_enabled",
     "audio_enabled",
     "solo",
     "collapse_transformation",
     "motion_blur",
+    "frame_blending",
     "adjustment_layer",
     "three_d",
     "quality",
     "label",
+    "blend_mode",
+    "preserve_transparency",
 ];
 
 pub struct SetLayerAttr;
@@ -1126,9 +1491,11 @@ pub struct SetLayerAttrParams {
     /// Layers (or project items, for `label`).
     pub layers: Vec<PrimPath>,
     /// One of the layer switches (`shy`, `locked`, `enabled` = Video,
-    /// `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
-    /// `adjustment_layer`, `three_d`), `quality` (`best` / `draft` /
-    /// `wireframe`) or `label` (0 = none, 1–16 = AE's label colours).
+    /// `effects_enabled` = Effect (fx), `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
+    /// `adjustment_layer`, `three_d`), `frame_blending` (`off` / `frame_mix` /
+    /// `pixel_motion`; the comp's `frame_blending` switch is set with `attr.set`), `quality` (`best` / `draft` /
+    /// `wireframe`), `label` (0 = none, 1–16 = AE's label colours) or `blend_mode`
+    /// (AE's 38 modes, `multiply` …).
     pub attr: String,
     pub value: Value,
 }
@@ -1143,7 +1510,7 @@ impl Command for SetLayerAttr {
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         if !LAYER_SWITCH_ATTRS.contains(&p.attr.as_str()) {
             return Err(fail(format!(
-                "layer.set_attr sets switches, quality and label, not `{}`",
+                "layer.set_attr sets switches, quality, label and blending mode, not `{}`",
                 p.attr
             )));
         }

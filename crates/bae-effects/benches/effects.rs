@@ -18,6 +18,8 @@ use bae_gpu::{GpuContext, GpuContextDescriptor};
 use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect};
 
+mod cases;
+
 const ITER: u32 = 60;
 
 struct Case {
@@ -94,51 +96,7 @@ fn main() {
         t.elapsed().as_secs_f64() * 1e3
     );
 
-    const UHD: [u32; 2] = [3840, 2160];
-    const HD: [u32; 2] = [1920, 1080];
-    let mut cases = Vec::new();
-    for size in [UHD, HD] {
-        let tag = if size == UHD { "4K" } else { "1080p" };
-        for b in [10.0, 25.0, 100.0, 300.0] {
-            cases.push(Case {
-                name: format!("{tag} gaussian blurriness {b}"),
-                match_name: "ADBE Gaussian Blur 2",
-                params: vec![(1, Value::Float(b)), (3, Value::Bool(false))],
-                size,
-            });
-        }
-        for (r, n) in [(5.0, 1), (20.0, 3), (100.0, 3)] {
-            cases.push(Case {
-                name: format!("{tag} fast box blur r{r} x{n}"),
-                match_name: "ADBE Box Blur2",
-                params: vec![(1, Value::Float(r)), (2, Value::Int(n))],
-                size,
-            });
-        }
-        for (name, params) in [
-            ("ADBE Tint", vec![(3, Value::Float(80.0))]),
-            ("ADBE Tritone", vec![(4, Value::Float(20.0))]),
-            ("ADBE Easy Levels2", vec![(5, Value::Float(1.4))]),
-            ("ADBE Pro Levels2", vec![(6, Value::Float(1.4))]),
-            (
-                "ADBE HUE SATURATION",
-                vec![(4, Value::Float(30.0)), (5, Value::Float(20.0))],
-            ),
-            (
-                "ADBE Brightness & Contrast 2",
-                vec![(1, Value::Float(30.0)), (2, Value::Float(20.0))],
-            ),
-            ("ADBE Exposure2", vec![(3, Value::Float(0.5))]),
-        ] {
-            cases.push(Case {
-                name: format!("{tag} {name}"),
-                match_name: name,
-                params,
-                size,
-            });
-        }
-    }
-
+    let cases = cases::all();
     let mut results = Vec::new();
     println!("{:<44} {:>10} {:>10}", "case", "ms/frame", "latency");
     for case in &cases {
@@ -150,6 +108,9 @@ fn main() {
         }
         let (per_frame, latency) = measure(&gpu, case);
         println!("{:<44} {:>10.3} {:>10.3}", case.name, per_frame, latency);
+        if case.match_name == "CC Particle World" {
+            particle_preview(&gpu, case);
+        }
         if steps {
             profile_steps(&gpu, case);
         }
@@ -177,7 +138,12 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
         enabled: true,
         params: case.params.clone(),
     };
-    let params = EffectParams {
+    let mut params = EffectParams {
+        time: if case.match_name == "CC Particle World" {
+            bae_model::Time::from_seconds(2.0)
+        } else {
+            bae_model::Time::ZERO
+        },
         scale: 1.0,
         ..EffectParams::new(&inst)
     };
@@ -185,6 +151,16 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
     let effect = fx.effect();
     let roi = effect.output_bounds(&params, image.rect);
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba16Float);
+    effect_inputs(&mut target, &*effect, &params, &image);
+    if case.match_name == "CC Particle World" {
+        let start = Instant::now();
+        let _ = fx.render(&mut target, &params, &image, roi).unwrap();
+        target.finish().unwrap();
+        println!(
+            "first 50k particle frame after background warm-up: {:.3} ms",
+            start.elapsed().as_secs_f64() * 1000.
+        );
+    }
     // Warm up (pipelines, pool).
     for _ in 0..3 {
         let _ = fx.render(&mut target, &params, &image, roi).unwrap();
@@ -195,13 +171,64 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
     target.finish().unwrap();
     let latency = t.elapsed().as_secs_f64() * 1e3;
     let t = Instant::now();
-    for _ in 0..ITER {
+    for frame in 0..ITER {
+        if case.match_name == "CC Particle World" {
+            params.time = params.frame_rate.frame_to_time(60 + i64::from(frame));
+        }
         let _ = fx.render(&mut target, &params, &image, roi).unwrap();
         target.submit();
     }
     target.finish().unwrap();
     let per_frame = t.elapsed().as_secs_f64() * 1e3 / f64::from(ITER);
     (per_frame, latency)
+}
+
+/// The normal preview graph, including the layer, effect, compositor and frame
+/// cache. Each sample advances the timeline and waits for the GPU to finish.
+fn particle_preview(gpu: &Arc<GpuContext>, case: &Case) {
+    use bae_render::{LayerContent, RenderComp, RenderLayer, RenderRequest, Renderer};
+    let mut renderer = Renderer::new(gpu.clone());
+    bae_effects::register(
+        &mut bae_model::EffectRegistry::new(),
+        renderer.effects_mut(),
+    );
+    let [width, height] = case.size;
+    let mut comp = RenderComp::new(PrimPath::new("/comps/bench").unwrap(), width, height);
+    let mut layer = RenderLayer::new(
+        PrimPath::new("/comps/bench/layers/a").unwrap(),
+        LayerContent::Solid {
+            color: [1.; 4],
+            width,
+            height,
+        },
+    );
+    layer.effects.push(RenderEffect {
+        path: PrimPath::new("/comps/bench/layers/a/effects/fx").unwrap(),
+        effect: case.match_name.into(),
+        enabled: true,
+        params: case.params.clone(),
+    });
+    comp.layers.push(layer);
+    let mut times = Vec::new();
+    for frame in 56..60 + ITER {
+        comp.time = comp.frame_rate.frame_to_time(i64::from(frame));
+        comp.layers[0].time = comp.time;
+        let start = Instant::now();
+        let _frame = renderer
+            .render_frame(&comp, &RenderRequest::default())
+            .unwrap();
+        gpu.wait_idle().unwrap();
+        if frame >= 60 {
+            times.push(start.elapsed().as_secs_f64() * 1000.);
+        }
+    }
+    times.sort_by(f64::total_cmp);
+    println!(
+        "1080p CC Particle World, 50000 live particles, {} advancing preview frames: mean {:.3} ms, p95 {:.3} ms",
+        ITER,
+        times.iter().sum::<f64>() / f64::from(ITER),
+        times[(times.len() * 95).div_ceil(100) - 1]
+    );
 }
 
 /// Prints the GPU time of every dispatch of one frame of `case`.
@@ -220,8 +247,10 @@ fn profile_steps(gpu: &Arc<GpuContext>, case: &Case) {
     };
     let params = EffectParams::new(&inst);
     let image = input(gpu, case.size);
-    let roi = fx.effect().output_bounds(&params, image.rect);
+    let effect = fx.effect();
+    let roi = effect.output_bounds(&params, image.rect);
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba16Float);
+    effect_inputs(&mut target, &*effect, &params, &image);
     // Warm the GPU up (clocks) without the timer, then time one frame.
     let timer = bae_effects::profile::take().unwrap();
     for _ in 0..30 {
@@ -236,4 +265,18 @@ fn profile_steps(gpu: &Arc<GpuContext>, case: &Case) {
     for sample in timer.read(gpu).unwrap() {
         println!("    {:<36} {:>8.3} ms", sample.label, sample.millis());
     }
+}
+
+fn effect_inputs(
+    target: &mut Standalone,
+    effect: &dyn bae_render::Effect,
+    params: &EffectParams<'_>,
+    image: &GpuImage,
+) {
+    let layers = effect
+        .layer_dependencies(params)
+        .into_iter()
+        .map(|dep| (dep, image.clone()))
+        .collect();
+    target.set_effect_inputs(layers, Vec::new());
 }

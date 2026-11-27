@@ -21,25 +21,7 @@ const CJK_FAMILIES: &[&str] = &[
 ];
 
 fn doc(text: &str, font: &str) -> TextDocument {
-    TextDocument {
-        text: text.to_owned(),
-        font: font.to_owned(),
-        font_size: 50.0,
-        fill_color: [1.0, 1.0, 1.0, 1.0],
-        stroke_color: None,
-        stroke_width: 0.0,
-        stroke_over_fill: false,
-        justification: "left".to_owned(),
-        tracking: 0.0,
-        leading: None,
-        baseline_shift: 0.0,
-        faux_bold: false,
-        faux_italic: false,
-        all_caps: false,
-        small_caps: false,
-        box_size: None,
-        box_position: None,
-    }
+    TextDocument::new(text, font, 50.0)
 }
 
 /// A Latin font installed on this machine (PostScript name).
@@ -114,12 +96,12 @@ fn point_text_alignment_and_lines() {
     assert_eq!(second_line_first.word, 1);
 
     let mut d = doc("Hello", &font);
-    d.justification = "center".to_owned();
+    d.paragraph.justification = "center".to_owned();
     let center = layout_text(&mut fonts, &d);
     let w = center.lines[0].width;
     assert!(w > 50.0);
     assert!((center.lines[0].x + w / 2.0).abs() < 1e-6);
-    d.justification = "right".to_owned();
+    d.paragraph.justification = "right".to_owned();
     let right = layout_text(&mut fonts, &d);
     assert!((right.lines[0].x + w).abs() < 1e-6);
     let last = right.runs[0].glyphs.last().unwrap();
@@ -127,8 +109,8 @@ fn point_text_alignment_and_lines() {
 
     // Explicit leading and baseline shift.
     let mut d = doc("a\rb", &font);
-    d.leading = Some(80.0);
-    d.baseline_shift = 10.0;
+    d.style.leading = Some(80.0);
+    d.style.baseline_shift = 10.0;
     let l = layout_text(&mut fonts, &d);
     assert_eq!(l.lines[1].baseline, 80.0);
     assert!((f64::from(l.runs[0].glyphs[0].y) + 10.0).abs() < 1e-3);
@@ -142,7 +124,7 @@ fn tracking_widens_lines_but_not_their_trailing_edge() {
     };
     let plain = layout_text(&mut fonts, &doc("ABCD", &font));
     let mut d = doc("ABCD", &font);
-    d.tracking = 100.0; // 0.1 em = 5 px after each character
+    d.style.tracking = 100.0; // 0.1 em = 5 px after each character
     let tracked = layout_text(&mut fonts, &d);
     let delta = tracked.lines[0].width - plain.lines[0].width;
     assert!((delta - 15.0).abs() < 0.01, "3 gaps × 5 px, got {delta}");
@@ -187,7 +169,7 @@ fn chinese_paragraph_text_wraps_with_kinsoku() {
     }
     let text = "这是一个用于检查中文段落换行的测试，标点不能出现在行首。第二句也一样！";
     let mut d = doc(text, "PingFangSC-Regular");
-    d.font_size = 40.0;
+    d.style.font_size = 40.0;
     d.box_size = Some([250.0, 1000.0]);
     d.box_position = Some([-125.0, -40.0]);
     let l = layout_text(&mut fonts, &d);
@@ -221,7 +203,7 @@ fn centred_paragraph_lines_centre_in_the_box() {
         return;
     };
     let mut d = doc("one two three four five six", &font);
-    d.justification = "center".to_owned();
+    d.paragraph.justification = "center".to_owned();
     d.box_size = Some([300.0, 500.0]);
     d.box_position = Some([0.0, 0.0]);
     let l = layout_text(&mut fonts, &d);
@@ -239,7 +221,7 @@ fn all_caps_keeps_character_indices() {
         return;
     };
     let mut d = doc("abc", &font);
-    d.all_caps = true;
+    d.style.all_caps = true;
     let caps = layout_text(&mut fonts, &d);
     let upper = layout_text(&mut fonts, &doc("ABC", &font));
     let ids = |l: &bae_text::TextLayout| -> Vec<u32> {
@@ -250,4 +232,133 @@ fn all_caps_keeps_character_indices() {
     };
     assert_eq!(ids(&caps), ids(&upper));
     assert_eq!(caps.chars[2].source, 2..3);
+}
+
+/// `sourceRectAtTime` measures text with the provider's fonts and shapes from
+/// their geometry.
+#[cfg(feature = "render")]
+#[test]
+fn provider_measures_text_and_shapes_for_expressions() {
+    use bae_anim::{EvaluatedPrim, SourceBounds};
+    use bae_model::{PrimPath, PrimType, Value};
+    let provider = bae_text::render::TextProvider::new();
+    let doc = bae_model::TextDocument::new("Hello", "ArialMT", 50.0);
+    let [_, _, w, h] = provider.text(&doc, false).expect("text bounds");
+    assert!(w > 50.0 && h > 20.0, "{w} × {h}");
+    let prim = |path: &str, ty: PrimType, attrs: Vec<(&str, Value)>| EvaluatedPrim {
+        path: PrimPath::new(path).unwrap(),
+        prim_type: Some(ty),
+        attrs: std::sync::Arc::new(attrs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()),
+        children: Vec::new().into(),
+    };
+    let rect = prim(
+        "/r",
+        PrimType::RECT,
+        vec![("size", Value::Vec2([100.0, 50.0]))],
+    );
+    let fill = prim("/f", PrimType::FILL, vec![]);
+    let r = provider.shapes(&[rect, fill], false).expect("shape bounds");
+    assert_eq!(r, [-50.0, -25.0, 100.0, 50.0]);
+}
+
+#[test]
+fn mixed_styles_share_a_line_and_paragraphs_have_independent_margins() {
+    let mut fonts = FontSystem::new();
+    let Some(font) = latin(&mut fonts) else {
+        return;
+    };
+    let mut doc = TextDocument::new("Abc\nDe", font, 20.);
+    doc.edit_styles(1..2, |s| {
+        s.font_size = 40.;
+        s.fill_color = [1., 0., 0., 1.];
+        s.baseline_shift = 6.;
+    });
+    doc.edit_paragraphs(4..6, |p| {
+        p.left_indent = 12.;
+        p.first_line_indent = 8.;
+    });
+    let l = layout_text(&mut fonts, &doc);
+    assert_eq!(
+        l.chars.iter().map(|c| c.source.start).collect::<Vec<_>>(),
+        [0, 1, 2, 3, 4, 5]
+    );
+    assert_eq!(l.chars[1].origin.y, -6.);
+    assert_eq!(
+        l.runs
+            .iter()
+            .find(|r| r.glyphs.iter().any(|g| g.char_index == 1))
+            .unwrap()
+            .font_size,
+        40.
+    );
+    assert_eq!(l.lines[1].x, 20.);
+    let c = &l.chars[4];
+    assert_eq!(
+        l.cursor_at(c.origin.x + 0.1 * c.advance, l.lines[1].baseline),
+        Some(4)
+    );
+}
+
+#[test]
+fn vertical_columns_keep_punctuation_and_combined_digits_together() {
+    let mut fonts = FontSystem::new();
+    let Some(font) = latin(&mut fonts) else {
+        return;
+    };
+    let mut d = doc("中日、文12A", &font);
+    d.line_orientation = bae_model::LineOrientation::Vertical;
+    d.box_size = Some([300., 101.]);
+    d.edit_styles(4..6, |s| {
+        s.baseline_direction = bae_model::BaselineDirection::TateChuYoko;
+        s.fill_color = [1., 0., 0., 1.];
+    });
+    let l = layout_text(&mut fonts, &d);
+    assert!(l.lines.len() >= 3);
+    assert!(l.lines.windows(2).all(|p| p[0].baseline > p[1].baseline));
+    assert_eq!(
+        l.chars[1].line, l.chars[2].line,
+        "closing punctuation stays with previous glyph"
+    );
+    let digits = &l.chars[4..6];
+    assert!(
+        digits
+            .iter()
+            .all(|c| c.combined_em.is_some() && c.paint.fill == Some([1., 0., 0., 1.]))
+    );
+    assert!(digits[1].origin.x > digits[0].origin.x);
+    assert_eq!(digits[1].origin.y, digits[0].origin.y);
+    let basis = |index| {
+        l.runs
+            .iter()
+            .find(|r| r.glyphs.iter().any(|g| g.char_index == index))
+            .unwrap()
+            .basis
+    };
+    assert_eq!(basis(0), kurbo::Affine::IDENTITY, "upright CJK");
+    assert_eq!(
+        basis(6).as_coeffs(),
+        [0., 1., -1., 0., 0., 0.],
+        "clockwise Latin"
+    );
+    assert!(l.bounds(false).unwrap().height() > 0.);
+}
+
+#[test]
+fn vertical_point_tracking_leading_shift_and_roman_alignment() {
+    let mut fonts = FontSystem::new();
+    let Some(font) = latin(&mut fonts) else {
+        return;
+    };
+    let mut d = doc("AB\nC", &font);
+    d.line_orientation = bae_model::LineOrientation::Vertical;
+    d.style.tracking = 100.;
+    d.style.leading = Some(70.);
+    d.style.baseline_shift = 5.;
+    d.style.baseline_direction = bae_model::BaselineDirection::UprightRoman;
+    let l = layout_text(&mut fonts, &d);
+    assert_eq!(l.lines.len(), 2);
+    assert_eq!(l.chars[0].origin, kurbo::Point::new(5., 0.));
+    assert_eq!(l.chars[1].origin.y, 55.);
+    assert_eq!(l.chars[3].origin.x, -65.);
+    assert!(l.runs.iter().all(|r| r.basis == kurbo::Affine::IDENTITY));
 }

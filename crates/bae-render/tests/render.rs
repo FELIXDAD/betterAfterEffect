@@ -53,55 +53,85 @@ fn render(r: &mut Renderer, comp: &RenderComp, req: &RenderRequest, alpha: Outpu
     }
 }
 
-/// CPU reference: straight `src` over straight `dst` with AE's generic equation.
-fn reference(mode: BlendMode, src: [f32; 4], opacity: f32, dst: [f32; 4], clamp: bool) -> [f32; 4] {
-    let a_s = src[3] * opacity;
-    let a_b = dst[3];
-    let b = |cb: f32, cs: f32| -> f32 {
-        let v = match mode {
-            BlendMode::Multiply => cb * cs,
-            BlendMode::Add => cb + cs,
-            BlendMode::Screen => cb + cs - cb * cs,
-            BlendMode::Overlay => {
-                if cb <= 0.5 {
-                    2.0 * cs * cb
-                } else {
-                    1.0 - 2.0 * (1.0 - cs) * (1.0 - cb)
-                }
-            }
-            _ => cs,
-        };
-        if clamp { v.clamp(0.0, 1.0) } else { v }
-    };
-    let ao = a_s + a_b * (1.0 - a_s);
-    let mut out = [0.0; 4];
-    if mode == BlendMode::Add {
-        // AE's Add: premultiplied backdrop + source (measured against AE 26.2).
-        for c in 0..3 {
-            let mut cop = src[c] * a_s + dst[c] * a_b;
-            if clamp {
-                cop = cop.min(ao);
-            }
-            out[c] = cop / ao;
-        }
-        out[3] = ao;
-        return out;
-    }
-    for c in 0..3 {
-        let cop =
-            (1.0 - a_b) * src[c] * a_s + (1.0 - a_s) * dst[c] * a_b + a_s * a_b * b(dst[c], src[c]);
-        out[c] = if ao > 0.0 { cop / ao } else { 0.0 };
-    }
-    out[3] = ao;
-    out
-}
-
-fn to8(c: [f32; 4]) -> [u8; 4] {
-    c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
-}
+#[path = "ae/blend_reference.rs"]
+mod blend_reference;
 
 fn close(a: [u8; 4], b: [u8; 4], tol: u8) -> bool {
     a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= tol)
+}
+
+#[test]
+fn output_targets_reuse_only_the_returned_storage() {
+    let Some(gpu) = gpu() else { return };
+    let mut renderer = Renderer::with_config(
+        gpu.clone(),
+        bae_render::RendererConfig {
+            frame_cache_bytes: 0,
+            ..Default::default()
+        },
+    );
+    let comp = RenderComp::new(p("/comps/main"), 64, 48);
+    let frame = renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    let target = renderer
+        .output_texture(&frame, OutputAlpha::Over([1.0, 0.0, 0.0]), None)
+        .unwrap();
+    let spare = renderer
+        .output_texture(&frame, OutputAlpha::Straight, None)
+        .unwrap();
+    let storage = spare.view().texture().clone();
+    let (_, spare) = renderer
+        .render_frame_output(
+            &comp,
+            &RenderRequest::full(),
+            None,
+            OutputAlpha::Over([0.0, 0.0, 1.0]),
+            Some(spare),
+        )
+        .unwrap();
+    assert_eq!(spare.view().texture(), &storage);
+    assert_ne!(target.view().texture(), &storage);
+    let pixels =
+        |texture: &bae_gpu::wgpu::Texture| bae_gpu::transfer::read_texture(&gpu, texture).unwrap();
+    assert_eq!(
+        pixels(target.view().texture()).pixel(0, 0),
+        [255, 0, 0, 255]
+    );
+    assert_eq!(pixels(spare.view().texture()).pixel(0, 0), [0, 0, 255, 255]);
+    let half = renderer
+        .render_frame(
+            &comp,
+            &RenderRequest {
+                resolution: Resolution::Half,
+                ..RenderRequest::full()
+            },
+        )
+        .unwrap();
+    let resized = renderer
+        .output_texture(&half, OutputAlpha::Straight, Some(spare))
+        .unwrap();
+    assert_eq!(resized.size(), [32, 24]);
+    assert_ne!(resized.view().texture(), &storage);
+    assert_eq!(renderer.frame_cache().stats().entries, 0);
+    renderer.set_frame_cache_budget(1 << 20);
+    renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    let (cached, output) = renderer
+        .render_frame_output(
+            &comp,
+            &RenderRequest::full(),
+            None,
+            OutputAlpha::Over([0.0, 1.0, 0.0]),
+            Some(target),
+        )
+        .unwrap();
+    assert!(cached.from_cache);
+    assert_eq!(
+        pixels(output.view().texture()).pixel(0, 0),
+        [0, 255, 0, 255]
+    );
 }
 
 #[test]
@@ -126,13 +156,9 @@ fn solids_are_pixel_exact_and_cover_their_rectangles() {
         &RenderRequest::full(),
         OutputAlpha::Premultiplied,
     );
-    assert!(
-        close(img.px(10, 6), [128, 0, 0, 128], 1),
-        "{:?}",
-        img.px(10, 6)
-    );
+    assert_eq!(img.px(10, 6), [128, 0, 0, 128]);
     assert_eq!(img.px(11, 6), [255, 0, 0, 255]);
-    assert!(close(img.px(30, 6), [128, 0, 0, 128], 1));
+    assert_eq!(img.px(30, 6), [128, 0, 0, 128]);
 }
 
 #[test]
@@ -164,37 +190,45 @@ fn rotated_layer_coverage_sums_to_its_area() {
 #[test]
 fn blend_modes_match_the_reference() {
     let Some(gpu) = gpu() else { return };
-    let mut r = Renderer::new(gpu);
-    let dst = [0.8, 0.4, 0.2, 1.0];
-    let src = [0.3, 0.6, 0.9, 1.0];
-    let half_dst = [0.8, 0.4, 0.2, 0.5];
-    for depth in [BitDepth::Bpc8, BitDepth::Float32] {
-        for mode in [
-            BlendMode::Normal,
-            BlendMode::Add,
-            BlendMode::Multiply,
-            BlendMode::Screen,
-            BlendMode::Overlay,
-        ] {
-            for (backdrop, opacity) in [(dst, 1.0), (dst, 0.5), (half_dst, 0.75)] {
-                let mut comp = RenderComp::new(p("/comps/main"), 8, 8);
-                let mut top = solid("top", src, [8, 8], [0.0, 0.0]);
+    let mut r = Renderer::new(gpu.clone());
+    for depth in [BitDepth::Bpc8, BitDepth::Bpc16, BitDepth::Float32] {
+        for mode in BlendMode::ALL {
+            let pairs = [
+                ([0.25, 0.75, 1., 1.], [0., 0.50, 0.75, 1.], 1.),
+                ([0.75, 0.375, 0.125, 0.5], [0.25, 0.625, 0.875, 0.75], 0.75),
+                ([0.25, 0.25, 0.25, 1.], [0.625, 0., 0.25, 0.5], 1.),
+            ];
+            for (backdrop, src, opacity) in pairs {
+                let mut comp = RenderComp::new(p("/comps/main"), 4, 4);
+                let mut top = solid("top", src, [4, 4], [0., 0.]);
                 top.blend_mode = mode;
                 top.opacity = opacity;
-                comp.layers.push(top);
-                comp.layers
-                    .push(solid("bottom", backdrop, [8, 8], [0.0, 0.0]));
-                let req = RenderRequest {
-                    depth,
-                    ..RenderRequest::full()
-                };
-                let img = render(&mut r, &comp, &req, OutputAlpha::Straight);
-                let want = to8(reference(mode, src, opacity, backdrop, depth.clamps()));
-                assert!(
-                    close(img.px(4, 4), want, 2),
-                    "{mode} {depth:?} opacity {opacity} backdrop {backdrop:?}: got {:?} want {want:?}",
-                    img.px(4, 4)
-                );
+                comp.layers = vec![top, solid("bottom", backdrop, [4, 4], [0., 0.])];
+                let frame = r
+                    .render_frame(
+                        &comp,
+                        &RenderRequest {
+                            depth,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                let pixels = bae_render::testing::read_pixels(&gpu, &frame.image).unwrap();
+                for (idx, got) in pixels.iter().enumerate() {
+                    let random = blend_reference::random(
+                        idx as u32 % 4,
+                        idx as u32 / 4,
+                        comp.layers[0].path.as_str(),
+                        0,
+                    );
+                    let want = blend_reference::pixel(mode, src, opacity, backdrop, depth, random);
+                    for c in 0..4 {
+                        assert!(
+                            (want[c] - got[c]).abs() <= 0.002 * want[c].abs().max(1.),
+                            "{mode} {depth:?} {src:?} over {backdrop:?}: {got:?} vs {want:?}"
+                        );
+                    }
+                }
             }
         }
     }
@@ -450,9 +484,14 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
         p("/comps/main/layers/img"),
         LayerContent::Footage(bae_render::FootageRef {
             asset: p("/assets/img"),
+            psd_layer: None,
+            file_revision: 0,
             file: Some(path),
             size: None,
+            alphabetical: false,
             source_time: Time::ZERO,
+            sequence: None,
+            blend: None,
         }),
     );
     l.transform = DAffine2::from_translation(DVec2::new(2.0, 1.0));
@@ -471,4 +510,265 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
         img.px(5, 2)
     );
     assert_eq!(img.px(1, 1), [0, 0, 0, 0]);
+}
+
+#[cfg(feature = "media")]
+#[test]
+fn photoshop_masks_reach_the_frame_cache_and_gpu() {
+    use bae_model::psd::{LayerImage, LayerKey, PixelMask};
+    let Some(gpu) = gpu() else { return };
+    let mut renderer = Renderer::new(gpu);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bae-interop-psd/tests/fixtures/art.psd");
+    let comp_path = p("/comps/art");
+    let mut comp = RenderComp::new(comp_path, 3, 2);
+    let footage = |id, mask| {
+        LayerContent::Footage(bae_render::FootageRef {
+            asset: p("/assets/art"),
+            file: Some(path.clone()),
+            size: Some([3, 2]),
+            source_time: Time::ZERO,
+            sequence: None,
+            alphabetical: false,
+            file_revision: 0,
+            psd_layer: Some(LayerImage {
+                key: LayerKey::Id(id),
+                canvas: false,
+                mask,
+            }),
+            blend: None,
+        })
+    };
+    comp.layers.push(RenderLayer::new(
+        p("/comps/art/base"),
+        footage(2, PixelMask::Disabled),
+    ));
+    let raw = render(
+        &mut renderer,
+        &comp,
+        &RenderRequest::full(),
+        OutputAlpha::Straight,
+    );
+    assert!(raw.px(1, 0)[3].abs_diff(230) <= 1);
+    comp.layers[0].content = footage(2, PixelMask::AsSaved);
+    let masked = render(
+        &mut renderer,
+        &comp,
+        &RenderRequest::full(),
+        OutputAlpha::Straight,
+    );
+    assert_eq!(masked.px(0, 0)[3], 0);
+    assert!(masked.px(1, 0)[3].abs_diff(115) <= 1);
+    let mut group_mask = RenderLayer::new(
+        p("/comps/art/group_mask"),
+        footage(
+            4,
+            PixelMask::Group {
+                origin: [1, 1],
+                size: [3, 2],
+                inverted: false,
+                density: 65535,
+            },
+        ),
+    );
+    group_mask.blend_mode = BlendMode::StencilAlpha;
+    comp.layers.insert(0, group_mask);
+    let group = render(
+        &mut renderer,
+        &comp,
+        &RenderRequest::full(),
+        OutputAlpha::Straight,
+    );
+    assert_eq!(group.px(1, 1)[3], 0);
+    assert!(group.px(1, 0)[3].abs_diff(115) <= 1);
+}
+
+#[cfg(feature = "media")]
+#[test]
+fn frame_mix_blends_neighbouring_sequence_frames() {
+    let Some(gpu) = gpu() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // A 3-frame sequence: red, green, blue.
+    for (i, rgb) in [[255u8, 0, 0], [0, 255, 0], [0, 0, 255]].iter().enumerate() {
+        let data = [rgb[0], rgb[1], rgb[2], 255].repeat(4);
+        bae_render::png_out::write_rgba8(
+            &dir.path().join(format!("seq_{i:04}.png")),
+            &bae_gpu::transfer::ImageData {
+                width: 2,
+                height: 2,
+                format: bae_gpu::wgpu::TextureFormat::Rgba8Unorm,
+                bytes_per_row: 8,
+                data,
+            },
+        )
+        .unwrap();
+    }
+    let fps = bae_model::FrameRate::FPS_30;
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 2, 2);
+    let footage = |blend| {
+        LayerContent::Footage(bae_render::FootageRef {
+            asset: p("/assets/seq"),
+            psd_layer: None,
+            file_revision: 0,
+            file: Some(dir.path().join("seq_0000.png")),
+            size: None,
+            alphabetical: false,
+            source_time: fps.frame_to_time(1),
+            sequence: Some(fps),
+            blend,
+        })
+    };
+    comp.layers
+        .push(RenderLayer::new(p("/comps/main/layers/seq"), footage(None)));
+    let plain = render(&mut r, &comp, &RenderRequest::full(), OutputAlpha::Straight);
+    assert_eq!(plain.px(0, 0), [0, 255, 0, 255]);
+    comp.layers[0].content = footage(Some(bae_render::FrameBlend {
+        span: fps.frame_duration(),
+        pixel_motion: false,
+    }));
+    let frame = r.render_frame(&comp, &RenderRequest::full()).unwrap();
+    assert!(frame.warnings.is_empty(), "{:?}", frame.warnings);
+    let img = r.read_rgba8(&frame, OutputAlpha::Straight).unwrap();
+    let px = Image {
+        w: img.width,
+        data: img.data,
+    }
+    .px(1, 1);
+    // ~5.5 % red + 89 % green + 5.5 % blue, still opaque.
+    assert!(close(px, [14, 228, 14, 255], 4), "{px:?}");
+}
+
+#[test]
+fn dissolve_frames_and_roi_use_composition_coordinates() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 32, 24);
+    comp.layers
+        .push(solid("grain", [1., 1., 1., 0.5], [32, 24], [0., 0.]));
+    for mode in [BlendMode::Dissolve, BlendMode::DancingDissolve] {
+        comp.layers[0].blend_mode = mode;
+        comp.time = Time::ZERO;
+        let first = render(
+            &mut r,
+            &comp,
+            &RenderRequest::full(),
+            OutputAlpha::Premultiplied,
+        );
+        comp.time = comp.frame_rate.frame_to_time(1);
+        let second = render(
+            &mut r,
+            &comp,
+            &RenderRequest::full(),
+            OutputAlpha::Premultiplied,
+        );
+        assert_eq!(first.data == second.data, mode == BlendMode::Dissolve);
+        let req = RenderRequest {
+            roi: Some(IRect::new(5, 7, 21, 18)),
+            ..Default::default()
+        };
+        let crop = render(&mut r, &comp, &req, OutputAlpha::Premultiplied);
+        for y in 0..11 {
+            for x in 0..16 {
+                let frame = u32::from(mode == BlendMode::DancingDissolve);
+                let random =
+                    blend_reference::random(x + 5, y + 7, comp.layers[0].path.as_str(), frame);
+                assert_eq!(crop.px(x, y), [if random < 0.5 { 255 } else { 0 }; 4]);
+                assert_eq!(crop.px(x, y), second.px(x + 5, y + 7));
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_dissolve_time_invalidates_only_dancing_frames() {
+    let mut inner = RenderComp::new(p("/comps/pre"), 4, 4);
+    inner.layers.push(solid("grain", [1.; 4], [4, 4], [0., 0.]));
+    let mut outer = RenderComp::new(p("/comps/main"), 4, 4);
+    outer.layers.push(RenderLayer::new(
+        p("/comps/main/layers/pre"),
+        LayerContent::None,
+    ));
+    for mode in [BlendMode::Dissolve, BlendMode::DancingDissolve] {
+        inner.layers[0].blend_mode = mode;
+        let mut hashes = vec![];
+        for n in [0, 1, 0] {
+            inner.time = inner.frame_rate.frame_to_time(n);
+            outer.layers[0].content = LayerContent::Comp(Arc::new(inner.clone()));
+            hashes.push(outer.content_hash());
+        }
+        assert_eq!(hashes[0] == hashes[1], mode == BlendMode::Dissolve);
+        assert_eq!(hashes[0], hashes[2]);
+    }
+}
+
+#[test]
+fn empty_stencil_clears_layers_below_and_keeps_layers_above() {
+    let Some(gpu) = gpu() else { return };
+    let mut renderer = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 8, 8);
+    comp.layers = vec![
+        solid("above", [1., 0., 0., 1.], [1, 1], [0., 0.]),
+        solid("stencil", [1.; 4], [3, 3], [3., 3.]),
+        solid("middle", [0., 1., 0., 1.], [4, 8], [0., 0.]),
+        solid("bottom", [0., 0., 1., 1.], [8, 8], [0., 0.]),
+    ];
+    for mode in [BlendMode::StencilAlpha, BlendMode::StencilLuma] {
+        comp.layers[1].blend_mode = mode;
+        for (offset, opacity) in [(3., 1.), (3., 0.), (30., 1.)] {
+            comp.layers[1].transform = DAffine2::from_translation(DVec2::splat(offset));
+            comp.layers[1].opacity = opacity;
+            let img = render(
+                &mut renderer,
+                &comp,
+                &RenderRequest::full(),
+                OutputAlpha::Premultiplied,
+            );
+            assert_eq!(img.px(0, 0), [255, 0, 0, 255]);
+            assert_eq!(img.px(1, 2), [0; 4]);
+            assert_eq!(img.px(7, 7), [0; 4]);
+            if offset == 3. && opacity == 1. {
+                assert_eq!(img.px(3, 3), [0, 255, 0, 255]);
+                assert_eq!(img.px(4, 3), [0, 0, 255, 255]);
+            } else {
+                assert_eq!(img.px(3, 3), [0; 4]);
+            }
+        }
+    }
+}
+
+#[test]
+fn float_arithmetic_preserves_hdr_and_negative_values() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu.clone());
+    for mode in [
+        BlendMode::Divide,
+        BlendMode::Subtract,
+        BlendMode::LinearBurn,
+        BlendMode::LinearLight,
+        BlendMode::Multiply,
+    ] {
+        let mut c = RenderComp::new(p("/comps/main"), 2, 2);
+        let b = [2., -0.25, 0.75, 1.];
+        let s = [0.5, 0.25, 0., 1.];
+        c.layers = vec![
+            solid("src", s, [2, 2], [0., 0.]),
+            solid("base", b, [2, 2], [0., 0.]),
+        ];
+        c.layers[0].blend_mode = mode;
+        let req = RenderRequest {
+            depth: BitDepth::Float32,
+            format: bae_render::WorkFormat::Rgba32Float,
+            ..Default::default()
+        };
+        let image = r.render_frame(&c, &req).unwrap().image;
+        let got = bae_render::testing::read_pixels(&gpu, &image).unwrap()[0];
+        let want = blend_reference::pixel(mode, s, 1., b, req.depth, 0.);
+        for i in 0..4 {
+            assert!(
+                (got[i] - want[i]).abs() < 0.001,
+                "{mode}: {got:?} vs {want:?}"
+            );
+        }
+    }
 }

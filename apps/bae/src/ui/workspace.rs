@@ -83,6 +83,26 @@ pub fn failure_notice(error: &bae_model::CommandError) -> String {
     }
 }
 
+/// The status bar template of a plugin notice (`{plugin}`, `{detail}`).
+pub fn plugin_notice_template(kind: bae_plugin::NoticeKind) -> &'static str {
+    use bae_plugin::NoticeKind as K;
+    match kind {
+        K::LoadFailed => "Plugin {plugin} could not be loaded and is disabled: {detail}",
+        K::RenderFailed => "Plugin {plugin} failed to render a frame: {detail}",
+        K::Crashed => "Plugin {plugin} crashed and will be restarted: {detail}",
+        K::Disabled => {
+            "Plugin {plugin} stopped working and was disabled for this session: {detail}"
+        }
+    }
+}
+
+/// The status bar text for a plugin notice (load failure, crash, disabled).
+pub fn plugin_notice(notice: &bae_plugin::Notice) -> String {
+    tr(plugin_notice_template(notice.kind))
+        .replace("{plugin}", &notice.plugin)
+        .replace("{detail}", &notice.detail)
+}
+
 /// The viewport texture the composition placeholder shows (an app resource).
 #[derive(Debug, Clone, Copy)]
 pub struct PlaceholderViewer(pub ViewportTextureId);
@@ -117,14 +137,64 @@ pub struct ShortcutRow {
 
 /// Preferences > Startup & Repair > Reveal Preferences in Explorer / Finder.
 pub const REVEAL_PREFERENCES: &str = "startup_repair.reveal_preferences_in_explorer";
+pub const MEMORY_DETAILS: &str = "memory_cpu.show_memory_usage_details";
+pub const GPU_INFORMATION: &str = "memory_cpu.gpu_information";
+
+pub(crate) fn hardware_information(
+    id: &str,
+    resources: &Resources,
+) -> Option<(&'static str, String)> {
+    match id {
+        MEMORY_DETAILS => {
+            let show = |n: Option<u64>| {
+                n.map(|n| format!("{:.1} MB", n as f64 / (1_u64 << 20) as f64))
+                    .unwrap_or_else(|| "—".to_owned())
+            };
+            let body = format!(
+                "{} {}\nBAE ({})   {} {}",
+                tr("Installed RAM:"),
+                show(bae_platform::memory::total_bytes()),
+                std::process::id(),
+                tr("Resident Memory:"),
+                show(bae_platform::memory::resident_bytes())
+            );
+            Some((tr("Memory Usage Details"), body))
+        }
+        GPU_INFORMATION => {
+            let body = resources
+                .get::<Arc<bae_gpu::GpuContext>>()
+                .map(|gpu| {
+                    let info = gpu.adapter_info();
+                    let mut lines = vec![gpu_summary(gpu)];
+                    if !info.driver.is_empty() {
+                        lines.push(format!("{} {}", tr("Driver:"), info.driver));
+                    }
+                    if !info.driver_info.is_empty() {
+                        lines.push(info.driver_info.clone());
+                    }
+                    lines.push(format!(
+                        "{} {} px",
+                        tr("Maximum Texture Dimension:"),
+                        gpu.limits().max_texture_dimension_2d
+                    ));
+                    lines.join("\n")
+                })
+                .unwrap_or_else(|| tr("No active GPU device.").to_owned());
+            Some((tr("GPU Information"), body))
+        }
+        _ => None,
+    }
+}
 
 /// The workbench plus shell-owned windows.
 pub struct Workspace {
     workbench: Workbench,
     show_about: bool,
+    home: bool,
     /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
     prefs: Arc<bae_prefs::PrefsStore>,
     settings: bae_ui::settings::SettingsDialog,
+    audio_page_visible: bool,
 }
 
 impl Workspace {
@@ -133,12 +203,45 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        bae_ui_motion::tools::configure_camera_keys(app, &prefs);
+        if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
+            let apply = move |p: &bae_prefs::Preferences| {
+                session.configure_output(
+                    p.str("audio.audio_default_output"),
+                    p.str("audio.audio_latency_ms")
+                        .parse()
+                        .expect("validated latency"),
+                );
+                session.lock().set_audio_mapping(
+                    p.str("audio.audio_map_left") == "channel_2",
+                    p.str("audio.audio_map_right") == "channel_1",
+                );
+            };
+            apply(&prefs.current());
+            prefs.subscribe(apply);
+        }
+        let mut workbench = Workbench::new(app, state);
+        // Keyboard Shortcuts presets are files in the config folder (AE: aeks/).
+        workbench.set_shortcut_presets_dir(
+            app.resource::<bae_platform::AppDirs>()
+                .map(|d| d.config.join(bae_ui::workbench::SHORTCUT_PRESETS_FOLDER)),
+        );
         Self {
-            workbench: Workbench::new(app, state),
+            workbench,
             show_about: false,
+            home: false,
+            audio_page_visible: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
-                .with_host_buttons(&[REVEAL_PREFERENCES, "choose"]),
+                .with_installed_ram(bae_platform::memory::total_bytes())
+                .with_host_buttons(&[
+                    "appearance.reset_coachmarks",
+                    REVEAL_PREFERENCES,
+                    "startup_repair.start_in_safe_mode",
+                    MEMORY_DETAILS,
+                    GPU_INFORMATION,
+                    "choose",
+                ]),
         }
     }
 
@@ -148,8 +251,8 @@ impl Workspace {
         self.settings.open(page, &current);
     }
 
-    /// The Preferences window (acceptance tests, macOS run).
-    #[cfg(all(test, target_os = "macos"))]
+    /// The Preferences window for application acceptance tests.
+    #[cfg(test)]
     pub fn settings_dialog(&mut self) -> &mut bae_ui::settings::SettingsDialog {
         &mut self.settings
     }
@@ -157,7 +260,15 @@ impl Workspace {
     /// Buttons of the Preferences window the shell runs ([`REVEAL_PREFERENCES`],
     /// `choose:<key>`).
     pub fn take_settings_requests(&mut self) -> Vec<String> {
-        self.settings.take_requests()
+        let mut requests = self.settings.take_requests();
+        requests.retain(|id| {
+            if id == "appearance.reset_coachmarks" {
+                self.workbench.reset_coachmarks();
+                return false;
+            }
+            true
+        });
+        requests
     }
 
     /// Answers a Choose Folder… button.
@@ -165,12 +276,38 @@ impl Workspace {
         self.settings.set(key, value);
     }
 
-    /// Ask for the user's role (first launch).
-    /// A modal dialog (the welcome / role picker, Preferences, a module dialog
-    /// such as Composition Settings) is open: it owns the keyboard and the menu
-    /// commands wait.
+    /// Whether Home or another dialog currently owns keyboard input.
     pub fn modal_open(&self, resources: &Resources) -> bool {
-        self.workbench.modal_open(resources) || self.settings.is_open()
+        self.home || self.workbench.modal_open(resources) || self.settings.is_open()
+    }
+
+    /// Home gives way to native menu commands. Other dialogs retain their modal guard.
+    pub fn accepts_native_menu(&mut self, resources: &Resources, inv: &Invocation) -> bool {
+        self.dismiss_home();
+        inv.id == bae_ui::action::ids::QUIT || !self.modal_open(resources)
+    }
+
+    /// Close the startup Home screen as soon as a command or project takes its place.
+    pub fn dismiss_home(&mut self) {
+        if self.home {
+            self.home = false;
+            // Native events can arrive before another frame refreshes the workbench.
+            self.workbench.set_external_modal(self.settings.is_open());
+        }
+    }
+
+    pub fn start_without_project(&mut self, first_run: bool) {
+        if self
+            .prefs
+            .current()
+            .bool("startup_repair.enable_home_screen")
+        {
+            if first_run {
+                self.show_role_picker();
+            } else {
+                self.home = true;
+            }
+        }
     }
 
     pub fn show_role_picker(&mut self) {
@@ -203,6 +340,18 @@ impl Workspace {
             .collect()
     }
 
+    /// Where Keyboard Shortcuts keeps its presets (acceptance tests, macOS run:
+    /// a temporary folder).
+    #[cfg(all(test, target_os = "macos"))]
+    pub fn set_shortcut_presets_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.workbench.set_shortcut_presets_dir(dir);
+    }
+
+    /// Whether the state should be saved now (OK in Keyboard Shortcuts).
+    pub fn take_save_request(&mut self) -> bool {
+        self.workbench.take_save_request()
+    }
+
     /// The state to persist between sessions.
     pub fn state(&mut self) -> WorkbenchState {
         self.workbench.state()
@@ -221,6 +370,47 @@ impl Workspace {
         doc: &Document,
         resources: &Resources,
     ) -> Vec<Invocation> {
+        // egui uses these timings for hover tips on both enabled and disabled controls.
+        let show_tips = self.prefs.current().bool("appearance.show_tool_tips");
+        let interaction = &ui.ctx().global_style().interaction;
+        if show_tips == interaction.tooltip_delay.is_infinite() {
+            let defaults = egui::style::Interaction::default();
+            ui.ctx().global_style_mut(|style| {
+                style.interaction.tooltip_delay = if show_tips {
+                    defaults.tooltip_delay
+                } else {
+                    f32::INFINITY
+                };
+                style.interaction.tooltip_grace_time = if show_tips {
+                    defaults.tooltip_grace_time
+                } else {
+                    0.0
+                };
+            });
+        }
+        if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
+            let audio_page = self.settings.is_open() && self.settings.page() == "audio";
+            if audio_page && !self.audio_page_visible {
+                session.refresh_output_devices();
+            }
+            self.audio_page_visible = audio_page;
+            let mut s = session.lock();
+            s.sync_playback(doc.stage());
+            s.tick(std::time::Instant::now());
+            if audio_page {
+                let devices = s.output_devices();
+                self.settings.set_audio_output(
+                    s.audio_output_info(),
+                    s.audio_buffer_ms(),
+                    &devices.default_name,
+                    devices.outputs.clone(),
+                );
+                if s.audio_device_pending() {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(50));
+                }
+            }
+        }
         let title = doc.title();
         let cx = WorkbenchContext {
             stage: doc.stage(),
@@ -229,12 +419,46 @@ impl Workspace {
             title: &title,
             dirty: doc.is_dirty(),
         };
-        self.workbench.set_external_modal(self.settings.is_open());
-        let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
-        if let bae_ui::settings::Outcome::Ok(prefs) = self.settings.show(ui.ctx())
-            && let Err(error) = self.prefs.set(prefs)
-        {
-            tracing::warn!("could not save preferences: {error}");
+        self.workbench
+            .set_external_modal(self.settings.is_open() || self.home);
+        let mut out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
+        if self.home {
+            let modal = egui::Modal::new(egui::Id::new("bae-home")).show(ui.ctx(), |ui| {
+                ui.heading(tr("Welcome to BAE"));
+                ui.horizontal(|ui| {
+                    for (label, id) in [
+                        ("New Project", bae_ui::action::ids::NEW_PROJECT),
+                        ("Open Project", bae_ui::action::ids::OPEN_PROJECT),
+                    ] {
+                        if ui.button(tr(label)).clicked() {
+                            out.push(Invocation::new(id));
+                            self.dismiss_home();
+                        }
+                    }
+                });
+            });
+            if modal.should_close() {
+                self.dismiss_home();
+            }
+        }
+        if self.settings.is_open() {
+            let outcome = self.settings.show(ui.ctx());
+            if outcome == bae_ui::settings::Outcome::None {
+                if let Some(draft) = self.settings.take_display_preview() {
+                    self.prefs.preview_display(Some(draft));
+                    bae_ui::settings::apply(draft);
+                    ui.ctx().request_repaint();
+                }
+            } else {
+                self.prefs.preview_display(None);
+                if let bae_ui::settings::Outcome::Ok(prefs) = outcome
+                    && let Err(error) = self.prefs.set(prefs)
+                {
+                    tracing::warn!("could not save preferences: {error}");
+                }
+                bae_ui::settings::apply(&self.prefs.current());
+                ui.ctx().request_repaint();
+            }
         }
         if self.show_about {
             let mut open = true;
@@ -269,7 +493,18 @@ impl Workspace {
             title: &title,
             dirty: false,
         };
-        (!self.workbench.handle(&inv, &cx)).then_some(inv)
+        if self.workbench.handle(&inv, &cx) {
+            return None;
+        }
+        let mut inv = inv;
+        if matches!(inv.id.as_str(), "attr.set_at" | "attr.set_many")
+            && resources
+                .get::<bae_ui_motion::SharedSession>()
+                .is_some_and(|s| s.lock().auto_key)
+        {
+            inv.params["auto_key"] = true.into();
+        }
+        Some(inv)
     }
 
     /// The menus modules contributed (`Registry<MenuItemSpec>`), for the active
@@ -300,19 +535,67 @@ impl Workspace {
         }
     }
 
+    /// Gives the panel `kind` the keyboard focus (tests: the shortcut sweep).
+    #[cfg(test)]
+    pub fn focus_panel(&mut self, kind: &str) {
+        if let Some(id) = self.open_panels().into_iter().find(|p| p.kind() == kind) {
+            self.workbench.dock_mut().focus_panel(&id);
+        }
+    }
+
+    /// The panel kind that has the keyboard focus.
+    #[cfg(test)]
+    pub fn focused_kind(&self) -> Option<String> {
+        self.workbench.focused_panel().map(|p| p.kind().to_owned())
+    }
+
     /// Panels open in the dock (Window menu check marks).
     pub fn open_panels(&self) -> Vec<bae_ui::PanelId> {
         self.workbench.dock().layout.panel_ids()
     }
 
     /// The effective keymap of the active workspace (menu shortcuts).
+    #[cfg(target_os = "macos")]
+    pub fn set_standard_system_shortcuts(&mut self, standard: bool) {
+        self.workbench.set_standard_system_shortcuts(standard);
+    }
+
     pub fn keymap(&self) -> &bae_ui::Keymap {
         self.workbench.keymap()
+    }
+
+    /// Remember the workspace independently of project edits and undo.
+    pub fn remember_project_workspace(&self, doc: &mut Document) {
+        doc.set_manifest_field("workspace", Some(self.active_workspace().into()));
+    }
+
+    pub fn restore_project_workspace(&mut self, doc: &Document) {
+        if !self
+            .prefs
+            .current()
+            .bool("project.preserve_current_workspace_on_open")
+            && let Some(id) = doc.manifest_field("workspace").and_then(|v| v.as_str())
+        {
+            self.workbench.switch_workspace(id);
+        }
     }
 
     /// Id of the active workspace.
     pub fn active_workspace(&self) -> &str {
         self.workbench.active_workspace()
+    }
+
+    /// English title of the active workspace.
+    pub fn active_workspace_title(&self) -> &str {
+        self.workspace_title(self.workbench.active_workspace())
+            .unwrap_or("")
+    }
+
+    pub fn workspace_title(&self, workspace: &str) -> Option<&str> {
+        self.workbench
+            .workspaces()
+            .find(|(id, _)| *id == workspace)
+            .map(|(_, p)| p.title.as_str())
     }
 
     /// Workspace ids and English titles in bar order (Window menu).
@@ -339,7 +622,8 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
         ui.separator();
     }
     if !status.gpu.is_empty() {
-        ui.label(small(status.gpu.clone()));
+        let adapter = ui.label(small(status.gpu.clone()));
+        bae_ui::a11y::value_source(&adapter, bae_ui::a11y::GPU_STATUS);
         ui.separator();
     }
     ui.label(small(

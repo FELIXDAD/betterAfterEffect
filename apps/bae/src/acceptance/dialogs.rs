@@ -118,6 +118,8 @@ fn composition_settings_edits_the_open_comp_in_one_undo_step() {
     assert!(dialog_open(&h));
     type_into(&mut h, "Width", "1000");
     key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(dialog_open(&h), "Tab opened the height field");
+    click_label(&mut h, "OK");
     assert!(!dialog_open(&h));
     let info = bae_motion::query::comp_info(h.state().stage(), &comp).unwrap();
     assert_eq!((info.width, info.height), (1000, 1080));

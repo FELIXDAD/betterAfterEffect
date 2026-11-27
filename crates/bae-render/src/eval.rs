@@ -39,6 +39,98 @@ use crate::input::{
 };
 use crate::request::RenderPurpose;
 
+/// Other frames of a comp for effects that read them, from an evaluator and
+/// the stage ([`crate::Renderer::render_frame_with`]).
+pub struct EvaluatorFrames<'a> {
+    /// The stage.
+    pub stage: &'a Stage,
+    /// The evaluator.
+    pub evaluator: &'a mut dyn CompEvaluator,
+}
+
+impl crate::graph::CompFrames for EvaluatorFrames<'_> {
+    fn animated_controls(&self, effect: &PrimPath, ids: &[u32]) -> bool {
+        ids.is_empty()
+            || self.stage.prim(effect).is_some_and(|fx| {
+                ids.iter().any(|id| {
+                    fx.attr(&bae_model::effect::param_attr(*id))
+                        .is_some_and(|a| a.is_animated() || a.expression.is_some())
+                })
+            })
+    }
+
+    fn parameters_at(
+        &mut self,
+        instance: &RenderEffect,
+        ids: &[u32],
+        frame: &crate::graph::EffectFrame,
+        times: &[Time],
+    ) -> Vec<crate::effect::ParameterSample> {
+        if times.is_empty() {
+            return Vec::new();
+        }
+        let Some(view) = self.stage.prim(&instance.path) else {
+            return Vec::new();
+        };
+        let mut samples: Vec<_> = times
+            .iter()
+            .map(|&time| crate::effect::ParameterSample {
+                time,
+                values: Vec::new(),
+            })
+            .collect();
+        for (id, current) in &instance.params {
+            if !ids.is_empty() && !ids.contains(id) {
+                continue;
+            }
+            let name = bae_model::effect::param_attr(*id);
+            let Some(attr) = view.attr(&name) else {
+                continue;
+            };
+            if !attr.is_animated() && attr.expression.is_none() {
+                continue;
+            }
+            let curve =
+                bae_anim::Curve::new(&attr.keyframes, bae_anim::schema::curve_kind(&name, attr));
+            for sample in &mut samples {
+                let value = if attr.expression.is_some() {
+                    self.evaluator.attribute(
+                        self.stage,
+                        &instance.path,
+                        &name,
+                        frame.comp_at(sample.time),
+                    )
+                } else {
+                    curve.as_ref().map(|curve| curve.sample(sample.time))
+                };
+                sample
+                    .values
+                    .push((*id, value.unwrap_or_else(|| current.clone())));
+            }
+        }
+        samples
+    }
+
+    fn scalar_track(
+        &mut self,
+        effect: &PrimPath,
+        id: u32,
+        frame: &crate::graph::EffectFrame,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let name = bae_model::effect::param_attr(id);
+        let attr = self.stage.prim(effect)?.attr(&name)?;
+        if !attr.is_animated() && attr.expression.is_none() {
+            return None;
+        }
+        self.evaluator
+            .integral(self.stage, effect, &name, frame, attr)
+    }
+
+    fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
+        self.evaluator.evaluate(self.stage, comp, time).map(Some)
+    }
+}
+
 /// Produces evaluated comps. Implemented by [`MockEvaluator`] and by
 /// [`crate::anim::AnimEvaluator`] (the adapter over 03's `bae-anim`).
 ///
@@ -53,6 +145,33 @@ pub trait CompEvaluator {
         time: Time,
     ) -> Result<RenderComp, RenderError>;
 
+    /// Evaluate a single effect attribute at composition time.
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<Value> {
+        bae_anim::Evaluator::new()
+            .evaluate_attribute(stage, path, name, time)
+            .ok()
+    }
+
+    /// Cumulative scalar samples for effects that integrate a parameter over time.
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        crate::parameter_track::prepare(&mut Default::default(), attr, frame, |t| {
+            Some((self.attribute(stage, path, name, t)?.as_f64()?, Vec::new()))
+        })
+    }
+
     /// Drops whatever `event` makes stale. Default: nothing is cached.
     fn invalidate(&mut self, _event: &StageEvent) {}
 
@@ -60,6 +179,10 @@ pub trait CompEvaluator {
     fn take_warnings(&mut self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Serves `sampleImage` expressions from `samples` (filled by
+    /// [`crate::Renderer::read_samples`]). Default: no expressions.
+    fn set_image_samples(&mut self, _samples: Option<std::sync::Arc<bae_anim::ImageSamples>>) {}
 }
 
 /// Evaluates a [`Stage`] with static values and linear keyframes.
@@ -161,6 +284,10 @@ impl<'a> MockPass<'a> {
                 float(&view, "shutter_phase", time).unwrap_or(-90.0),
             ],
             layers: Vec::new(),
+            // The mock evaluator draws every layer flat and unblurred.
+            camera: None,
+            lights: Vec::new(),
+            motion_blur: None,
         };
 
         let layer_paths = layer_paths(stage, path);
@@ -187,6 +314,9 @@ impl<'a> MockPass<'a> {
 
             let mut out = RenderLayer::new(layer.path().clone(), LayerContent::None);
             out.time = local;
+            out.start_time = start;
+            out.time_scale = if stretch == 0.0 { 1.0 } else { stretch / 100.0 };
+            out.in_point = in_point;
             out.active = in_point <= time && time < out_point && solo_ok && guide_ok;
             out.visible = boolean(layer, "enabled", local).unwrap_or(true);
             out.adjustment =
@@ -201,6 +331,8 @@ impl<'a> MockPass<'a> {
                 }),
                 None => BlendMode::Normal,
             };
+            out.quality =
+                bae_anim::LayerQuality::from_token(string(layer, "quality", local).as_deref());
             out.preserve_transparency =
                 boolean(layer, "preserve_transparency", local).unwrap_or(false);
             out.track_matte = string(layer, "track_matte", local)
@@ -214,8 +346,15 @@ impl<'a> MockPass<'a> {
                 });
             if out.active {
                 out.content = self.content(layer, &kind, local, depth)?;
-                out.effects = self.effects(layer, local);
+                if boolean(layer, "effects_enabled", local).unwrap_or(true) {
+                    out.effects = self.effects(layer, local);
+                }
+                out.layer_styles =
+                    bae_model::layer_styles::effective_styles(self.stage, layer.path())
+                        .and_then(|p| self.effect(p, local));
                 out.masks = self.masks(layer, local);
+                out.resolve_photoshop_mask(self.stage);
+                out.resolve_photoshop_group(self.stage, self.assets);
             }
             if layer_has_expressions(layer) {
                 self.warn(format!(
@@ -225,6 +364,7 @@ impl<'a> MockPass<'a> {
             }
             comp.layers.push(out);
         }
+        comp.photoshop_clipping_visibility(self.stage);
         Ok(comp)
     }
 
@@ -278,7 +418,8 @@ impl<'a> MockPass<'a> {
         local: Time,
         depth: usize,
     ) -> Result<LayerContent, RenderError> {
-        if matches!(kind, "null" | "camera" | "light" | "audio" | "adjustment") {
+        // Adjustment layers keep their source: its alpha is their coverage.
+        if matches!(kind, "null" | "camera" | "light" | "audio") {
             return Ok(LayerContent::None);
         }
         let stage = self.stage;
@@ -334,9 +475,20 @@ impl<'a> MockPass<'a> {
                 };
                 Ok(LayerContent::Footage(FootageRef {
                     asset: source,
+                    file_revision: bae_model::asset::file_revision(&src),
+                    psd_layer: bae_model::psd::LayerImage::from_asset(&src),
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: local,
+                    sequence: (asset_kind == "sequence").then(|| match src.value("frame_rate") {
+                        Some(Value::FrameRate(rate)) => *rate,
+                        _ => FrameRate::FPS_30,
+                    }),
+                    alphabetical: src
+                        .value("sequence:pattern")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s.starts_with("*.")),
+                    blend: None,
                 }))
             }
             _ => Ok(LayerContent::None),
@@ -347,25 +499,43 @@ impl<'a> MockPass<'a> {
         let stage = self.stage;
         children_of_type(stage, layer.path(), "effects", &PrimType::EFFECT)
             .into_iter()
-            .filter_map(|path| {
-                let fx = stage.prim(&path)?;
-                let mut params: Vec<(u32, Value)> = fx
-                    .attr_names()
-                    .into_iter()
-                    .filter_map(|name| {
-                        let id = bae_model::effect::param_id(name)?;
-                        Some((id, sample(&fx, name, local)?))
-                    })
-                    .collect();
-                params.sort_by_key(|(id, _)| *id);
-                Some(RenderEffect {
-                    effect: string(&fx, "match_name", local).unwrap_or_default(),
-                    enabled: boolean(&fx, "enabled", local).unwrap_or(true),
-                    params,
-                    path,
-                })
-            })
+            .filter_map(|path| self.effect(path, local))
             .collect()
+    }
+
+    fn effect(&self, path: PrimPath, local: Time) -> Option<RenderEffect> {
+        let fx = self.stage.prim(&path)?;
+        let mut params: Vec<(u32, Value)> = fx
+            .attr_names()
+            .into_iter()
+            .filter_map(|name| {
+                let id = bae_model::effect::param_id(name)?;
+                Some((id, sample(&fx, name, local)?))
+            })
+            .collect();
+        let effect = string(&fx, "match_name", local).unwrap_or_default();
+        if effect == "CC Ripple Pulse"
+            && fx
+                .attr("param:0002")
+                .is_some_and(|p| !p.keyframes.is_empty())
+        {
+            let span = sample(&fx, "param:0003", local)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let profile = bae_anim::effect_history::ripple_profile(local, span, |t| {
+                sample(&fx, "param:0002", t)
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(100.0)
+            });
+            params.push((bae_anim::effect_history::HISTORY_PARAM, profile));
+        }
+        params.sort_by_key(|(id, _)| *id);
+        Some(RenderEffect {
+            effect,
+            enabled: boolean(&fx, "enabled", local).unwrap_or(true),
+            params,
+            path,
+        })
     }
 
     fn masks(&self, layer: &PrimView<'_>, local: Time) -> Vec<RenderMask> {

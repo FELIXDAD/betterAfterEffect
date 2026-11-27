@@ -185,6 +185,13 @@ impl Appearance {
 
 static APPEARANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
+static ACCESSIBLE_CONTRAST: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_accessible_contrast(enabled: bool) {
+    ACCESSIBLE_CONTRAST.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Uses `a` from the next frame on.
 pub fn set_appearance(a: Appearance) {
     APPEARANCE.store(a as u8, std::sync::atomic::Ordering::Relaxed);
@@ -202,8 +209,16 @@ pub fn appearance() -> Appearance {
 /// `c` (premultiplied) as drawn with appearance `a`: only grays change; accent,
 /// label and image colors keep their values.
 pub fn adjust(c: Color32, a: Appearance) -> Color32 {
+    adjust_ui_color(
+        c,
+        a,
+        ACCESSIBLE_CONTRAST.load(std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
+fn adjust_ui_color(c: Color32, a: Appearance, accessible: bool) -> Color32 {
     let alpha = c.a();
-    if alpha == 0 || a == Appearance::Darkest {
+    if alpha == 0 || (a == Appearance::Darkest && accessible) {
         return c;
     }
     let un = |v: u8| (f32::from(v) * 255.0 / f32::from(alpha)).min(255.0);
@@ -213,22 +228,28 @@ pub fn adjust(c: Color32, a: Appearance) -> Color32 {
     }
     let map = |v: f32| match a {
         Appearance::Dark => v + (255.0 - v) * 0.09,
-        _ => 240.0 - v * 0.8,
+        Appearance::Light => 240.0 - v * 0.8,
+        Appearance::Darkest => v,
     };
     let q = |v: f32| {
-        (map(v) * f32::from(alpha) / 255.0)
-            .round()
-            .clamp(0.0, 255.0) as u8
+        let shade = map(v);
+        let shade = if accessible {
+            shade
+        } else {
+            (shade - 128.0) * 0.85 + 128.0
+        };
+        (shade * f32::from(alpha) / 255.0).round().clamp(0.0, 255.0) as u8
     };
     Color32::from_rgba_premultiplied(q(r), q(g), q(b), alpha)
 }
 
 /// Applies the current [`Appearance`] to a tessellated frame. Only meshes drawn
 /// with egui's own texture (shapes and text) change; images and the viewer are
-/// left alone. Does nothing for Darkest (the default).
+/// left alone. The default Darkest palette already uses accessible contrast.
 pub fn apply_appearance(prims: &mut [egui::ClippedPrimitive]) {
     let a = appearance();
-    if a == Appearance::Darkest {
+    let accessible = ACCESSIBLE_CONTRAST.load(std::sync::atomic::Ordering::Relaxed);
+    if a == Appearance::Darkest && accessible {
         return;
     }
     for prim in prims {
@@ -236,7 +257,7 @@ pub fn apply_appearance(prims: &mut [egui::ClippedPrimitive]) {
             && mesh.texture_id == egui::TextureId::default()
         {
             for v in &mut mesh.vertices {
-                v.color = adjust(v.color, a);
+                v.color = adjust_ui_color(v.color, a, accessible);
             }
         }
     }
@@ -252,6 +273,9 @@ pub mod metrics {
     /// Header of a collapsed panel in a stacked frame.
     pub const STACK_HEADER_H: f32 = 24.0;
     pub const ROW_H: f32 = 17.0;
+    /// Inner margin of panels laid out as forms (Render Queue, …), the
+    /// inset of the Preview and Timeline controls.
+    pub const PANEL_PADDING: f32 = 8.0;
     /// AE uses Adobe Clean; SF at 11.5pt matches its text widths within ~1%.
     pub const FONT_SIZE: f32 = 11.5;
     pub const SMALL_FONT_SIZE: f32 = 10.5;
@@ -498,4 +522,21 @@ pub fn apply(ctx: &Context) {
             s.corner_radius = egui::CornerRadius::same(3);
         }
     });
+}
+
+#[cfg(test)]
+#[test]
+fn accessible_palette_has_higher_text_contrast_in_each_theme() {
+    for theme in [Appearance::Darkest, Appearance::Dark, Appearance::Light] {
+        let difference = |accessible| {
+            let text = adjust_ui_color(Color32::from_gray(205), theme, accessible);
+            let panel = adjust_ui_color(Color32::from_gray(35), theme, accessible);
+            text.r().abs_diff(panel.r())
+        };
+        assert!(difference(true) > difference(false), "{theme:?}");
+        assert_eq!(
+            adjust_ui_color(Color32::RED, theme, true),
+            adjust_ui_color(Color32::RED, theme, false)
+        );
+    }
 }

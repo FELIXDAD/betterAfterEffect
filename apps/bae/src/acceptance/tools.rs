@@ -6,7 +6,7 @@
 use bae_model::{PrimPath, Value};
 use bae_motion::query;
 use bae_ui_motion::{SharedTools, Tool};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Rect, vec2};
 use egui_kittest::kittest::Queryable as _;
 
 use super::*;
@@ -41,35 +41,6 @@ fn button(h: &Ui, label: &str) -> Rect {
         .unwrap_or_else(|| panic!("no “{label}”"))
 }
 
-fn drag(h: &mut Ui, from: Pos2, to: Pos2, modifiers: Modifiers) {
-    send(h, Event::PointerMoved(from));
-    send(h, Event::ModifiersChanged(modifiers));
-    send(
-        h,
-        Event::PointerButton {
-            pos: from,
-            button: PointerButton::Primary,
-            pressed: true,
-            modifiers,
-        },
-    );
-    for i in 1..=6 {
-        let t = i as f32 / 6.0;
-        send(h, Event::PointerMoved(from + (to - from) * t));
-    }
-    send(
-        h,
-        Event::PointerButton {
-            pos: to,
-            button: PointerButton::Primary,
-            pressed: false,
-            modifiers,
-        },
-    );
-    send(h, Event::ModifiersChanged(Modifiers::NONE));
-    settle(h);
-}
-
 fn key_down(h: &mut Ui, modifiers: Modifiers, key: Key, pressed: bool) {
     send(
         h,
@@ -93,11 +64,13 @@ fn position(h: &Ui, layer: &PrimPath) -> [f64; 3] {
     }
 }
 
-/// The magnification dropdown's text ("Fit", "50%" …).
+/// The magnification popup's text: "Fit" while fitted (AE shows the fitted
+/// value in parentheses, "(50%)"), else the step ("200%").
 fn magnification(h: &Ui) -> String {
-    let labels = [
-        "Fit", "12.5%", "25%", "33.3%", "50%", "100%", "200%", "400%",
-    ];
+    if !find_texts(h, |t| t.starts_with('(') && t.ends_with("%)")).is_empty() {
+        return "Fit".to_owned();
+    }
+    let labels = ["12.5%", "25%", "33.3%", "50%", "100%", "200%", "400%"];
     labels
         .into_iter()
         .find(|l| h.root().query_by_label(l).is_some())
@@ -299,6 +272,10 @@ fn space_drag_pans_and_does_not_play() {
     send(&mut h, Event::PointerMoved(c));
     key_down(&mut h, Modifiers::NONE, Key::Space, true);
     settle(&mut h);
+    // Playback runs on the wall clock: let it pass a frame (a loaded CI
+    // machine does) before the drag starts.
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    settle(&mut h);
     drag(&mut h, c, c + vec2(-90.0, 40.0), Modifiers::NONE);
     key_down(&mut h, Modifiers::NONE, Key::Space, false);
     settle(&mut h);
@@ -394,4 +371,46 @@ fn tools_without_viewer_actions_do_nothing_there() {
         );
         assert_eq!(position(&h, &layer), before);
     }
+}
+
+/// Esc is Switch to Last 3D View whichever panel has focus (AE; #460): F11 →
+/// F12 → Esc goes back to Custom View 1. An open menu takes Esc first.
+#[test]
+fn esc_goes_back_to_the_last_3d_view_from_any_panel() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    settle(&mut h);
+    let shows = |h: &Ui, view: &str| painted_texts(h).iter().any(|t| t == view);
+    key(&mut h, Modifiers::NONE, Key::F11);
+    key(&mut h, Modifiers::NONE, Key::F12);
+    assert!(shows(&h, "Active Camera"));
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(shows(&h, "Custom View 1"), "Esc without the viewer focused");
+    // An open tool flyout closes on Esc; the view stays.
+    let group = button(&h, "Rectangle Tool");
+    send(&mut h, Event::PointerMoved(group.center()));
+    for pressed in [true, false] {
+        send(
+            &mut h,
+            Event::PointerButton {
+                pos: group.center(),
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        );
+    }
+    settle(&mut h);
+    assert!(
+        h.root().query_by_label("Star Tool").is_some(),
+        "flyout open"
+    );
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(
+        h.root().query_by_label("Star Tool").is_none(),
+        "flyout closed"
+    );
+    assert!(shows(&h, "Custom View 1"), "the flyout took Esc");
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(shows(&h, "Active Camera"));
 }

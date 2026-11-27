@@ -1,5 +1,9 @@
 //! The stage: sublayers composed by strength, transactions, undo and events.
 
+use std::collections::VecDeque;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use rustc_hash::FxHashMap;
 
 use crate::error::{ModelError, Result};
@@ -12,6 +16,14 @@ use crate::sublayer::Sublayer;
 
 /// Default maximum of undo steps kept per author ([`Stage::set_undo_limit`]).
 pub const DEFAULT_UNDO_LIMIT: usize = 1000;
+
+/// Timeline switches that can change without unlocking or selecting the layer.
+pub fn editable_on_locked_layer(attr: &str) -> bool {
+    matches!(
+        attr,
+        "locked" | "enabled" | "audio_enabled" | "solo" | "shy" | "motion_blur"
+    )
+}
 
 /// Sublayer IDs that differ only in case map to the same file on macOS/Windows.
 fn same_file_name(a: &SublayerId, b: &SublayerId) -> bool {
@@ -33,12 +45,18 @@ struct UndoEntry {
     edits: Vec<Edit>,
 }
 
+/// Events and total changes kept for [`Stage::changes_since`].
+const JOURNAL_EVENTS: usize = 64;
+const JOURNAL_CHANGES: usize = 4096;
+
 /// An open project: a stack of sublayers composed strongest-first.
 ///
 /// For every prim path, each sublayer may hold a spec; for every attribute the
 /// strongest sublayer with an opinion wins. A prim exists on the stage when at least
 /// one sublayer has a `def` spec for it and its parent exists.
 pub struct Stage {
+    revision: u64,
+    changes: OnceLock<VecDeque<(u64, StageEvent)>>,
     pub(crate) sublayers: FxHashMap<SublayerId, Sublayer>,
     /// Strongest first.
     pub(crate) stack: Vec<SublayerId>,
@@ -72,7 +90,56 @@ impl Default for Stage {
     }
 }
 
+static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
+
 impl Stage {
+    /// Identifies this exact composed document state, including after project replacement.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Pin this composed stage, including linked projects. Call the returned
+    /// reader on a worker to materialize it without serializing the project on the UI thread.
+    pub fn snapshot_reader(&self) -> Box<dyn FnOnce() -> Result<Self> + Send> {
+        let layers: Vec<_> = self
+            .stack
+            .iter()
+            .map(|id| self.sublayers[id].snapshot_reader())
+            .collect();
+        let linked: Vec<_> = self
+            .externals
+            .iter()
+            .map(|(k, v)| (k.clone(), v.snapshot_reader()))
+            .collect();
+        Box::new(move || {
+            let mut stage = Self::from_sublayers(
+                layers
+                    .into_iter()
+                    .map(|read| read())
+                    .collect::<Result<_>>()?,
+            )?;
+            for (name, read) in linked {
+                stage.externals.insert(name, read()?);
+            }
+            Ok(stage)
+        })
+    }
+
+    /// Changes since a previously observed version. A new project or an older
+    /// version outside the bounded journal requires rebuilding the consumer.
+    /// Tracking starts on the first read, so unopened projects pay no event-copy cost.
+    pub fn changes_since(&self, revision: u64) -> Option<impl Iterator<Item = &StageEvent>> {
+        let entries = self.changes.get_or_init(VecDeque::new);
+        let from = if revision == self.revision {
+            entries.len()
+        } else {
+            entries
+                .iter()
+                .position(|(previous, _)| *previous == revision)?
+        };
+        Some(entries.iter().skip(from).map(|(_, event)| event))
+    }
+
     /// A stage with one empty `root` sublayer as the edit target.
     pub fn new() -> Self {
         Self::from_sublayers(vec![Sublayer::new(SublayerId::root())]).expect("one sublayer")
@@ -95,6 +162,8 @@ impl Stage {
             map.insert(id, s);
         }
         Ok(Stage {
+            changes: OnceLock::new(),
+            revision: NEXT_REVISION.fetch_add(1, Ordering::Relaxed),
             sublayers: map,
             stack,
             edit_target,
@@ -240,6 +309,21 @@ impl Stage {
             self.ref_index = None;
         }
         self.expand_through_references(&mut event);
+        if let Some(entries) = self.changes.get_mut() {
+            // Bounded by events and by changes, so a bulk import or paste is not
+            // kept twice; consumers older than the journal rebuild.
+            if event.changes.len() > JOURNAL_CHANGES {
+                entries.clear();
+            } else {
+                entries.push_back((self.revision, event.clone()));
+                let mut total: usize = entries.iter().map(|(_, e)| e.changes.len()).sum();
+                while entries.len() > JOURNAL_EVENTS || total > JOURNAL_CHANGES {
+                    let (_, dropped) = entries.pop_front().expect("over the bound");
+                    total -= dropped.changes.len();
+                }
+            }
+        }
+        self.revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
         for (_, f) in &mut self.subscribers {
             f(&event);
         }
@@ -578,7 +662,7 @@ impl Transaction<'_> {
     /// Every transaction (commands, agents, scripts) refuses ops on a layer
     /// that was locked when the transaction first touched it and still is:
     /// the layer itself, its properties, keyframes and children. Allowed: the
-    /// layer's own `locked` attribute, and pure reorders (another layer moved
+    /// layer's lock and its static timeline switches, and pure reorders (another layer moved
     /// past it). Undo / redo replay history directly and are not checked.
     fn check_locks(&mut self, op: &Op) -> Result<()> {
         if self.allow_locked {
@@ -608,15 +692,21 @@ impl Transaction<'_> {
             if !(locked_at_start && locked_now) {
                 continue;
             }
-            let lock_switch = match op {
-                Op::SetValue { path, attr, .. }
-                | Op::SetAttr { path, attr, .. }
-                | Op::SetKeyframe { path, attr, .. }
-                | Op::RemoveKeyframe { path, attr, .. }
-                | Op::SetExpression { path, attr, .. } => *path == layer && attr == "locked",
-                _ => false,
-            };
-            if !lock_switch {
+            let switch_edit = path == &layer
+                && match op {
+                    Op::SetValue {
+                        attr,
+                        value: Some(crate::Value::Bool(_)),
+                        ..
+                    } => editable_on_locked_layer(attr),
+                    Op::SetValue { attr, .. }
+                    | Op::SetAttr { attr, .. }
+                    | Op::SetKeyframe { attr, .. }
+                    | Op::RemoveKeyframe { attr, .. }
+                    | Op::SetExpression { attr, .. } => attr == "locked",
+                    _ => false,
+                };
+            if !switch_edit {
                 let name = self
                     .stage
                     .prim(&layer)

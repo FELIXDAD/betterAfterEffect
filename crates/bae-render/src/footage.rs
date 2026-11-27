@@ -28,11 +28,26 @@ mod imp {
             Self
         }
 
-        pub fn get(&self, path: &Path) -> Result<Arc<dyn LayerSource>, String> {
+        pub fn get(
+            &self,
+            path: &Path,
+            _asset: &bae_model::PrimPath,
+            _revision: i64,
+            _sequence: Option<bae_model::FrameRate>,
+            _alphabetical: bool,
+            _psd_layer: Option<bae_model::psd::LayerImage>,
+        ) -> Result<Arc<dyn LayerSource>, String> {
             Err(format!(
                 "footage {}: bae-render was built without the `media` feature",
                 path.display()
             ))
+        }
+
+        pub fn channels(
+            &self,
+            _: &crate::input::FootageRef,
+        ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+            None
         }
 
         pub fn clear(&self) {}
@@ -47,8 +62,9 @@ mod imp {
     use bae_gpu::GpuContext;
     use bae_media::{
         AlphaMode, FrameCache, FrameRequest, MediaFormats, MediaGpu, MediaLibrary, OpenOptions,
+        SequenceMode,
     };
-    use bae_model::Time;
+    use bae_model::{FrameRate, Time};
     use rustc_hash::FxHashMap;
 
     use crate::error::RenderError;
@@ -66,6 +82,7 @@ mod imp {
         open: OpenOptions,
         request: FrameRequest,
         size: [u32; 2],
+        rate: Option<FrameRate>,
     }
 
     impl std::fmt::Debug for FootageSource {
@@ -78,13 +95,24 @@ mod imp {
     }
 
     impl FootageSource {
-        /// Opens `path` through `library`.
+        /// Opens `path` through `library`: alone, or (`sequence`) as the image
+        /// sequence it starts at that frame rate.
         pub fn open(
             library: Arc<MediaLibrary>,
             gpu: Arc<MediaGpu>,
             path: &Path,
+            sequence: Option<FrameRate>,
+            psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Self, RenderError> {
-            let open = OpenOptions::default();
+            Self::open_with_options(library, gpu, path, open_options(sequence, false, psd_layer))
+        }
+
+        fn open_with_options(
+            library: Arc<MediaLibrary>,
+            gpu: Arc<MediaGpu>,
+            path: &Path,
+            open: OpenOptions,
+        ) -> Result<Self, RenderError> {
             let info = library
                 .info(path, &open)
                 .map_err(|e| RenderError::Footage {
@@ -97,6 +125,9 @@ mod imp {
             })?;
             Ok(Self {
                 size: [video.width, video.height],
+                rate: video
+                    .frame_rate
+                    .filter(|_| info.kind != bae_media::MediaKind::Still),
                 library,
                 gpu,
                 path: path.to_path_buf(),
@@ -115,6 +146,10 @@ mod imp {
             self.library
                 .content_hash(&self.path, &self.open, &self.request, time)
                 .unwrap_or(0)
+        }
+
+        fn frame_rate(&self) -> Option<FrameRate> {
+            self.rate
         }
 
         fn render(
@@ -140,15 +175,31 @@ mod imp {
                 AlphaMode::Ignore => ImageAlpha::Opaque,
                 AlphaMode::Premultiplied | AlphaMode::Opaque => ImageAlpha::Premultiplied,
             };
-            Ok(GpuImage::from_texture(frame.texture, alpha))
+            let mut image = GpuImage::from_texture(frame.texture, alpha);
+            image.channels = frame.channels;
+            Ok(image)
         }
+    }
+
+    fn open_options(
+        sequence: Option<FrameRate>,
+        alphabetical: bool,
+        psd_layer: Option<bae_model::psd::LayerImage>,
+    ) -> OpenOptions {
+        let mut options = sequence.map(OpenOptions::sequence).unwrap_or_default();
+        options.psd_layer = psd_layer;
+        if alphabetical && sequence.is_some() {
+            options.sequence = SequenceMode::Alphabetical;
+        }
+        options
     }
 
     /// Footage sources by path, over one [`MediaLibrary`].
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
-        sources: FxHashMap<PathBuf, Result<Arc<FootageSource>, String>>,
+        revisions: FxHashMap<bae_model::PrimPath, i64>,
+        sources: FxHashMap<(PathBuf, OpenOptions), Result<Arc<FootageSource>, String>>,
     }
 
     impl FootageCache {
@@ -160,6 +211,7 @@ mod imp {
             Self {
                 library: Arc::new(library),
                 gpu: Arc::new(MediaGpu::new(gpu)),
+                revisions: FxHashMap::default(),
                 sources: FxHashMap::default(),
             }
         }
@@ -172,20 +224,57 @@ mod imp {
 
         /// The source for `path` (opened once; failures are remembered and
         /// reported as warnings by the caller).
-        pub fn get(&mut self, path: &Path) -> Result<Arc<dyn LayerSource>, String> {
-            if let Some(entry) = self.sources.get(path) {
+        pub fn get(
+            &mut self,
+            path: &Path,
+            asset: &bae_model::PrimPath,
+            revision: i64,
+            sequence: Option<FrameRate>,
+            alphabetical: bool,
+            psd_layer: Option<bae_model::psd::LayerImage>,
+        ) -> Result<Arc<dyn LayerSource>, String> {
+            if self.revisions.insert(asset.clone(), revision).unwrap_or(0) != revision {
+                self.sources.retain(|(file, _), _| file != path);
+                self.library.invalidate(path);
+            }
+            let options = open_options(sequence, alphabetical, psd_layer);
+            let key = (path.to_path_buf(), options);
+            if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
             }
-            let entry = FootageSource::open(self.library.clone(), self.gpu.clone(), path)
-                .map(Arc::new)
-                .map_err(|e| e.to_string());
-            self.sources.insert(path.to_path_buf(), entry.clone());
+            let entry = FootageSource::open_with_options(
+                self.library.clone(),
+                self.gpu.clone(),
+                path,
+                options,
+            )
+            .map(Arc::new)
+            .map_err(|e| e.to_string());
+            self.sources.insert(key, entry.clone());
             entry.map(|s| s as Arc<dyn LayerSource>)
+        }
+
+        pub fn channels(
+            &self,
+            footage: &crate::input::FootageRef,
+        ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+            let path = footage.file.as_ref()?;
+            let source = self
+                .sources
+                .get(&(
+                    path.clone(),
+                    open_options(footage.sequence, footage.alphabetical, footage.psd_layer),
+                ))?
+                .as_ref()
+                .ok()?;
+            source
+                .library
+                .cached_channels(path, &source.open, &source.request, footage.source_time)
         }
 
         /// Forgets open files (they changed on disk or were relinked).
         pub fn clear(&mut self) {
-            for path in self.sources.keys() {
+            for (path, _) in self.sources.keys() {
                 self.library.invalidate(path);
             }
             self.sources.clear();

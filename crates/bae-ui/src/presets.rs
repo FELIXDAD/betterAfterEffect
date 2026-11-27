@@ -20,10 +20,13 @@ use crate::workspace::WorkspacePreset;
 /// Id of the After Effects keymap.
 pub const AE_KEYMAP: &str = "ae";
 
-/// Motion: AE's Default workspace.
+/// The three slots in Window > Assign Shortcut to Workspace.
+pub const WORKSPACE_KEYS: [&str; 3] = ["Shift+F10", "Shift+F11", "Shift+F12"];
+
+/// AE's Default workspace (id `motion`).
 pub fn motion() -> WorkspacePreset {
     WorkspacePreset::new(
-        "Motion",
+        "Default",
         AE_KEYMAP,
         Node::row(vec![
             (
@@ -60,26 +63,39 @@ pub fn motion() -> WorkspacePreset {
     )
 }
 
-/// Review: a large viewer with the timeline below; preview and history at the side.
+/// AE's Review workspace: Project and Effect Controls, the viewer, the utility
+/// panels stacked at the right and the Timeline below (AE 26's layout).
 pub fn review() -> WorkspacePreset {
     WorkspacePreset::new(
         "Review",
         AE_KEYMAP,
-        Node::row(vec![
+        Node::column(vec![
             (
-                1406.0,
-                Node::column(vec![
-                    (760.0, Node::tabs(&["composition"])),
-                    (175.0, Node::tabs(&["timeline"])),
+                599.0,
+                Node::row(vec![
+                    (505.0, Node::tabs(&["project", "effect_controls"])),
+                    (1118.0, Node::tabs(&["composition"])),
+                    (
+                        99.0,
+                        Node::frame(
+                            Frame::new(&[
+                                "info",
+                                "audio",
+                                "preview",
+                                "effects",
+                                "align",
+                                "libraries",
+                                "character",
+                                "paragraph",
+                                "tracker",
+                                "content_aware_fill",
+                            ])
+                            .stacked(None),
+                        ),
+                    ),
                 ]),
             ),
-            (
-                316.0,
-                Node::column(vec![
-                    (52.0, Node::tabs(&["preview"])),
-                    (883.0, Node::tabs(&["history", "info"])),
-                ]),
-            ),
+            (336.0, Node::tabs(&["timeline"])),
         ]),
     )
     .order(1)
@@ -119,9 +135,6 @@ pub fn ae_keymap() -> Keymap {
     let panel = |chord: &str, id: &str| {
         Binding::new(chord, ids::OPEN_PANEL).params(json!({ "id": id, "toggle": true }))
     };
-    let workspace = |chord: &str, index: u32| {
-        Binding::new(chord, ids::SWITCH_WORKSPACE).params(json!({ "index": index }))
-    };
     Keymap::new(
         "After Effects",
         vec![
@@ -137,23 +150,24 @@ pub fn ae_keymap() -> Keymap {
             Binding::new("Cmd+Shift+Z", ids::REDO),
             Binding::new("Cmd+Alt+Quote", ids::KEYBOARD_SHORTCUTS),
             // Window: panels (AE-UI-001)
+            // Panels that exist; AE's Cmd+1 … Cmd+9 for the others (Tools, Info,
+            // Audio, Effects & Presets, Character, Paragraph …) come from the AE
+            // command catalog once their panel is real (bae-ui-motion's late
+            // bindings), so a key never opens a "not implemented" placeholder
+            // whose Window item is greyed.
             panel("Cmd+0", "project"),
             panel("Cmd+Alt+0", "render_queue"),
-            panel("Cmd+1", "tools"),
-            panel("Cmd+2", "info"),
             panel("Cmd+3", "preview"),
-            panel("Cmd+4", "audio"),
-            panel("Cmd+5", "effects"),
-            panel("Cmd+6", "character"),
-            panel("Cmd+7", "paragraph"),
             panel("F3", "effect_controls"),
-            // Window: workspaces (AE-UI-005). AE assigns Shift+F10 / F11 to the
-            // Default and Review workspaces (Window ▸ Assign Shortcut to
-            // Workspace), so the menu items show them; Shift+F12 (AE: Learn, which
-            // BAE does not have) switches to the third workspace.
-            Binding::new("Shift+F10", ids::SWITCH_WORKSPACE).params(json!({ "id": "motion" })),
-            Binding::new("Shift+F11", ids::SWITCH_WORKSPACE).params(json!({ "id": "review" })),
-            workspace("Shift+F12", 2),
+            // Window: workspaces (AE-UI-005). AE assigns Shift+F10 / F11 / F12 to
+            // the Default, Review and Learn workspaces (Window ▸ Assign Shortcut
+            // to Workspace), so the menu items show them.
+            Binding::new(WORKSPACE_KEYS[0], ids::SWITCH_WORKSPACE)
+                .params(json!({ "id": "motion" })),
+            Binding::new(WORKSPACE_KEYS[1], ids::SWITCH_WORKSPACE)
+                .params(json!({ "id": "review" })),
+            Binding::new(WORKSPACE_KEYS[2], ids::SWITCH_WORKSPACE)
+                .params(json!({ "id": "ae_learn" })),
         ],
     )
 }

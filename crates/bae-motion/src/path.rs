@@ -18,6 +18,18 @@ use crate::util::{ensure_unlocked, fail, write_attr};
 /// The attribute holding the path of a mask or shape Path prim.
 pub const PATH_ATTR: &str = "path";
 
+/// Center of a drawn Pen path, including cubic extrema. A point has no segments.
+pub fn drawing_center(path: &BezierPath) -> [f64; 2] {
+    use bae_vector::kurbo::Shape;
+    if let [vertex] = path.vertices.as_slice()
+        && !path.closed
+    {
+        return *vertex;
+    }
+    let c = bae_vector::path::to_bez_path(path).bounding_box().center();
+    [c.x, c.y]
+}
+
 type P = [f64; 2];
 
 fn add(a: P, b: P) -> P {
@@ -69,6 +81,120 @@ pub fn point_at(p: &BezierPath, seg: usize, t: f64) -> P {
     let bc = lerp(b, c, t);
     let cd = lerp(c, d, t);
     lerp(lerp(ab, bc, t), lerp(bc, cd, t), t)
+}
+
+/// Steps per segment when measuring an outline.
+const STEPS: usize = 32;
+
+/// The outline as a polyline: (point, arc length from vertex 0, path parameter).
+fn polyline(p: &BezierPath) -> Vec<(P, f64, f64)> {
+    let mut out = Vec::new();
+    let segs = segment_count(p);
+    if segs == 0 {
+        return out;
+    }
+    let mut len = 0.0;
+    let mut last = p.vertices[0];
+    out.push((last, 0.0, 0.0));
+    for seg in 0..segs {
+        for k in 1..=STEPS {
+            let t = k as f64 / STEPS as f64;
+            let q = point_at(p, seg, t);
+            len += (q[0] - last[0]).hypot(q[1] - last[1]);
+            out.push((q, len, seg as f64 + t));
+            last = q;
+        }
+    }
+    out
+}
+
+/// Length of the outline (closed paths include the closing segment).
+pub fn outline_length(p: &BezierPath) -> f64 {
+    polyline(p).last().map_or(0.0, |l| l.1)
+}
+
+/// The path resampled to `count` corner vertices spaced evenly along its
+/// outline from vertex 0 (Smart Mask Interpolation's added vertices); feather
+/// points keep their place on the outline.
+pub fn resample(p: &BezierPath, count: usize) -> BezierPath {
+    let line = polyline(p);
+    let total = line.last().map_or(0.0, |l| l.1);
+    if count < 2 || total <= 0.0 {
+        return p.clone();
+    }
+    let spacing = total / if p.closed { count } else { count - 1 } as f64;
+    // Point and parameter at arc length `s`.
+    let at = |s: f64| -> (P, f64) {
+        let i = line.partition_point(|l| l.1 < s).clamp(1, line.len() - 1);
+        let (a, b) = (line[i - 1], line[i]);
+        let f = if b.1 > a.1 {
+            (s - a.1) / (b.1 - a.1)
+        } else {
+            0.0
+        };
+        (lerp(a.0, b.0, f), a.2 + (b.2 - a.2) * f)
+    };
+    let vertices: Vec<P> = (0..count).map(|k| at(k as f64 * spacing).0).collect();
+    // Arc length of a path parameter.
+    let length_at = |u: f64| -> f64 {
+        let i = line.partition_point(|l| l.2 < u).clamp(1, line.len() - 1);
+        let (a, b) = (line[i - 1], line[i]);
+        let f = if b.2 > a.2 {
+            (u - a.2) / (b.2 - a.2)
+        } else {
+            0.0
+        };
+        a.1 + (b.1 - a.1) * f
+    };
+    let feather = p
+        .feather
+        .iter()
+        .map(|f| {
+            let pos = length_at(f64::from(f.segment) + f.t) / spacing;
+            let seg = (pos.floor() as usize).min(count - 1);
+            bae_model::FeatherPoint {
+                segment: seg as u32,
+                t: pos - seg as f64,
+                ..*f
+            }
+        })
+        .collect();
+    BezierPath {
+        in_tangents: vec![[0.0, 0.0]; count],
+        out_tangents: vec![[0.0, 0.0]; count],
+        vertices,
+        closed: p.closed,
+        feather,
+    }
+}
+
+/// Per-vertex linear blend of two paths with the same vertex count (feather
+/// points too when their counts match).
+pub fn blend(a: &BezierPath, b: &BezierPath, f: f64) -> BezierPath {
+    let mix =
+        |x: &[P], y: &[P]| -> Vec<P> { x.iter().zip(y).map(|(u, v)| lerp(*u, *v, f)).collect() };
+    let mix1 = |x: f64, y: f64| x + (y - x) * f;
+    BezierPath {
+        vertices: mix(&a.vertices, &b.vertices),
+        in_tangents: mix(&a.in_tangents, &b.in_tangents),
+        out_tangents: mix(&a.out_tangents, &b.out_tangents),
+        closed: a.closed,
+        feather: if a.feather.len() == b.feather.len() {
+            a.feather
+                .iter()
+                .zip(&b.feather)
+                .map(|(u, v)| bae_model::FeatherPoint {
+                    t: mix1(u.t, v.t),
+                    radius: mix1(u.radius, v.radius),
+                    tension: mix1(u.tension, v.tension),
+                    corner_angle: mix1(u.corner_angle, v.corner_angle),
+                    ..*u
+                })
+                .collect()
+        } else {
+            a.feather.clone()
+        },
+    }
 }
 
 /// Insert a vertex at parameter `t` of segment `seg`, splitting the cubic (de
@@ -208,6 +334,50 @@ fn edit_all(
 
 pub struct SetVertices;
 
+/// A topology edit to repeat on the other keys of an animated mask.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskTopologyEdit {
+    RemoveVertices(Vec<usize>),
+    AddFeather(bae_model::FeatherPoint),
+    RemoveFeather(usize),
+}
+
+impl MaskTopologyEdit {
+    fn apply(&self, source: &BezierPath) -> Result<BezierPath, CommandError> {
+        let mut path = source.clone();
+        match self {
+            Self::RemoveVertices(indices) => {
+                let mut indices = indices.clone();
+                indices.sort_unstable();
+                indices.dedup();
+                for i in indices.into_iter().rev() {
+                    if i < path.vertices.len() && path.vertices.len() > 1 {
+                        path = remove(&path, i);
+                    }
+                }
+            }
+            Self::AddFeather(point) => {
+                let mut point = *point;
+                let count = segment_count(&path);
+                if count == 0 {
+                    return Err(fail(
+                        "cannot add a feather point to a path without segments",
+                    ));
+                }
+                point.segment = point.segment.min((count - 1) as u32);
+                path.feather.push(point);
+            }
+            Self::RemoveFeather(index) => {
+                if *index < path.feather.len() {
+                    path.feather.remove(*index);
+                }
+            }
+        }
+        Ok(path)
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SetVerticesParams {
     /// The mask or shape Path prim.
@@ -215,6 +385,7 @@ pub struct SetVerticesParams {
     /// Keyframe time in flicks (layer time) when the path is animated.
     #[serde(default)]
     pub time: Option<Time>,
+    pub topology: Option<MaskTopologyEdit>,
     /// The new path (layer space for masks, group space for shape paths).
     #[serde(flatten)]
     pub shape: BezierPath,
@@ -241,6 +412,13 @@ impl Command for SetVertices {
             .prim(&p.path)
             .and_then(|v| v.prim_type().cloned())
             == Some(PrimType::MASK);
+        if is_mask
+            && let Some(edit) = p.topology.as_ref()
+            && query::attr_spec(tx.stage(), &p.path, PATH_ATTR)
+                .is_some_and(|a| !a.keyframes.is_empty())
+        {
+            edit_all(tx, &p.path, |b| edit.apply(b))?;
+        }
         let was_open = matches!(
             tx.stage().prim(&p.path).and_then(|v| query::static_value(&v, PATH_ATTR)),
             Some(Value::Bezier(ref b)) if !b.closed
@@ -257,6 +435,7 @@ impl Command for SetVertices {
         SetAt.run(
             tx,
             SetAtParams {
+                auto_key: false,
                 path: p.path,
                 attr: PATH_ATTR.into(),
                 time: p.time.unwrap_or(Time::ZERO),

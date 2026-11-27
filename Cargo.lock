@@ -150,6 +150,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "alsa"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "812947049edcd670a82cd5c73c3661d2e58468577ba8489de58e1a73c04cbd5d"
+dependencies = [
+ "alsa-sys",
+ "bitflags 2.13.2",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "alsa-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad7569085a265dd3f607ebecce7458eaab2132a84393534c95b18dcbc3f31e04"
+dependencies = [
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -294,6 +316,9 @@ name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "arref"
@@ -507,12 +532,13 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bae"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bae-agent",
  "bae-anim",
  "bae-app",
+ "bae-effects",
  "bae-gpu",
  "bae-model",
  "bae-motion",
@@ -521,10 +547,12 @@ dependencies = [
  "bae-plugin",
  "bae-prefs",
  "bae-render",
+ "bae-script",
  "bae-text",
  "bae-ui",
  "bae-ui-motion",
  "bae-vector",
+ "cc",
  "clap",
  "egui",
  "egui-wgpu",
@@ -546,14 +574,14 @@ dependencies = [
 
 [[package]]
 name = "bae-aex-host"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-model",
 ]
 
 [[package]]
 name = "bae-agent"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-model",
  "bae-package",
@@ -572,11 +600,12 @@ dependencies = [
 
 [[package]]
 name = "bae-anim"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-model",
  "glam",
  "rquickjs",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -584,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "bae-app"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "indexmap",
@@ -594,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "bae-color"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-gpu",
  "bae-media",
@@ -607,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "bae-dep-probe"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -622,28 +651,43 @@ dependencies = [
 
 [[package]]
 name = "bae-effects"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
+ "bae-anim",
+ "bae-app",
+ "bae-color",
  "bae-gpu",
+ "bae-media",
  "bae-model",
+ "bae-motion",
  "bae-plugin",
  "bae-render",
+ "bae-text",
+ "chrono",
+ "exr",
+ "glam",
  "half",
+ "kurbo",
  "parking_lot",
  "png",
  "pollster 0.4.0",
+ "roxmltree",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
+ "smallvec",
+ "tempfile",
  "toml",
+ "tracing",
 ]
 
 [[package]]
 name = "bae-gpu"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-app",
  "bae-platform",
+ "libc",
  "parking_lot",
  "pollster 0.4.0",
  "serde",
@@ -658,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "bae-hub"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bae-model",
@@ -678,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "bae-interop-ai"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-anim",
  "bae-model",
@@ -692,18 +736,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "bae-media"
-version = "0.0.1"
+name = "bae-interop-psd"
+version = "0.1.1"
 dependencies = [
+ "bae-model",
+ "effectcraft-psd",
+ "rust-motion-psd",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "bae-media"
+version = "0.1.1"
+dependencies = [
+ "bae-anim",
  "bae-app",
  "bae-gpu",
+ "bae-interop-psd",
  "bae-model",
  "bytemuck",
+ "cpal",
  "exr",
  "half",
  "image",
  "objc2 0.6.5",
  "objc2-av-foundation",
+ "objc2-avf-audio",
+ "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-core-media",
  "objc2-core-video",
@@ -712,6 +772,7 @@ dependencies = [
  "objc2-video-toolbox",
  "parking_lot",
  "png",
+ "rtrb",
  "serde",
  "serde_json",
  "symphonia",
@@ -719,12 +780,13 @@ dependencies = [
  "thiserror 2.0.21",
  "tiff",
  "tracing",
+ "windows",
  "zune-jpeg",
 ]
 
 [[package]]
 name = "bae-model"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "indexmap",
@@ -740,10 +802,11 @@ dependencies = [
 
 [[package]]
 name = "bae-motion"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-anim",
  "bae-app",
+ "bae-interop-psd",
  "bae-model",
  "bae-vector",
  "schemars",
@@ -753,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "bae-package"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-model",
  "schemars",
@@ -766,12 +829,13 @@ dependencies = [
 
 [[package]]
 name = "bae-platform"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bae-app",
  "clap",
  "directories",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -783,20 +847,28 @@ dependencies = [
 
 [[package]]
 name = "bae-plugin"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bae-app",
  "bae-gpu",
  "bae-model",
+ "bae-motion",
  "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
+ "bae-script",
+ "cc",
  "clap",
  "half",
+ "libc",
+ "libloading",
+ "memmap2",
  "naga",
  "parking_lot",
+ "rayon",
  "rustc-hash 2.1.3",
+ "rustix 1.1.6",
  "semver",
  "serde",
  "serde_json",
@@ -804,15 +876,17 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "bae-plugin-sdk"
-version = "0.0.1"
+version = "0.1.1"
 
 [[package]]
 name = "bae-prefs"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-platform",
  "serde",
@@ -823,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "bae-render"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bae-anim",
@@ -848,8 +922,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-script"
+version = "0.1.1"
+dependencies = [
+ "bae-anim",
+ "bae-app",
+ "bae-model",
+ "bae-motion",
+ "rquickjs",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "bae-sync"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-model",
  "blake3",
@@ -866,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "bae-text"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-anim",
  "bae-gpu",
@@ -875,10 +964,14 @@ dependencies = [
  "bae-text",
  "bae-vector",
  "fontique",
+ "icu_properties",
+ "icu_segmenter",
  "kurbo",
  "parking_lot",
  "parley",
+ "png",
  "rustc-hash 2.1.3",
+ "serde_json",
  "skrifa 0.49.0",
  "vello",
  "vello_cpu",
@@ -886,7 +979,7 @@ dependencies = [
 
 [[package]]
 name = "bae-ui"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-app",
  "bae-model",
@@ -905,19 +998,27 @@ dependencies = [
 
 [[package]]
 name = "bae-ui-motion"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-anim",
  "bae-app",
+ "bae-color",
+ "bae-effects",
  "bae-gpu",
+ "bae-interop-psd",
  "bae-media",
  "bae-model",
  "bae-motion",
  "bae-platform",
  "bae-prefs",
  "bae-render",
+ "bae-script",
+ "bae-text",
  "bae-ui",
+ "bae-vector",
+ "chrono",
  "egui",
+ "egui-wgpu",
  "flate2",
  "serde",
  "serde_json",
@@ -927,15 +1028,18 @@ dependencies = [
 
 [[package]]
 name = "bae-vector"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "bae-anim",
+ "bae-effects",
  "bae-gpu",
  "bae-model",
  "bae-render",
  "bae-vector",
  "glam",
+ "image",
  "kurbo",
+ "linesweeper",
  "parking_lot",
  "rustc-hash 2.1.3",
  "serde_json",
@@ -1337,6 +1441,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "coreaudio-rs"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d5d7dca3ebcf65a035582c9ad4385371a9d9ee6537474d2a278f4e1e475bb58"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+ "objc2-audio-toolbox",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "cpal"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
+dependencies = [
+ "alsa",
+ "block2 0.6.2",
+ "coreaudio-rs",
+ "dasp_sample",
+ "jni",
+ "js-sys",
+ "libc",
+ "mach2",
+ "ndk",
+ "ndk-context",
+ "num-derive",
+ "num-traits",
+ "objc2 0.6.5",
+ "objc2-audio-toolbox",
+ "objc2-avf-audio",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "web-sys",
+ "windows",
+ "windows-core 0.62.2",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1365,6 +1513,25 @@ name = "crossbeam-channel"
 version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98b0cc327b5bc766e7fda9c9260cc0fa81b43a8e240440422dff70788e3f9ef1"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-deque"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1430,6 +1597,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "dasp_sample"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
 name = "data-encoding"
@@ -1559,6 +1732,15 @@ checksum = "0656a7530b9e2841ee7a5f983965bdd9840c32f4012f759cfd44b912cced6b34"
 dependencies = [
  "bytemuck",
  "emath",
+]
+
+[[package]]
+name = "effectcraft-psd"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5462caf20ff5952afee5a3f0c7bfb54d90f03722f91dc427788953a3e30f009"
+dependencies = [
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]
@@ -2795,6 +2977,7 @@ dependencies = [
  "arrayvec",
  "euclid",
  "polycool",
+ "serde",
  "smallvec",
 ]
 
@@ -2855,6 +3038,19 @@ name = "linebender_resource_handle"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
+
+[[package]]
+name = "linesweeper"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a25df1b0c5432893f41bba817150e323703ee5f6d974f3a6808ac7fd7f046d18"
+dependencies = [
+ "arrayvec",
+ "kurbo",
+ "polycool",
+ "rustc-hash 2.1.3",
+ "smallvec",
+]
 
 [[package]]
 name = "linux-raw-sys"
@@ -3056,6 +3252,12 @@ checksum = "13591d77a9b6d941f7e6fcade7f9dfd9e801308752bde50c0a9bb5852778c22c"
 dependencies = [
  "twox-hash",
 ]
+
+[[package]]
+name = "mach2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "matchers"
@@ -3342,6 +3544,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3460,6 +3673,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-audio-toolbox"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+ "objc2 0.6.5",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-av-foundation"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3469,6 +3697,17 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-core-media",
  "objc2-core-video",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-avf-audio"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
 ]
 
@@ -3506,6 +3745,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-core-audio-types",
  "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -3537,7 +3777,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "dispatch2",
+ "libc",
  "objc2 0.6.5",
 ]
 
@@ -3654,6 +3896,7 @@ checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
+ "libc",
  "objc2 0.6.5",
  "objc2-core-foundation",
 ]
@@ -3815,7 +4058,9 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05bf9a3c14831a7d9641b0d81d87dd913ee238a012b2fde27db5a84b56f5df3e"
 dependencies = [
+ "bitflags 2.13.2",
  "objc2-core-foundation",
+ "objc2-core-media",
 ]
 
 [[package]]
@@ -4339,6 +4584,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "read-fonts"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4542,6 +4807,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "rtrb"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5974e397833d890f2f74963408e0d4a6cd8eda2f6a445ae06750291b5d7a997e"
+
+[[package]]
+name = "rust-motion-cms"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5268635906922f787496d5e15a2c8aeb7a49f88814d099af0c327093af2f1ba1"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "rust-motion-color"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8408c53b5b96dfd2f73cefcd578c1515e651c6312e21914783f8736ab5e14d4"
+dependencies = [
+ "rust-motion-cms",
+ "serde",
+]
+
+[[package]]
+name = "rust-motion-psd"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8417ab40fc83c1d4f71722573da5abd40bfba0a5be31feebf1427cd41c2c60a"
+dependencies = [
+ "flate2",
+ "rust-motion-color",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6452,7 +6753,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "png",

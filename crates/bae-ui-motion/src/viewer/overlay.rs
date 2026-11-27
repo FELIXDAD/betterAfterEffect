@@ -11,6 +11,45 @@ use egui::{Color32, Painter, Pos2, Shape, Stroke};
 
 use crate::render::View;
 
+/// Draw the wireframes of visible component layers in a collapsed composition.
+pub(super) fn precomp_bounds(
+    painter: &Painter,
+    layer: &bae_anim::EvaluatedLayer,
+    view: &View,
+    outer: &crate::render::Affine,
+    parent_3d: bool,
+    color: Color32,
+) {
+    if !layer.switches.collapse_transformation {
+        return;
+    }
+    let bae_anim::LayerSource::Comp {
+        nested: Some(comp), ..
+    } = &layer.source
+    else {
+        return;
+    };
+    let outer = outer.then(&layer.world_matrix);
+    let project_3d = parent_3d || crate::render::is_3d(layer);
+    for child in comp.layers.iter().filter(|l| {
+        l.visible
+            && !matches!(
+                l.kind,
+                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+            )
+    }) {
+        if let Some(quad) = crate::render::projected_bounds(
+            child,
+            view,
+            &outer,
+            project_3d || crate::render::is_3d(child),
+        ) {
+            painter.add(Shape::closed_line(quad.to_vec(), Stroke::new(1.0, color)));
+        }
+        precomp_bounds(painter, child, view, &outer, project_3d, color);
+    }
+}
+
 /// Screen position of a point in a layer's space.
 pub(super) fn to_screen(view: &View, m: &DMat4, p: [f64; 2]) -> Pos2 {
     let w = m.transform_point3(DVec3::new(p[0], p[1], 0.0));
@@ -18,7 +57,7 @@ pub(super) fn to_screen(view: &View, m: &DMat4, p: [f64; 2]) -> Pos2 {
 }
 
 /// The segments of `path` (in the space `m` maps to comp space) as screen shapes.
-pub(super) fn path_shapes(path: &BezierPath, m: &DMat4, view: &View, stroke: Stroke) -> Vec<Shape> {
+pub(crate) fn path_shapes(path: &BezierPath, m: &DMat4, view: &View, stroke: Stroke) -> Vec<Shape> {
     let n = path.vertices.len();
     if n == 0 || !path.is_consistent() {
         return Vec::new();
@@ -45,7 +84,7 @@ pub(super) fn path_shapes(path: &BezierPath, m: &DMat4, view: &View, stroke: Str
 }
 
 /// A mask's outline color (its `color` attribute).
-pub(super) fn mask_color(stage: &Stage, mask: &PrimPath) -> Color32 {
+pub(crate) fn mask_color(stage: &Stage, mask: &PrimPath) -> Color32 {
     let c = stage
         .prim(mask)
         .and_then(|v| query::static_value(&v, "color"))
@@ -56,6 +95,45 @@ pub(super) fn mask_color(stage: &Stage, mask: &PrimPath) -> Color32 {
         .unwrap_or([1.0, 1.0, 0.0, 1.0]);
     let u = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     Color32::from_rgb(u(c[0]), u(c[1]), u(c[2]))
+}
+
+/// Show a mask or shape path being edited in the evaluated comp, so the
+/// picture follows the drag (#593): the mask's shape, or the Path item's
+/// `path` in the layer's contents (copied on write: contents are shared).
+pub(crate) fn apply_path_preview(comp: &mut EvaluatedComp, prim: &PrimPath, path: &BezierPath) {
+    fn holds(items: &[bae_anim::EvaluatedPrim], prim: &PrimPath) -> bool {
+        items
+            .iter()
+            .any(|i| i.path == *prim || holds(&i.children, prim))
+    }
+    fn patch(
+        items: &mut std::sync::Arc<[bae_anim::EvaluatedPrim]>,
+        prim: &PrimPath,
+        path: &BezierPath,
+    ) -> bool {
+        let Some(i) = items
+            .iter()
+            .position(|item| item.path == *prim || holds(&item.children, prim))
+        else {
+            return false;
+        };
+        let item = &mut std::sync::Arc::make_mut(items)[i];
+        if item.path != *prim {
+            return patch(&mut item.children, prim, path);
+        }
+        std::sync::Arc::make_mut(&mut item.attrs)
+            .insert("path".into(), Value::Bezier(path.clone()));
+        true
+    }
+    for layer in &mut comp.layers {
+        if let Some(m) = layer.masks.iter_mut().find(|m| m.path == *prim) {
+            m.shape = path.clone();
+            return;
+        }
+        if patch(&mut layer.contents, prim, path) {
+            return;
+        }
+    }
 }
 
 /// Mask outlines of the selected layers.
@@ -136,7 +214,7 @@ pub(crate) fn editable_paths(
     out
 }
 
-fn shape_paths(
+pub(super) fn shape_paths(
     items: &[bae_anim::EvaluatedPrim],
     m: &DMat4,
     color: Color32,
@@ -159,6 +237,8 @@ fn shape_paths(
                 let gm = *m * crate::render::group_matrix(item);
                 shape_paths(&item.children, &gm, color, out);
             }
+            // A group's `contents` folder (or an untyped container).
+            Some(t) if *t == PrimType::FOLDER => shape_paths(&item.children, m, color, out),
             Some(_) => {}
             None => shape_paths(&item.children, m, color, out),
         }

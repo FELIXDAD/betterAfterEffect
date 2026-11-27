@@ -5,12 +5,14 @@
 
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
-use egui_kittest::kittest::{AccessKitNode, NodeT as _, Queryable as _};
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::*;
 
 /// Proper nouns and key legends that stay in Latin letters in a Chinese UI.
 pub(super) const ALLOWED: &[&str] = &[
+    // The Project panel's color depth button ("8 bpc", as in AE's Chinese UI).
+    "bpc",
     // Product, formats, color models, codecs.
     "BAE",
     "PNG",
@@ -22,9 +24,15 @@ pub(super) const ALLOWED: &[&str] = &[
     "HEVC",
     "ProRes",
     "HQ",
+    // AE's Chinese output module keeps "RGB + Alpha".
+    "Alpha",
+    // AE's zh_CN keeps it: "3D 位置 Gizmo", "向前循环 3D Gizmo 模式" (KB/S/Tools).
+    "Gizmo",
     // Frame rate unit: AE zh_CN keeps it ("社交媒体纵向 HD • 1080x1920 • 30 fps",
     // docs/reference/ae/preferences.json); the timeline shows "(30.00 fps)".
     "fps",
+    // The H.264 output module uses this bitrate unit in both languages.
+    "Mbps",
     // AE (keyboard layout name, "Roto 笔刷工具") and BAE's Agent workspace
     // (docs/glossary.md).
     "After",
@@ -76,6 +84,12 @@ pub(super) const ALLOWED: &[&str] = &[
     "Gl",
     "GL",
     "WebGPU",
+    // Keyboard Shortcuts: AE's zh_CN keeps the keyboard layout codes ("键盘布局 - en")
+    // and the key cap legends of its keyboard ("⌥ Opt", "Num Lock").
+    "en",
+    "Opt",
+    "Num",
+    "Lock",
     // Key legends (shortcuts are shown as on the keyboard).
     "Ctrl",
     "Shift",
@@ -102,30 +116,10 @@ pub(super) const ALLOWED: &[&str] = &[
     "Insert",
 ];
 
-/// Visible texts with English words, as `(role, text)`.
+/// UI-owned accessibility text containing English words.
 fn english(h: &Ui, allowed: &[String]) -> Vec<String> {
-    fn walk(n: AccessKitNode<'_>, out: &mut Vec<(Role, String)>) {
-        // What the user typed is theirs.
-        let typed = matches!(
-            n.role(),
-            Role::TextInput | Role::MultilineTextInput | Role::SearchInput
-        );
-        if let Some(l) = n.label() {
-            out.push((n.role(), l));
-        }
-        if !typed {
-            if let Some(v) = n.value() {
-                out.push((n.role(), v));
-            }
-            for c in n.children() {
-                walk(c, out);
-            }
-        }
-    }
-    let mut texts = Vec::new();
-    walk(h.root().accesskit_node(), &mut texts);
     let mut found = Vec::new();
-    for (role, text) in texts {
+    for text in super::i18n_retest::a11y_texts(h) {
         let words: Vec<&str> = text
             .split(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '_')
             .filter(|w| !w.is_empty())
@@ -136,7 +130,7 @@ fn english(h: &Ui, allowed: &[String]) -> Vec<String> {
             .filter(|w| !allowed.iter().any(|a| a == w))
             .collect();
         if !words.is_empty() {
-            let line = format!("{role:?} “{text}”: {}", words.join(", "));
+            let line = format!("“{text}”: {}", words.join(", "));
             if !found.contains(&line) {
                 found.push(line);
             }
@@ -210,7 +204,7 @@ fn chinese_ui_has_no_english_words() {
     );
     expand_all(&mut h);
     scan(&mut h, "comp with layers, expanded", &mut problems);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     scan(&mut h, "render queue", &mut problems);
     for title in ["Effect Controls", "Project"] {
         let tab = h

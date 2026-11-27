@@ -139,3 +139,119 @@ fn solids_folder_default_matches_the_folder_bae_makes_in_chinese() {
     let solids = bae_model::PrimPath::new(bae_motion::query::SOLIDS_FOLDER).unwrap();
     assert_eq!(bae_motion::query::display_name_of(stage, &solids), "纯色");
 }
+
+/// Appearance > Language switches the UI at once, no restart: the panels and
+/// menus show the chosen language while the window is still open, OK keeps it,
+/// Cancel goes back.
+#[test]
+fn language_switches_without_restart() {
+    if !in_child(
+        "acceptance::settings::language_switches_without_restart",
+        &[("BAE_LANG", "en")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    let open = |h: &mut Ui| {
+        h.state_mut().dispatch(Invocation::with_params(
+            bae_ui::settings::ACTION,
+            serde_json::json!({"page": "appearance"}),
+        ));
+        settle(h);
+    };
+    open(&mut h);
+    assert!(
+        find_text(&h, "Language / 语言").is_some(),
+        "first on Appearance"
+    );
+    h.state_mut()
+        .workspace
+        .settings_dialog()
+        .set(keys::LANGUAGE, "zh-CN");
+    settle(&mut h);
+    assert_eq!(bae_ui::i18n::lang(), bae_ui::Lang::Zh);
+    let texts = painted_texts(&h);
+    for zh in ["项目", "时间轴", "语言 / Language"] {
+        assert!(texts.iter().any(|t| t.contains(zh)), "{zh} not shown");
+    }
+    // The menu bar is built from these titles.
+    let menus = h.state().workspace.contributed_menus(&h.state().app);
+    assert!(
+        menus.menus.iter().any(|(t, _)| bae_ui::tr(t) == "文件"),
+        "File menu not in Chinese"
+    );
+    h.get_by_label("确定").click();
+    settle(&mut h);
+    assert_eq!(h.state().prefs.current().str(keys::LANGUAGE), "zh-CN");
+    assert_eq!(bae_ui::i18n::lang(), bae_ui::Lang::Zh);
+    // English, then Cancel: back to Chinese.
+    open(&mut h);
+    h.state_mut()
+        .workspace
+        .settings_dialog()
+        .set(keys::LANGUAGE, "en");
+    settle(&mut h);
+    assert!(
+        find_text(&h, "Timeline").is_some(),
+        "English while choosing"
+    );
+    h.get_by_label("Cancel").click();
+    settle(&mut h);
+    assert_eq!(bae_ui::i18n::lang(), bae_ui::Lang::Zh);
+}
+
+#[test]
+fn transparency_settings_change_the_checkerboard_cells() {
+    let mut h = gui();
+    new_comp(&mut h);
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page":"grids_guides"}),
+    ));
+    settle(&mut h);
+    let dialog = h.state_mut().workspace.settings_dialog();
+    dialog.set("grids_guides.transparency_grid_size", "large");
+    dialog.set(keys::TRANSPARENCY_PRESET, "blue");
+    let second = dialog.draft().color(keys::TRANSPARENCY_SECOND);
+    dialog.set(keys::TRANSPARENCY_FIRST, "#125698");
+    assert_eq!(dialog.draft().str(keys::TRANSPARENCY_PRESET), "custom");
+    assert_eq!(dialog.draft().color(keys::TRANSPARENCY_SECOND), second);
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    h.get_by_label("Toggle Transparency Grid").click();
+    settle(&mut h);
+    // One rectangle tiled with a 2×2 texture of the two colours; large
+    // cells are 16 px, so it repeats every 32 px.
+    let (colors, texture) = h
+        .ctx
+        .data(|d| {
+            d.get_temp::<([egui::Color32; 2], egui::TextureHandle)>(egui::Id::new(
+                "bae.checkerboard",
+            ))
+        })
+        .expect("checkerboard texture");
+    assert_eq!(
+        colors,
+        [
+            egui::Color32::from_rgb(0x12, 0x56, 0x98),
+            egui::Color32::from_rgb(second[0], second[1], second[2])
+        ]
+    );
+    let tiled = h.output().shapes.iter().any(|shape| {
+        let egui::Shape::Mesh(mesh) = &shape.shape else {
+            return false;
+        };
+        let span = |f: &dyn Fn(&egui::epaint::Vertex) -> f32| {
+            let (lo, hi) = mesh
+                .vertices
+                .iter()
+                .map(f)
+                .fold((f32::MAX, f32::MIN), |(l, h), v| (l.min(v), h.max(v)));
+            hi - lo
+        };
+        mesh.texture_id == texture.id()
+            && (span(&|v| v.uv.x) * 32.0 - span(&|v| v.pos.x)).abs() < 0.5
+    });
+    assert!(tiled);
+}

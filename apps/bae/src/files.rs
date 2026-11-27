@@ -43,6 +43,11 @@ pub trait FileDialogs {
     fn save_dialog_confirms_replace(&self) -> bool {
         false
     }
+    /// Ask whether to drop the changes and reload the last saved version
+    /// (File > Revert). `true` = revert.
+    fn confirm_revert(&mut self) -> bool {
+        false
+    }
     /// Tell the user something failed.
     fn error(&mut self, message: &str);
 }
@@ -97,7 +102,14 @@ pub enum FileOutcome {
 pub fn is_file_command(id: &str) -> bool {
     matches!(
         id,
-        ids::NEW_PROJECT | ids::OPEN_PROJECT | ids::CLOSE_PROJECT | ids::SAVE | ids::SAVE_AS
+        ids::NEW_PROJECT
+            | ids::OPEN_PROJECT
+            | ids::CLOSE_PROJECT
+            | ids::SAVE
+            | ids::SAVE_AS
+            | ids::SAVE_A_COPY
+            | ids::INCREMENT_AND_SAVE
+            | ids::REVERT
     )
 }
 
@@ -184,9 +196,30 @@ pub fn run(
     doc: &mut Document,
     dialogs: &mut dyn FileDialogs,
     inv: &Invocation,
+    new_template: Option<&Path>,
 ) -> Option<FileOutcome> {
     Some(match inv.id.as_str() {
         ids::NEW_PROJECT | ids::CLOSE_PROJECT => {
+            if inv.id == ids::NEW_PROJECT
+                && let Some(path) = new_template
+            {
+                match Document::load_template(path) {
+                    Ok(opened) => {
+                        if !confirm_discard(doc, dialogs) {
+                            return Some(FileOutcome::Cancelled);
+                        }
+                        doc.replace(opened);
+                        return Some(FileOutcome::Replaced);
+                    }
+                    // A missing or broken template still gives a new project:
+                    // a blank one, after saying why.
+                    Err(error) => dialogs.error(&format!(
+                        "{}\n\n{}",
+                        tr("The project template could not be opened. A blank project is created instead."),
+                        crate::file_error::describe_open(path, &error)
+                    )),
+                }
+            }
             // AE: Close Project leaves an empty untitled project.
             if !confirm_discard(doc, dialogs) {
                 return Some(FileOutcome::Cancelled);
@@ -204,6 +237,9 @@ pub fn run(
         }
         ids::SAVE => save(doc, dialogs),
         ids::SAVE_AS => save_as(doc, dialogs),
+        ids::SAVE_A_COPY => save_a_copy(doc, dialogs),
+        ids::INCREMENT_AND_SAVE => increment_and_save(doc, dialogs),
+        ids::REVERT => revert(doc, dialogs),
         _ => return None,
     })
 }
@@ -233,13 +269,27 @@ pub fn open(
     let Some(path) = path.or_else(|| dialogs.pick_project()) else {
         return FileOutcome::Cancelled;
     };
-    let opened = match Document::load(&path) {
+    replace_from_disk(doc, dialogs, &path, Document::load)
+}
+
+pub fn template_path(prefs: &bae_prefs::Preferences) -> Option<&Path> {
+    let path = prefs.str("project.project_template");
+    (prefs.bool("project.new_project_loads_template") && !path.is_empty()).then(|| Path::new(path))
+}
+
+fn replace_from_disk(
+    doc: &mut Document,
+    dialogs: &mut dyn FileDialogs,
+    path: &Path,
+    load: fn(&Path) -> anyhow::Result<bae_package::OpenedProject>,
+) -> FileOutcome {
+    let opened = match load(path) {
         Ok(opened) => opened,
         Err(error) => {
             dialogs.error(&format!(
                 "{}\n\n{}",
                 tr("Could not open the project."),
-                crate::file_error::describe_open(&path, &error)
+                crate::file_error::describe_open(path, &error)
             ));
             return FileOutcome::Failed;
         }
@@ -322,6 +372,121 @@ pub fn save_as(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome
     }
 }
 
+/// Save a Copy: ask for a location and write the project there; the open
+/// project keeps its location and its unsaved state (AE).
+pub fn save_a_copy(doc: &Document, dialogs: &mut dyn FileDialogs) -> FileOutcome {
+    let location = doc.location().map(Path::to_owned);
+    let stem = location
+        .as_deref()
+        .and_then(Path::file_stem)
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| tr("Untitled Project").to_owned());
+    let name = format!("{stem} {}.bae", tr("copy"));
+    let dir = location.as_deref().and_then(Path::parent);
+    let Some(picked) = dialogs.pick_save_path(&name, dir) else {
+        return FileOutcome::Cancelled;
+    };
+    let path = save_target(&with_project_extension(picked));
+    if location
+        .as_deref()
+        .is_some_and(|l| crate::document::same_path(l, &path))
+        || is_bae_project_dir(&path)
+        || is_foreign_folder(&path)
+    {
+        // A copy never replaces a project (the open one or another).
+        dialogs.error(&format!(
+            "{}\n\n{}",
+            tr("Could not save the project."),
+            tr("“{file}” already exists. Choose another name.")
+                .replace("{file}", &path.display().to_string())
+        ));
+        return FileOutcome::Failed;
+    }
+    match doc.save_a_copy(&path) {
+        Ok(()) => {
+            tracing::info!("saved a copy at {}", path.display());
+            FileOutcome::Saved
+        }
+        Err(error) => {
+            report_save_error(dialogs, &path, &error);
+            FileOutcome::Failed
+        }
+    }
+}
+
+/// Increment and Save (AE): save next to the project under its name with the
+/// next number (“Project 2.bae”, then “Project 3.bae”) and go on working in
+/// that file. An untitled project asks where first (Save As).
+pub fn increment_and_save(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome {
+    let Some(location) = doc.location().map(Path::to_owned) else {
+        return save_as(doc, dialogs);
+    };
+    let path = incremented(&location);
+    match doc.save_as(&path) {
+        Ok(()) => {
+            tracing::info!("saved {}", path.display());
+            FileOutcome::Saved
+        }
+        Err(error) => {
+            report_save_error(dialogs, &path, &error);
+            FileOutcome::Failed
+        }
+    }
+}
+
+/// The first free name after `path` for Increment and Save: a trailing number
+/// goes up by one (keeping its zero padding), otherwise “ 2” is appended.
+pub fn incremented(path: &Path) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
+    let base = stem.trim_end_matches(|c: char| c.is_ascii_digit());
+    let digits = &stem[base.len()..];
+    let (base, width, mut n) = match digits.parse::<u64>() {
+        Ok(n) => (base.to_owned(), digits.len(), n + 1),
+        Err(_) => (format!("{stem} "), 1, 2),
+    };
+    loop {
+        let name = match &ext {
+            Some(ext) => format!("{base}{n:0width$}.{ext}"),
+            None => format!("{base}{n:0width$}"),
+        };
+        let candidate = path.with_file_name(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Revert (AE): after asking, reload the saved project and drop the changes
+/// made since. Nothing to do for an untitled or unchanged project.
+pub fn revert(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome {
+    let Some(path) = doc.location().map(Path::to_owned) else {
+        return FileOutcome::Cancelled;
+    };
+    if !doc.is_dirty() || !dialogs.confirm_revert() {
+        return FileOutcome::Cancelled;
+    }
+    match Document::load(&path) {
+        Ok(opened) => {
+            doc.replace(opened);
+            tracing::info!("reverted {}", path.display());
+            FileOutcome::Replaced
+        }
+        Err(error) => {
+            dialogs.error(&format!(
+                "{}\n\n{}",
+                tr("Could not open the project."),
+                crate::file_error::describe_open(&path, &error)
+            ));
+            FileOutcome::Failed
+        }
+    }
+}
+
 /// Where Save As writes `picked`: the outermost `.bae` project folder it lies
 /// in, or `picked` itself.
 pub fn save_target(picked: &Path) -> PathBuf {
@@ -395,6 +560,8 @@ mod tests {
         /// Answers to "replace the existing project?" and who was asked.
         replace: VecDeque<bool>,
         asked_replace: Vec<String>,
+        /// Answers to "revert to the last saved version?".
+        revert: VecDeque<bool>,
     }
 
     impl FileDialogs for Script {
@@ -417,6 +584,9 @@ mod tests {
                 .pop_front()
                 .expect("unexpected replace question")
         }
+        fn confirm_revert(&mut self) -> bool {
+            self.revert.pop_front().expect("unexpected revert question")
+        }
         fn error(&mut self, message: &str) {
             self.errors.push(message.to_owned());
         }
@@ -435,7 +605,84 @@ mod tests {
     }
 
     fn cmd(doc: &mut Document, d: &mut Script, id: &str) -> FileOutcome {
-        run(doc, d, &Invocation::new(id)).expect("file command")
+        run(doc, d, &Invocation::new(id), None).expect("file command")
+    }
+
+    /// Increment and Save goes on in “Film 2.bae”, then “Film 3.bae”; Revert
+    /// asks, then drops the changes since the last save (AE).
+    #[test]
+    fn increment_and_save_and_revert() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(None);
+        let mut d = Script::default();
+        edit(&mut doc, "/Comp1");
+        d.save.push_back(Some(dir.path().join("Film")));
+        assert_eq!(cmd(&mut doc, &mut d, ids::SAVE), FileOutcome::Saved);
+        assert_eq!(
+            cmd(&mut doc, &mut d, ids::INCREMENT_AND_SAVE),
+            FileOutcome::Saved
+        );
+        assert_eq!(
+            doc.location(),
+            Some(dir.path().join("Film 2.bae").as_path())
+        );
+        assert_eq!(
+            cmd(&mut doc, &mut d, ids::INCREMENT_AND_SAVE),
+            FileOutcome::Saved
+        );
+        assert_eq!(
+            doc.location(),
+            Some(dir.path().join("Film 3.bae").as_path())
+        );
+        assert!(is_bae_project_dir(&dir.path().join("Film.bae")));
+        assert_eq!(
+            incremented(Path::new("/x/Shot_v09.baez")),
+            Path::new("/x/Shot_v10.baez")
+        );
+        // Revert: nothing to do without changes; Cancel keeps them.
+        assert_eq!(cmd(&mut doc, &mut d, ids::REVERT), FileOutcome::Cancelled);
+        edit(&mut doc, "/Comp2");
+        d.revert.push_back(false);
+        assert_eq!(cmd(&mut doc, &mut d, ids::REVERT), FileOutcome::Cancelled);
+        assert!(has(&doc, "/Comp2"));
+        d.revert.push_back(true);
+        assert_eq!(cmd(&mut doc, &mut d, ids::REVERT), FileOutcome::Replaced);
+        assert!(has(&doc, "/Comp1") && !has(&doc, "/Comp2") && !doc.is_dirty());
+        assert_eq!(
+            doc.location(),
+            Some(dir.path().join("Film 3.bae").as_path())
+        );
+    }
+
+    /// Save a Copy writes the project elsewhere; the open one keeps its
+    /// location and stays unsaved (AE).
+    #[test]
+    fn save_a_copy_keeps_the_open_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(None);
+        let mut d = Script::default();
+        edit(&mut doc, "/Comp1");
+        d.save.push_back(Some(dir.path().join("Film")));
+        assert_eq!(cmd(&mut doc, &mut d, ids::SAVE), FileOutcome::Saved);
+        edit(&mut doc, "/Comp2");
+        d.save.push_back(Some(dir.path().join("Backup")));
+        assert_eq!(cmd(&mut doc, &mut d, ids::SAVE_A_COPY), FileOutcome::Saved);
+        assert_eq!(
+            d.suggested.last().map(String::as_str),
+            Some("Film copy.bae")
+        );
+        assert_eq!(doc.location(), Some(dir.path().join("Film.bae").as_path()));
+        assert!(doc.is_dirty(), "the copy does not save the open project");
+        let mut copy = Document::new(None);
+        d.open.push_back(Some(dir.path().join("Backup.bae")));
+        assert_eq!(
+            cmd(&mut copy, &mut d, ids::OPEN_PROJECT),
+            FileOutcome::Replaced
+        );
+        assert!(has(&copy, "/Comp1") && has(&copy, "/Comp2"));
+        // A copy never replaces a project.
+        d.save.push_back(Some(dir.path().join("Film.bae")));
+        assert_eq!(cmd(&mut doc, &mut d, ids::SAVE_A_COPY), FileOutcome::Failed);
     }
 
     #[test]
@@ -480,10 +727,35 @@ mod tests {
             ids::OPEN_PROJECT,
             serde_json::json!({ "path": dir.path().join("Film.baez") }),
         );
-        assert_eq!(run(&mut other, &mut d, &inv), Some(FileOutcome::Replaced));
+        assert_eq!(
+            run(&mut other, &mut d, &inv, None),
+            Some(FileOutcome::Replaced)
+        );
         assert!(has(&other, "/Comp2"));
         assert!(d.errors.is_empty(), "{:?}", d.errors);
-        assert_eq!(run(&mut other, &mut d, &Invocation::new(ids::UNDO)), None);
+        assert_eq!(
+            run(&mut other, &mut d, &Invocation::new(ids::UNDO), None),
+            None
+        );
+    }
+
+    /// #677: a missing project template still gives a new project (blank),
+    /// after saying why.
+    #[test]
+    fn a_missing_template_falls_back_to_a_blank_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(None);
+        let mut d = Script::default();
+        edit(&mut doc, "/Old");
+        d.answers.push_back(UnsavedChoice::DontSave);
+        let missing = dir.path().join("Template.bae");
+        let inv = Invocation::new(ids::NEW_PROJECT);
+        assert_eq!(
+            run(&mut doc, &mut d, &inv, Some(&missing)),
+            Some(FileOutcome::Replaced)
+        );
+        assert_eq!(d.errors.len(), 1);
+        assert!(!has(&doc, "/Old") && doc.location().is_none());
     }
 
     #[test]

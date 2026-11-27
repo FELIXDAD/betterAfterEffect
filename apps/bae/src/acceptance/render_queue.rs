@@ -1,4 +1,4 @@
-//! Render Queue through the panel: Cmd+M, PNG / TIFF / EXR, frame range,
+//! Render Queue through the panel: Ctrl+Cmd+M, PNG / TIFF / EXR, frame range,
 //! paths with spaces and Chinese, Render / Stop (frames kept, N/M matches the
 //! files on disk), invalid paths, a full disk, Show in Finder (the `open`
 //! arguments), editing while it renders, several items. Needs a GPU; skipped
@@ -34,8 +34,8 @@ fn configure(h: &Ui, index: usize, format: ExportFormat, output: &Path, start: i
     let mut q = queue.lock();
     let id = q.items()[index].id;
     let item = q.item_mut(id).unwrap();
-    item.set_format(format);
-    item.output = output.to_string_lossy().into_owned();
+    item.outputs[0].set_format(format);
+    item.outputs[0].output = output.to_string_lossy().into_owned();
     item.start = start;
     item.end = end;
 }
@@ -72,7 +72,8 @@ fn files_in(dir: &Path, ext: &str) -> Vec<String> {
 }
 
 fn render(h: &mut Ui) {
-    h.get_by_label("Render").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+        .click();
     settle(h);
 }
 
@@ -89,23 +90,27 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
             "motion.layer.new.text",
         ],
     );
-    // Cmd+M queues the active comp and opens the Render Queue.
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    // ⌃⌘M (AE on macOS; ⌘M is the system's Minimize) queues the active comp
+    // and opens the Render Queue.
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(items(&h).len(), 1);
     let first = &items(&h)[0];
-    assert_eq!(first.format, ExportFormat::Png);
-    assert!(
-        first.output.ends_with("Comp 1_[####].png"),
-        "{}",
-        first.output
-    );
+    let out = &first.outputs[0];
+    if cfg!(target_os = "macos") {
+        assert_eq!(out.format, ExportFormat::H264);
+        assert!(out.output.ends_with("Comp 1.mp4"), "{}", out.output);
+    } else {
+        assert_eq!(out.format, ExportFormat::Png);
+        assert!(out.output.ends_with("Comp 1_[####].png"), "{}", out.output);
+    }
     assert_eq!(
         (first.start, first.end),
         (0, 299),
         "default range is the work area"
     );
     assert!(
-        h.query_by_label("Render").is_some(),
+        h.query_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+            .is_some(),
         "Render Queue panel not open"
     );
 
@@ -181,7 +186,7 @@ fn stop_keeps_the_rendered_frames_and_reports_n_of_m() {
     let tmp = tempfile::tempdir().unwrap();
     let out = tricky_dir(tmp.path()).join("停止 测试");
     long_comp(&mut h);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(&h, 0, ExportFormat::Png, &out.join("f_[####].png"), 0, 1799);
     render(&mut h);
     // Let some frames finish, then Stop.
@@ -201,7 +206,9 @@ fn stop_keeps_the_rendered_frames_and_reports_n_of_m() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        h.get_by_label("Render").accesskit_node().is_disabled(),
+        h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+            .accesskit_node()
+            .is_disabled(),
         "Render enabled while rendering"
     );
     queue_control(&h, 1, "Stop").expect("Stop").click();
@@ -249,12 +256,20 @@ fn invalid_output_paths_fail_with_a_message() {
     ];
     let mut report = Vec::new();
     for (i, (label, path)) in cases.iter().enumerate() {
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         configure(&h, i, ExportFormat::Png, path, 0, 2);
         render(&mut h);
         wait_done(&mut h, Duration::from_secs(120));
         let status = items(&h)[i].status.clone();
         report.push(format!("{label}: {status:?}"));
+        if i == 0 {
+            // Items with their output modules are taller than the short
+            // Timeline frame the queue shares (AE): maximize it (`).
+            to_front(&mut h, "render_queue");
+            h.state_mut()
+                .dispatch(Invocation::new(bae_ui::action::ids::MAXIMIZE_FRAME));
+            settle(&mut h);
+        }
         match status {
             ItemStatus::Failed(message) => {
                 assert!(!message.is_empty(), "{label}: empty message");
@@ -276,7 +291,7 @@ fn output_without_extension_gets_one() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(
         &h,
         0,
@@ -312,7 +327,7 @@ fn empty_output_path_is_refused() {
     }
     let Some(mut h) = gpu_gui() else { return };
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(&h, 0, ExportFormat::Png, Path::new(""), 0, 2);
     render(&mut h);
     wait_done(&mut h, Duration::from_secs(120));
@@ -330,7 +345,7 @@ fn frame_range_outside_the_comp() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     // The panel's frame fields accept any numbers; AE limits them to the comp.
     configure(
         &h,
@@ -358,7 +373,7 @@ fn editing_while_rendering_and_several_items() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let comp = long_comp(&mut h);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(
         &h,
         0,
@@ -372,8 +387,8 @@ fn editing_while_rendering_and_several_items() {
     assert!(h.state_mut().menu("motion.layer.new.solid"));
     settle(&mut h);
     confirm_dialog(&mut h);
-    key(&mut h, Modifiers::COMMAND, Key::M);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(
         &h,
         1,
@@ -441,7 +456,7 @@ fn show_in_finder_passes_the_path_to_open() {
     let tmp = tempfile::tempdir().unwrap();
     let out = tricky_dir(tmp.path()).join("显示 在 访达");
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(&h, 0, ExportFormat::Png, &out.join("帧 _[####].png"), 0, 2);
     render(&mut h);
     wait_done(&mut h, Duration::from_secs(120));
@@ -523,7 +538,7 @@ fn full_disk_fails_cleanly() {
     let volume = PathBuf::from("/Volumes/BAEFULL");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         comp_with(&mut h, &["motion.layer.new.solid", "shape:ellipse"]);
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         configure(
             &h,
             0,
@@ -553,14 +568,14 @@ fn full_disk_fails_cleanly() {
 
 /// Queue the active comp once more and set the new item's output.
 fn queue_one(h: &mut Ui, format: ExportFormat, output: &Path, start: i64, end: i64) -> usize {
-    key(h, Modifiers::COMMAND, Key::M);
+    key(h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let i = items(h).len() - 1;
     let queue = h.state().render_queue();
     let mut q = queue.lock();
     let id = q.items()[i].id;
     let item = q.item_mut(id).unwrap();
-    item.format = format;
-    item.output = output.to_string_lossy().into_owned();
+    item.outputs[0].format = format;
+    item.outputs[0].output = output.to_string_lossy().into_owned();
     item.start = start;
     item.end = end;
     i
@@ -786,8 +801,8 @@ fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
         let mut q = queue.lock();
         let id = q.items()[i].id;
         let item = q.item_mut(id).unwrap();
-        item.set_format(f);
-        item.output.clone()
+        item.outputs[0].set_format(f);
+        item.outputs[0].output.clone()
     };
     for (f, ext) in [
         (ExportFormat::Tiff, "tif"),
@@ -819,6 +834,12 @@ fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
         0,
     );
     settle(&mut h);
+    // The Render Queue shares the short Timeline frame (AE): maximize it (`)
+    // to see the whole item.
+    to_front(&mut h, "render_queue");
+    h.state_mut()
+        .dispatch(Invocation::new(bae_ui::action::ids::MAXIMIZE_FRAME));
+    settle(&mut h);
     assert!(
         find_text(&h, "The file will be saved as .tif to match the format.").is_some(),
         "no hint for the mismatched extension"
@@ -832,15 +853,12 @@ fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
 fn typed_frame_numbers_stay_inside_the_comp() {
     let Some(mut h) = gpu_gui() else { return };
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
-    // The start and end fields: the Render Queue's two spin buttons (the first
-    // two in the tree; the Properties panel has more further on).
-    let fields = |h: &Ui| -> Vec<(Rect, String)> {
-        h.root()
-            .query_all_by_role(egui::accesskit::Role::SpinButton)
-            .map(|n| (n.rect(), n.value().unwrap_or_default()))
-            .take(2)
-            .collect()
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    let fields = |h: &Ui| {
+        ["Frames · Start", "Frames · End"].map(|name| {
+            let node = queue_control(h, 1, name).expect("frame range control");
+            (node.rect(), node.value().unwrap_or_default())
+        })
     };
     let f = fields(&h);
     assert_eq!(
@@ -900,4 +918,326 @@ fn a_single_frame_numbers_the_output_name() {
             "{ext}"
         );
     }
+}
+
+// ---- Retest on dev 3d582ea: movies from the Render Queue (#239), #225, #231 ----
+
+/// What an MP4 / QuickTime file holds, read from its boxes: the video codec
+/// (sample entry type), its depth (32 = with alpha), the number of samples
+/// (frames) and the duration in seconds. Enough for one video track.
+fn movie_info(path: &Path) -> (String, u16, u32, f64) {
+    let b = fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let find = |tag: &[u8], from: usize| {
+        b[from..]
+            .windows(4)
+            .position(|w| w == tag)
+            .map(|i| i + from)
+    };
+    let u16_at = |i: usize| u16::from_be_bytes([b[i], b[i + 1]]);
+    let u32_at = |i: usize| u32::from_be_bytes(b[i..i + 4].try_into().unwrap());
+    let u64_at = |i: usize| u64::from_be_bytes(b[i..i + 8].try_into().unwrap());
+    let mvhd = find(b"mvhd", 0).expect("no mvhd");
+    let (scale, duration) = if b[mvhd + 4] == 1 {
+        (u32_at(mvhd + 24), u64_at(mvhd + 28))
+    } else {
+        (u32_at(mvhd + 16), u64::from(u32_at(mvhd + 20)))
+    };
+    let stsd = find(b"stsd", 0).expect("no stsd");
+    let (codec, at) = [b"avc1", b"hvc1", b"hev1", b"apch", b"ap4h"]
+        .iter()
+        .find_map(|c| find(*c, stsd).map(|i| (String::from_utf8_lossy(*c).into_owned(), i)))
+        .expect("no known video codec");
+    let depth = u16_at(at + 78);
+    let stsz = find(b"stsz", 0).expect("no stsz");
+    (
+        codec,
+        depth,
+        u32_at(stsz + 12),
+        duration as f64 / f64::from(scale),
+    )
+}
+
+/// Frames until item `i` has finished (Done, Failed or Stopped): a movie item
+/// can still be Queued for a few frames after Render while its encoder starts,
+/// when [`wait_done`] already sees the queue idle.
+fn wait_item(h: &mut Ui, i: usize, timeout: Duration) -> ItemStatus {
+    let started = Instant::now();
+    loop {
+        frame(h);
+        let status = items(h)[i].status.clone();
+        if matches!(
+            status,
+            ItemStatus::Done { .. } | ItemStatus::Failed(_) | ItemStatus::Stopped { .. }
+        ) {
+            settle(h);
+            return status;
+        }
+        assert!(started.elapsed() < timeout, "item {i} still {status:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn set_channels(h: &Ui, index: usize, channels: bae_ui_motion::render_queue::Channels) {
+    let queue = h.state().render_queue();
+    let mut q = queue.lock();
+    let id = q.items()[index].id;
+    q.item_mut(id).unwrap().outputs[0].channels = channels;
+}
+
+#[test]
+fn movies_from_the_render_queue_have_their_codec_frames_and_alpha() {
+    use bae_ui_motion::render_queue::default_channels;
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    // A rectangle on a transparent background: the alpha shows in the file.
+    comp_with(&mut h, &["shape:rect"]);
+    let cases = [
+        (ExportFormat::H264, "mp4", "avc1", false),
+        (ExportFormat::Hevc, "mov", "hvc1", false),
+        (ExportFormat::ProRes, "mov", "apch", false),
+        (ExportFormat::ProRes4444, "mov", "ap4h", true),
+    ];
+    for (i, (format, ext, codec, alpha)) in cases.into_iter().enumerate() {
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+        let path = dir.join(format!("影片 {codec}.{ext}"));
+        configure(&h, i, format, &path, 0, 59);
+        // The output module's defaults for the format (as AE's templates).
+        set_channels(&h, i, default_channels(format));
+        settle(&mut h);
+        render(&mut h);
+        let status = wait_item(&mut h, i, Duration::from_secs(300));
+        // The file the item wrote (BAE gives the format its own extension).
+        let path = match &status {
+            ItemStatus::Done { first, .. } => first.clone(),
+            _ => path,
+        };
+        assert!(
+            matches!(status, ItemStatus::Done { .. }),
+            "{codec}: {status:?}"
+        );
+        let (got, depth, frames, seconds) = movie_info(&path);
+        println!(
+            "{codec}: {} → {got} depth {depth}, {frames} frames, {seconds:.3} s",
+            path.file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(got, codec);
+        assert_eq!(frames, 60, "{codec}: frames");
+        assert!((seconds - 2.0).abs() < 0.01, "{codec}: {seconds} s");
+        assert_eq!(depth == 32, alpha, "{codec}: depth {depth}");
+    }
+}
+
+#[test]
+fn stopping_a_movie_keeps_a_playable_file_of_the_rendered_frames() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tricky_dir(tmp.path()).join("停止 影片.mp4");
+    long_comp(&mut h);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    configure(&h, 0, ExportFormat::H264, &path, 0, 1799);
+    settle(&mut h);
+    render(&mut h);
+    let started = Instant::now();
+    loop {
+        frame(&mut h);
+        match items(&h)[0].status {
+            ItemStatus::Rendering { done, .. } if done >= 20 => break,
+            ItemStatus::Done { .. } | ItemStatus::Failed(_) | ItemStatus::Stopped { .. } => {
+                panic!("finished before Stop: {:?}", items(&h)[0].status)
+            }
+            _ => {}
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(120),
+            "{:?}",
+            items(&h)[0].status
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    queue_control(&h, 1, "Stop").expect("Stop").click();
+    settle(&mut h);
+    let ItemStatus::Stopped { done, total, .. } = wait_item(&mut h, 0, Duration::from_secs(120))
+    else {
+        panic!("not stopped: {:?}", items(&h)[0].status);
+    };
+    assert!(done > 0 && done < total, "{done}/{total}");
+    if path.exists() {
+        let (codec, _, frames, _) = movie_info(&path);
+        println!("stopped at {done}/{total}: {codec}, {frames} frames in the file");
+        assert_eq!(
+            frames as usize, done,
+            "frames in the stopped movie vs “Stopped (N/M)”"
+        );
+    } else {
+        println!("stopped at {done}/{total}: no file left");
+    }
+}
+
+#[test]
+fn a_movie_into_a_read_only_folder_fails_with_a_message() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let locked = tmp.path().join("只读 影片");
+    fs::create_dir(&locked).unwrap();
+    let mut perms = fs::metadata(&locked).unwrap().permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&locked, perms.clone()).unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    configure(&h, 0, ExportFormat::ProRes, &locked.join("x.mov"), 0, 9);
+    render(&mut h);
+    let status = wait_item(&mut h, 0, Duration::from_secs(120));
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&locked, perms).unwrap();
+    let ItemStatus::Failed(message) = status else {
+        panic!("not failed: {status:?}");
+    };
+    println!("read-only folder: {message}");
+    assert!(!message.is_empty());
+    new_solid(&mut h); // the app keeps working
+}
+
+#[test]
+#[ignore = "manual (macOS): creates and ejects a 4 MB RAM disk"]
+fn a_movie_on_a_full_disk_fails_cleanly() {
+    let Some(mut h) = gpu_gui() else { return };
+    let dev = std::process::Command::new("hdiutil")
+        .args(["attach", "-nomount", "ram://8192"])
+        .output()
+        .unwrap();
+    let dev = String::from_utf8_lossy(&dev.stdout).trim().to_owned();
+    assert!(dev.starts_with("/dev/disk"), "{dev}");
+    let ok = std::process::Command::new("diskutil")
+        .args(["erasevolume", "HFS+", "BAEFULLMOV", &dev])
+        .output()
+        .unwrap();
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let volume = PathBuf::from("/Volumes/BAEFULLMOV");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        long_comp(&mut h);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+        configure(
+            &h,
+            0,
+            ExportFormat::ProRes4444,
+            &volume.join("满 盘.mov"),
+            0,
+            599,
+        );
+        render(&mut h);
+        wait_done(&mut h, Duration::from_secs(300));
+        let status = items(&h)[0].status.clone();
+        println!("FULL DISK (movie): {status:?}");
+        assert!(matches!(status, ItemStatus::Failed(_)), "{status:?}");
+        new_solid(&mut h);
+    }));
+    let _ = std::process::Command::new("hdiutil")
+        .args(["detach", &dev])
+        .output();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+#[test]
+fn closing_the_project_while_rendering_stops_and_empties_the_queue() {
+    // #231: the Render Queue belongs to the project (AE).
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("关闭 时 渲染");
+    long_comp(&mut h);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    configure(&h, 0, ExportFormat::Png, &out.join("f_[####].png"), 0, 1799);
+    render(&mut h);
+    let started = Instant::now();
+    while !matches!(items(&h)[0].status, ItemStatus::Rendering { done, .. } if done >= 5) {
+        frame(&mut h);
+        assert!(started.elapsed() < Duration::from_secs(120));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let close = h
+        .state()
+        .menu_items()
+        .into_iter()
+        .find(|i| i.invocation.id == "file.close_project")
+        .unwrap();
+    h.state_mut()
+        .dialogs
+        .answers
+        .push_back(crate::files::UnsavedChoice::DontSave);
+    assert!(h.state_mut().menu(&close.id));
+    settle(&mut h);
+    assert!(
+        items(&h).is_empty(),
+        "queue after Close Project: {:?}",
+        items(&h)
+    );
+    // The worker stops after the frames already in flight: the count on disk
+    // settles quickly and stays far below the 1 800 frames of the range.
+    let count = |h: &mut Ui| {
+        for _ in 0..100 {
+            frame(h);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        files_in(&out, "png").len()
+    };
+    let at_close = files_in(&out, "png").len();
+    let watch: Vec<usize> = (0..10).map(|_| count(&mut h)).collect();
+    println!("frames on disk each second after Close Project: {at_close} {watch:?}");
+    let (one, two, three) = (watch[0], watch[8], watch[9]);
+    println!(
+        "frames on disk after Close Project: {at_close}, +1 s {one}, +2 s {two}, +3 s {three}"
+    );
+    assert_eq!(
+        two, three,
+        "frames kept coming after Close Project: {at_close} → {one} → {two} → {three}"
+    );
+    assert!(three < 100, "{three} frames: the render did not stop");
+    // The next project renders normally.
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    assert_eq!(items(&h).len(), 1);
+    configure(
+        &h,
+        0,
+        ExportFormat::Png,
+        &tmp.path().join("新 工程/n_[####].png"),
+        0,
+        2,
+    );
+    settle(&mut h);
+    render(&mut h);
+    let status = wait_item(&mut h, 0, Duration::from_secs(120));
+    assert!(matches!(status, ItemStatus::Done { .. }), "{status:?}");
+}
+
+#[test]
+fn a_new_png_item_is_rgb_as_in_ae() {
+    // #225: a new output module is RGB; the PNG has no alpha (colour type 2).
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["shape:rect"]);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    assert_eq!(
+        items(&h)[0].outputs[0].channels,
+        bae_ui_motion::render_queue::Channels::Rgb
+    );
+    configure(
+        &h,
+        0,
+        ExportFormat::Png,
+        &tmp.path().join("rgb_[####].png"),
+        0,
+        0,
+    );
+    render(&mut h);
+    wait_done(&mut h, Duration::from_secs(120));
+    let png = fs::read(tmp.path().join("rgb_0000.png")).unwrap();
+    // IHDR: colour type at byte 25 (2 = RGB, 6 = RGBA).
+    assert_eq!(png[25], 2, "PNG colour type {}", png[25]);
 }

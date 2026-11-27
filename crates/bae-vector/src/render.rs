@@ -26,7 +26,7 @@ use bae_render::{
     SourceProvider, SourceRequest,
 };
 use kurbo::{Affine, Rect};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use rustc_hash::FxHashMap;
 use vello::peniko::{self, Color, ColorStop, Extend, InterpolationAlphaSpace};
 
@@ -250,8 +250,23 @@ impl std::fmt::Debug for VelloRenderer {
     }
 }
 
-type SharedRenderers = Mutex<Vec<(Weak<GpuContext>, Weak<VelloRenderer>)>>;
+/// Renderers by GPU context, kept for the context's lifetime: Vello compiles
+/// its pipelines when a renderer is created, so letting it go between draws
+/// recompiled every shader for every shape layer of every frame.
+type SharedRenderers = Mutex<Vec<(Weak<GpuContext>, Slot)>>;
 static SHARED: SharedRenderers = Mutex::new(Vec::new());
+/// Signalled when a shared renderer finished building (or failed).
+static BUILT: Condvar = Condvar::new();
+
+/// A shared renderer, or one being built (by the warm-up, usually).
+enum Slot {
+    Building,
+    Ready(Arc<VelloRenderer>),
+}
+
+/// Threads Vello compiles its shaders on when the user is not waiting (the
+/// warm-up): few, so the UI keeps the CPU.
+const BACKGROUND_COMPILE_THREADS: usize = 2;
 
 fn vello_error(e: vello::Error) -> RenderError {
     RenderError::Other(format!("vello: {e}"))
@@ -267,6 +282,16 @@ impl VelloRenderer {
     /// A new renderer with an explicit backend. The GPU backend compiles Vello's
     /// pipelines (tens to hundreds of milliseconds).
     pub fn with_backend(gpu: &GpuContext, backend: VectorBackend) -> Result<Self, RenderError> {
+        Self::build(gpu, backend, None)
+    }
+
+    /// A renderer compiling Vello's shaders on `threads` threads (all cores when
+    /// `None`).
+    fn build(
+        gpu: &GpuContext,
+        backend: VectorBackend,
+        threads: Option<std::num::NonZeroUsize>,
+    ) -> Result<Self, RenderError> {
         let renderer = match backend {
             VectorBackend::Cpu => None,
             VectorBackend::Gpu => Some(Mutex::new(
@@ -275,7 +300,7 @@ impl VelloRenderer {
                     vello::RendererOptions {
                         use_cpu: false,
                         antialiasing_support: vello::AaSupport::area_only(),
-                        num_init_threads: None,
+                        num_init_threads: threads,
                         pipeline_cache: None,
                     },
                 )
@@ -286,18 +311,64 @@ impl VelloRenderer {
     }
 
     /// The renderer shared by everyone drawing on `gpu`; created on first use and
-    /// dropped when the last user lets go of it.
+    /// kept until the context is dropped. While another thread (the warm-up)
+    /// builds it, an interactive thread (`bae_render::is_interactive_thread`)
+    /// gets a "warming up" error instead of waiting; others wait.
     pub fn shared(gpu: &Arc<GpuContext>) -> Result<Arc<Self>, RenderError> {
+        Self::get(gpu, None)
+    }
+
+    /// Builds the shared renderer ahead of its first use, compiling on a few
+    /// threads (the app's warm-up).
+    pub fn warm(gpu: &Arc<GpuContext>) -> Result<(), RenderError> {
+        Self::get(gpu, std::num::NonZeroUsize::new(BACKGROUND_COMPILE_THREADS)).map(drop)
+    }
+
+    fn get(
+        gpu: &Arc<GpuContext>,
+        threads: Option<std::num::NonZeroUsize>,
+    ) -> Result<Arc<Self>, RenderError> {
+        let interactive = bae_render::is_interactive_thread();
         let mut shared = SHARED.lock();
-        shared.retain(|(g, r)| g.strong_count() > 0 && r.strong_count() > 0);
-        if let Some(r) = shared
-            .iter()
-            .find(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)))
-            .and_then(|(_, r)| r.upgrade())
-        {
-            return Ok(r);
+        loop {
+            shared.retain(|(g, _)| g.strong_count() > 0);
+            match shared
+                .iter()
+                .find(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)))
+            {
+                Some((_, Slot::Ready(r))) => return Ok(r.clone()),
+                Some((_, Slot::Building)) if interactive => {
+                    return Err(bae_render::warming_up("the vector renderer"));
+                }
+                Some((_, Slot::Building)) => BUILT.wait(&mut shared),
+                None => break,
+            }
         }
-        let r = Arc::new(Self::new(gpu)?);
+        shared.push((Arc::downgrade(gpu), Slot::Building));
+        drop(shared);
+        if interactive {
+            // Not even started: build it in the background, never on the UI thread.
+            let background = gpu.clone();
+            let spawned = std::thread::Builder::new()
+                .name("bae-vector-build".into())
+                .spawn(move || {
+                    bae_gpu::warm_up::lower_priority();
+                    let threads = std::num::NonZeroUsize::new(BACKGROUND_COMPILE_THREADS);
+                    Self::finish(&background, Self::build_shared(&background, threads)).ok();
+                });
+            if spawned.is_err() {
+                return Self::finish(gpu, Self::build_shared(gpu, None));
+            }
+            return Err(bae_render::warming_up("the vector renderer"));
+        }
+        Self::finish(gpu, Self::build_shared(gpu, threads))
+    }
+
+    fn build_shared(
+        gpu: &GpuContext,
+        threads: Option<std::num::NonZeroUsize>,
+    ) -> Result<Arc<Self>, RenderError> {
+        let r = Arc::new(Self::build(gpu, VectorBackend::for_adapter(gpu), threads)?);
         if r.backend == VectorBackend::Cpu {
             tracing::warn!(
                 "vector shapes and text are rasterized on the CPU (adapter {:?} is {:?})",
@@ -305,8 +376,30 @@ impl VelloRenderer {
                 gpu.adapter_info().device_type
             );
         }
-        shared.push((Arc::downgrade(gpu), Arc::downgrade(&r)));
         Ok(r)
+    }
+
+    /// Publishes the outcome of a build and wakes the threads waiting for it.
+    fn finish(
+        gpu: &Arc<GpuContext>,
+        built: Result<Arc<Self>, RenderError>,
+    ) -> Result<Arc<Self>, RenderError> {
+        let mut shared = SHARED.lock();
+        let at = shared
+            .iter()
+            .position(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)));
+        match (&built, at) {
+            (Ok(r), Some(i)) => shared[i].1 = Slot::Ready(r.clone()),
+            (Err(_), Some(i)) => {
+                shared.remove(i);
+            }
+            (_, None) => {}
+        }
+        BUILT.notify_all();
+        drop(shared);
+        // Frames drawn while it was building are incomplete: draw them again.
+        bae_gpu::warm_up::request_redraw();
+        built
     }
 
     /// The backend in use.
@@ -490,6 +583,91 @@ pub struct ShapeSource {
     scene: Arc<VectorScene>,
     bounds: IRect,
     hash: u64,
+    memo: RenderMemo,
+    #[cfg(target_os = "macos")]
+    shared: Option<Arc<SharedDrawing>>,
+}
+
+/// Layer sources by content hash. When it fills up it drops only the entries
+/// not used since the last sweep (second chance) and lets the limit follow the
+/// working set, so every layer still on screen keeps its source and the image
+/// it remembered, however many layers there are.
+#[derive(Debug)]
+pub struct SourceCache<T> {
+    map: FxHashMap<u64, (Arc<T>, bool)>,
+    limit: usize,
+}
+
+/// Entries a [`SourceCache`] holds before its first sweep.
+const CACHE_ENTRIES: usize = 512;
+
+impl<T> Default for SourceCache<T> {
+    fn default() -> Self {
+        Self {
+            map: FxHashMap::default(),
+            limit: CACHE_ENTRIES,
+        }
+    }
+}
+
+impl<T> SourceCache<T> {
+    /// The source for `hash`, marked as used.
+    pub fn get(&mut self, hash: u64) -> Option<Arc<T>> {
+        let (source, used) = self.map.get_mut(&hash)?;
+        *used = true;
+        Some(source.clone())
+    }
+
+    /// Adds `source` for `hash`, sweeping first when full.
+    pub fn insert(&mut self, hash: u64, source: Arc<T>) {
+        if self.map.len() >= self.limit {
+            self.map.retain(|_, (_, used)| std::mem::take(used));
+            self.limit = (2 * self.map.len()).max(CACHE_ENTRIES);
+        }
+        self.map.insert(hash, (source, true));
+    }
+}
+
+/// The last image a vector source rendered, reused while the request is the
+/// same: layers that only move, turn or fade are rasterized once, not every
+/// frame (the image is only ever read).
+#[derive(Debug, Default)]
+pub struct RenderMemo(Mutex<Option<MemoEntry>>);
+
+#[derive(Debug)]
+struct MemoEntry {
+    gpu: usize,
+    roi: IRect,
+    scale: u64,
+    image: GpuImage,
+}
+
+impl RenderMemo {
+    /// The image for `roi` at `scale` on `gpu`: the remembered one, or `render`'s.
+    pub fn get_or_render(
+        &self,
+        gpu: &Arc<GpuContext>,
+        roi: IRect,
+        scale: f64,
+        render: impl FnOnce() -> Result<GpuImage, RenderError>,
+    ) -> Result<GpuImage, RenderError> {
+        let gpu = Arc::as_ptr(gpu) as usize;
+        if let Some(e) = &*self.0.lock()
+            && e.gpu == gpu
+            && e.roi == roi
+            && e.scale == scale.to_bits()
+        {
+            return Ok(e.image.clone());
+        }
+        let image = render()?;
+        *self.0.lock() = Some(MemoEntry {
+            gpu,
+            roi,
+            scale: scale.to_bits(),
+            image: image.clone(),
+        });
+        Ok(image)
+    }
 }
 
 impl ShapeSource {
@@ -499,6 +677,9 @@ impl ShapeSource {
             bounds: pixel_bounds(&scene),
             hash: scene.content_hash(),
             scene,
+            memo: RenderMemo::default(),
+            #[cfg(target_os = "macos")]
+            shared: None,
         }
     }
 
@@ -515,7 +696,16 @@ impl ShapeSource {
         scale: f64,
     ) -> Result<GpuImage, RenderError> {
         let roi = roi.intersect(&self.bounds);
-        VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.scene.as_ref())
+        self.memo.get_or_render(gpu, roi, scale, || {
+            let draw = || VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, &*self.scene);
+            // The per-layer memo above still holds this layer's own scale and
+            // ROI when another instance of the drawing asks for a different one.
+            #[cfg(target_os = "macos")]
+            if let Some(shared) = &self.shared {
+                return shared.memo.get_or_render(gpu, roi, scale, draw);
+            }
+            draw()
+        })
     }
 
     /// Renders `roi` at `scale` with a specific renderer (e.g. a forced backend).
@@ -556,17 +746,59 @@ impl LayerSource for ShapeSource {
     }
 }
 
+/// Equal display lists can share a raster even when the project paths differ.
+/// The provider's index has only weak references, so it cannot pin textures.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct SharedDrawing {
+    scene: Arc<VectorScene>,
+    memo: RenderMemo,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Default)]
+struct SharedDrawings {
+    by_hash: FxHashMap<u64, Weak<SharedDrawing>>,
+    next_sweep: usize,
+}
+
+#[cfg(target_os = "macos")]
+impl SharedDrawings {
+    fn share(&mut self, mut source: ShapeSource) -> ShapeSource {
+        let shared = self
+            .by_hash
+            .get(&source.hash)
+            .and_then(Weak::upgrade)
+            .filter(|drawing| drawing.scene == source.scene);
+        let shared = shared.unwrap_or_else(|| {
+            if self.by_hash.len() >= self.next_sweep {
+                self.by_hash
+                    .retain(|_, drawing| drawing.strong_count() != 0);
+                self.next_sweep = (2 * self.by_hash.len()).max(CACHE_ENTRIES);
+            }
+            let drawing = Arc::new(SharedDrawing {
+                scene: source.scene.clone(),
+                memo: RenderMemo::default(),
+            });
+            self.by_hash.insert(source.hash, Arc::downgrade(&drawing));
+            drawing
+        });
+        source.scene = shared.scene.clone();
+        source.shared = Some(shared);
+        source
+    }
+}
+
 /// Creates [`ShapeSource`]s for [`crate::SHAPE_PROVIDER`] content. Sources are
 /// cached by `CustomContent::hash` (a small cache: one entry per visible shape
 /// layer and frame is typical).
 #[derive(Debug, Default)]
 pub struct ShapeProvider {
-    cache: Mutex<FxHashMap<u64, Arc<ShapeSource>>>,
+    cache: Mutex<SourceCache<ShapeSource>>,
+    #[cfg(target_os = "macos")]
+    drawings: Mutex<SharedDrawings>,
     warnings: Mutex<Vec<String>>,
 }
-
-/// Cached sources kept before the cache is cleared.
-const CACHE_ENTRIES: usize = 512;
 
 impl ShapeProvider {
     /// An empty provider.
@@ -611,15 +843,34 @@ impl SourceProvider for ShapeProvider {
     }
 
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
-        if let Some(hit) = self.cache.lock().get(&content.hash) {
-            return Ok(hit.clone());
+        if let Some(hit) = self.cache.lock().get(content.hash) {
+            return Ok(hit);
         }
-        let source = Arc::new(ShapeSource::new(self.scene_of(content)?));
-        let mut cache = self.cache.lock();
-        if cache.len() >= CACHE_ENTRIES {
-            cache.clear();
-        }
-        cache.insert(content.hash, source.clone());
+        let source = ShapeSource::new(self.scene_of(content)?);
+        #[cfg(target_os = "macos")]
+        let source = self.drawings.lock().share(source);
+        let source = Arc::new(source);
+        self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
+    }
+}
+
+/// Builds the shared vector renderer during the app's warm-up
+/// (`bae_gpu::warm_up`), before the first shape or text layer is drawn.
+#[derive(Debug, Default)]
+pub struct VectorWarmUp;
+
+impl bae_gpu::WarmUp for VectorWarmUp {
+    fn name(&self) -> &str {
+        "vector renderer"
+    }
+
+    /// Right after the fonts (text and shapes need it).
+    fn priority(&self) -> u8 {
+        1
+    }
+
+    fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
+        VelloRenderer::warm(gpu).map_err(|e| e.to_string())
     }
 }

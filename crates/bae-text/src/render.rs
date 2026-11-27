@@ -15,20 +15,93 @@ use bae_render::{
     CustomContent, EncodeContext, GpuImage, IRect, LayerSource, RenderError, SourceProvider,
     SourceRequest,
 };
-use bae_vector::render::{VectorDraw, VelloRenderer, cpu_paint};
+use bae_vector::render::{RenderMemo, SourceCache, VectorDraw, VelloRenderer, cpu_paint};
 use kurbo::{Affine, BezPath, Diagonal2, Join, Rect};
 use parking_lot::Mutex;
-use rustc_hash::FxHashMap;
 use vello::peniko::{self, Color};
 use vello::{FontEmbolden, Glyph, NormalizedCoord};
 
 use crate::fonts::FontSystem;
-use crate::layout::{GlyphRun, PositionedGlyph, TextLayout, layout_text};
+use crate::layout::{GlyphRun, PositionedGlyph, TextLayout, TextPaint, layout_text};
 
 /// Appends `text` to `scene` with `transform` (layer space → target pixels).
 pub fn encode(scene: &mut vello::Scene, text: &TextLayout, transform: Affine) {
-    let fill = text.paint.fill.map(|c| peniko::Brush::Solid(Color::new(c)));
-    let stroke = text.paint.stroke.map(|s| {
+    encode_clipped(scene, text, transform, None);
+}
+
+fn encode_clipped(
+    scene: &mut vello::Scene,
+    text: &TextLayout,
+    transform: Affine,
+    mut viewport: Option<Rect>,
+) {
+    for run in &text.runs {
+        for_batches(text, run, transform, |glyphs, matrix, paint, opacity| {
+            if opacity < 1.0 {
+                let clip = viewport.get_or_insert_with(|| {
+                    transform
+                        .transform_rect_bbox(text.bounds(true).unwrap_or_default())
+                        .inflate(1.0, 1.0)
+                });
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::Mix::Normal,
+                    opacity,
+                    Affine::IDENTITY,
+                    clip,
+                );
+            }
+            encode_batch(scene, run, matrix, glyphs, paint);
+            if opacity < 1.0 {
+                scene.pop_layer();
+            }
+        });
+    }
+}
+
+// Plain text stays batched by font run. Adjacent identical animator results can
+// also share a glyph draw, including clusters shaped into several glyphs.
+fn for_batches(
+    text: &TextLayout,
+    run: &GlyphRun,
+    transform: Affine,
+    mut visit: impl FnMut(&[PositionedGlyph], Affine, TextPaint, f32),
+) {
+    if text.styles.is_empty() {
+        visit(&run.glyphs, transform, run.paint, 1.0);
+        return;
+    }
+    for batch in run.glyphs.chunk_by(|a, b| {
+        a.char_index == b.char_index
+            || (text.styles[a.char_index].opacity == 1.0
+                && text.styles[a.char_index] == text.styles[b.char_index])
+    }) {
+        let style = text.styles[batch[0].char_index];
+        let mut paint = style.paint;
+        let mut opacity = style.opacity;
+        if batch.len() == 1 && (paint.fill.is_none() || paint.stroke.is_none()) {
+            // A single paint operation needs no intermediate layer.
+            if let Some(fill) = &mut paint.fill {
+                fill[3] *= opacity;
+            }
+            if let Some(stroke) = &mut paint.stroke {
+                stroke.color[3] *= opacity;
+            }
+            opacity = 1.0;
+        }
+        visit(batch, transform * style.transform, paint, opacity);
+    }
+}
+
+fn encode_batch(
+    scene: &mut vello::Scene,
+    run: &GlyphRun,
+    transform: Affine,
+    glyphs: &[PositionedGlyph],
+    paint: TextPaint,
+) {
+    let fill = paint.fill.map(|c| peniko::Brush::Solid(Color::new(c)));
+    let stroke = paint.stroke.map(|s| {
         let style = bae_vector::StrokeStyle {
             width: s.width,
             join: s.join,
@@ -38,28 +111,22 @@ pub fn encode(scene: &mut vello::Scene, text: &TextLayout, transform: Affine) {
         .to_kurbo();
         (style, peniko::Brush::Solid(Color::new(s.color)))
     });
-    for run in &text.runs {
-        match (&fill, &stroke) {
-            (None, None) => {}
-            (Some(f), None) => draw(scene, run, transform, &run.glyphs, Paint::Fill(f)),
-            (None, Some((style, brush))) => draw(
-                scene,
-                run,
-                transform,
-                &run.glyphs,
-                Paint::Stroke(style, brush),
-            ),
-            (Some(f), Some((style, brush))) => {
-                // Per character: a later character's paint covers an earlier one's.
-                for g in &run.glyphs {
-                    let one = std::slice::from_ref(g);
-                    if text.paint.stroke_over_fill {
-                        draw(scene, run, transform, one, Paint::Fill(f));
-                        draw(scene, run, transform, one, Paint::Stroke(style, brush));
-                    } else {
-                        draw(scene, run, transform, one, Paint::Stroke(style, brush));
-                        draw(scene, run, transform, one, Paint::Fill(f));
-                    }
+    match (&fill, &stroke) {
+        (None, None) => {}
+        (Some(f), None) => draw(scene, run, transform, glyphs, Paint::Fill(f)),
+        (None, Some((style, brush))) => {
+            draw(scene, run, transform, glyphs, Paint::Stroke(style, brush))
+        }
+        (Some(f), Some((style, brush))) => {
+            // Per character: a later character's paint covers an earlier one's.
+            for g in glyphs {
+                let one = std::slice::from_ref(g);
+                if paint.stroke_over_fill {
+                    draw(scene, run, transform, one, Paint::Fill(f));
+                    draw(scene, run, transform, one, Paint::Stroke(style, brush));
+                } else {
+                    draw(scene, run, transform, one, Paint::Stroke(style, brush));
+                    draw(scene, run, transform, one, Paint::Fill(f));
                 }
             }
         }
@@ -86,10 +153,15 @@ fn draw(
         .font_size(run.font_size)
         .transform(transform)
         .normalized_coords(coords);
-    if skew != 0.0 {
+    if skew != 0.0 || run.basis != Affine::IDENTITY {
         // Vello applies the glyph transform in font space (y up): leaning right
         // moves points above the baseline (y > 0) to +x.
-        builder = builder.glyph_transform(Some(Affine::new([1.0, 0.0, skew, 1.0, 0.0, 0.0])));
+        builder = builder.glyph_transform(Some(
+            Affine::FLIP_Y
+                * run.basis
+                * Affine::FLIP_Y
+                * Affine::new([1.0, 0.0, skew, 1.0, 0.0, 0.0]),
+        ));
     }
     if run.embolden > 0.0 {
         let e = f64::from(run.embolden);
@@ -129,6 +201,7 @@ pub struct TextSource {
     layout: Arc<TextLayout>,
     bounds: IRect,
     hash: u64,
+    memo: RenderMemo,
 }
 
 impl TextSource {
@@ -138,6 +211,7 @@ impl TextSource {
             bounds: pixel_bounds(&layout),
             hash: layout.content_hash(),
             layout,
+            memo: RenderMemo::default(),
         }
     }
 
@@ -154,7 +228,9 @@ impl TextSource {
         scale: f64,
     ) -> Result<GpuImage, RenderError> {
         let roi = roi.intersect(&self.bounds);
-        VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.layout.as_ref())
+        self.memo.get_or_render(gpu, roi, scale, || {
+            VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.layout.as_ref())
+        })
     }
 
     /// Renders `roi` at `scale` with a specific renderer (e.g. a forced backend).
@@ -175,8 +251,8 @@ impl TextSource {
 }
 
 impl VectorDraw for TextLayout {
-    fn encode(&self, scene: &mut vello::Scene, transform: Affine, _viewport: Rect) {
-        encode(scene, self, transform);
+    fn encode(&self, scene: &mut vello::Scene, transform: Affine, viewport: Rect) {
+        encode_clipped(scene, self, transform, Some(viewport));
     }
 
     fn draw_cpu(&self, ctx: &mut vello_cpu::RenderContext, transform: Affine) {
@@ -188,49 +264,54 @@ impl VectorDraw for TextLayout {
 /// outlines from skrifa, filled and stroked as paths in the same per-character
 /// order. Colour (COLR/bitmap) glyphs are drawn as their outlines.
 pub fn draw_cpu(ctx: &mut vello_cpu::RenderContext, text: &TextLayout, transform: Affine) {
-    let fill = text
-        .paint
-        .fill
-        .map(|c| cpu_paint(peniko::Brush::Solid(Color::new(c))));
-    let stroke = text.paint.stroke.map(|s| {
-        let style = bae_vector::StrokeStyle {
-            width: s.width,
-            join: s.join,
-            miter_limit: s.miter_limit,
-            ..bae_vector::StrokeStyle::default()
-        }
-        .to_kurbo();
-        (style, cpu_paint(peniko::Brush::Solid(Color::new(s.color))))
-    });
-    if fill.is_none() && stroke.is_none() {
-        return;
-    }
-    ctx.set_transform(transform);
     ctx.set_fill_rule(peniko::Fill::NonZero);
     for run in &text.runs {
         let outlines = glyph_outlines(run);
-        for path in outlines.into_iter().flatten() {
-            let paint_fill = |ctx: &mut vello_cpu::RenderContext| {
-                if let Some(f) = &fill {
-                    ctx.set_paint(f.clone());
-                    ctx.fill_path(&path);
-                }
-            };
-            let paint_stroke = |ctx: &mut vello_cpu::RenderContext| {
-                if let Some((style, brush)) = &stroke {
-                    ctx.set_paint(brush.clone());
-                    ctx.set_stroke(style.clone());
-                    ctx.stroke_path(&path);
-                }
-            };
-            if text.paint.stroke_over_fill {
-                paint_fill(ctx);
-                paint_stroke(ctx);
-            } else {
-                paint_stroke(ctx);
-                paint_fill(ctx);
+        let mut paths = outlines.iter();
+        for_batches(text, run, transform, |glyphs, matrix, paint, opacity| {
+            if opacity < 1.0 {
+                ctx.push_layer(None, None, Some(opacity), None, None);
             }
-        }
+            ctx.set_transform(matrix);
+            let fill = paint
+                .fill
+                .map(|c| cpu_paint(peniko::Brush::Solid(Color::new(c))));
+            let stroke = paint.stroke.map(|s| {
+                let style = bae_vector::StrokeStyle {
+                    width: s.width,
+                    join: s.join,
+                    miter_limit: s.miter_limit,
+                    ..bae_vector::StrokeStyle::default()
+                }
+                .to_kurbo();
+                (style, cpu_paint(peniko::Brush::Solid(Color::new(s.color))))
+            });
+            for path in paths.by_ref().take(glyphs.len()).flatten() {
+                let paint_fill = |ctx: &mut vello_cpu::RenderContext| {
+                    if let Some(f) = &fill {
+                        ctx.set_paint(f.clone());
+                        ctx.fill_path(path);
+                    }
+                };
+                let paint_stroke = |ctx: &mut vello_cpu::RenderContext| {
+                    if let Some((style, brush)) = &stroke {
+                        ctx.set_paint(brush.clone());
+                        ctx.set_stroke(style.clone());
+                        ctx.stroke_path(path);
+                    }
+                };
+                if paint.stroke_over_fill {
+                    paint_fill(ctx);
+                    paint_stroke(ctx);
+                } else {
+                    paint_stroke(ctx);
+                    paint_fill(ctx);
+                }
+            }
+            if opacity < 1.0 {
+                ctx.pop_layer();
+            }
+        });
     }
 }
 
@@ -272,7 +353,7 @@ fn glyph_outlines(run: &GlyphRun) -> Vec<Option<BezPath>> {
                 let e = f64::from(run.embolden);
                 path = kurbo::expand_path(&path, Diagonal2::new(e, e), Join::Miter, 4.0, 0.01);
             }
-            Some(Affine::translate((f64::from(g.x), f64::from(g.y))) * path)
+            Some(Affine::translate((f64::from(g.x), f64::from(g.y))) * run.basis * path)
         })
         .collect()
 }
@@ -338,12 +419,22 @@ impl LayerSource for TextSource {
 #[derive(Debug, Default)]
 pub struct TextProvider {
     fonts: Mutex<Option<FontSystem>>,
-    cache: Mutex<FxHashMap<u64, Arc<TextSource>>>,
+    cache: Mutex<SourceCache<TextSource>>,
 }
 
-const CACHE_ENTRIES: usize = 512;
-
 impl TextProvider {
+    /// The process-wide system font provider used by layers and text effects.
+    pub fn shared() -> Arc<Self> {
+        static SYSTEM: std::sync::LazyLock<Arc<TextProvider>> =
+            std::sync::LazyLock::new(|| Arc::new(TextProvider::new()));
+        SYSTEM.clone()
+    }
+
+    pub fn layout_for_render(&self, doc: &TextDocument) -> Result<TextLayout, RenderError> {
+        let mut fonts = self.render_fonts()?;
+        Ok(layout_text(fonts.get_or_insert_with(FontSystem::new), doc))
+    }
+
     /// A provider with the system fonts (scanned on first use).
     pub fn new() -> Self {
         Self::default()
@@ -355,6 +446,32 @@ impl TextProvider {
             fonts: Mutex::new(Some(fonts)),
             cache: Mutex::default(),
         }
+    }
+
+    /// Expressions' `sourceRectAtTime` measures text and shapes with this
+    /// provider (process-wide).
+    pub fn measure_expressions(self: &Arc<Self>) {
+        bae_anim::set_source_bounds(self.clone());
+    }
+
+    /// Scans the system fonts now (the app's warm-up) instead of at the first
+    /// text layer.
+    pub fn load_fonts(&self) {
+        self.fonts.lock().get_or_insert_with(FontSystem::new);
+    }
+
+    /// The fonts for the render path. On an interactive thread it never waits
+    /// for the warm-up still scanning them (the frame is drawn again later).
+    fn render_fonts(&self) -> Result<parking_lot::MutexGuard<'_, Option<FontSystem>>, RenderError> {
+        if bae_render::is_interactive_thread() && bae_gpu::warm_up::is_running() {
+            return match self.fonts.try_lock() {
+                Some(fonts) if fonts.is_some() => Ok(fonts),
+                _ => Err(bae_render::warming_up("text layout")),
+            };
+        }
+        let mut fonts = self.fonts.lock();
+        fonts.get_or_insert_with(FontSystem::new);
+        Ok(fonts)
     }
 
     /// Lays out `doc` with the provider's fonts.
@@ -370,11 +487,30 @@ impl TextProvider {
             return Ok(Arc::new(layout.clone()));
         }
         if let Some(doc) = content.data.downcast_ref::<TextDocument>() {
-            return Ok(Arc::new(self.layout(doc)));
+            return self.layout_for_render(doc).map(Arc::new);
         }
         if let Some(layer) = content.data.downcast_ref::<EvaluatedLayer>() {
             return Ok(Arc::new(match &layer.text {
-                Some(doc) => self.layout(doc),
+                Some(doc) => {
+                    let mut fonts = self.render_fonts()?;
+                    let mut layout = crate::animator::layout_animated(
+                        fonts.get_or_insert_with(FontSystem::new),
+                        doc,
+                        &layer.text_animators,
+                    );
+                    // Text on a path (AE: Path Options with a mask chosen).
+                    if let Some(options) = &layer.text_path
+                        && let Some(mask) = layer.masks.iter().find(|m| m.path == options.mask)
+                    {
+                        crate::path::place_on_path(
+                            &mut layout,
+                            &mask.shape,
+                            options,
+                            &doc.paragraph.justification,
+                        );
+                    }
+                    layout
+                }
                 None => TextLayout::empty(crate::layout::TextPaint {
                     fill: None,
                     stroke: None,
@@ -395,15 +531,80 @@ impl SourceProvider for TextProvider {
     }
 
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
-        if let Some(hit) = self.cache.lock().get(&content.hash) {
-            return Ok(hit.clone());
+        if let Some(hit) = self.cache.lock().get(content.hash) {
+            return Ok(hit);
         }
         let source = Arc::new(TextSource::new(self.layout_of(content)?));
-        let mut cache = self.cache.lock();
-        if cache.len() >= CACHE_ENTRIES {
-            cache.clear();
-        }
-        cache.insert(content.hash, source.clone());
+        self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
+    }
+}
+
+/// `sourceRectAtTime` for the expression engine: text laid out with the
+/// provider's fonts, shapes from their geometry (the app registers the
+/// provider with `bae_anim::set_source_bounds`).
+impl bae_anim::SourceBounds for TextProvider {
+    fn text(&self, doc: &TextDocument, include_extents: bool) -> Option<bae_anim::SourceRect> {
+        // Expressions run on the UI thread: never wait for the font warm-up.
+        let mut fonts = self.render_fonts().ok()?;
+        let r = layout_text(fonts.as_mut()?, doc).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
+    }
+
+    fn shapes(
+        &self,
+        contents: &[bae_anim::EvaluatedPrim],
+        include_extents: bool,
+    ) -> Option<bae_anim::SourceRect> {
+        let mut warnings = Vec::new();
+        let group = bae_vector::ShapeGroup::from_evaluated(contents, &mut warnings);
+        let r = bae_vector::VectorScene::from_group(&group).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
+    }
+}
+
+impl bae_gpu::WarmUp for TextProvider {
+    fn name(&self) -> &str {
+        "fonts"
+    }
+
+    /// First of all: text needs it and the scan takes well under a
+    /// millisecond (it must never wait behind the compositor or effects).
+    fn priority(&self) -> u8 {
+        0
+    }
+
+    fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        self.load_fonts();
+        VelloRenderer::warm(gpu).map_err(|e| e.to_string())?;
+        let doc = TextDocument::new("Text 文字 0123456789", "ArialMT", 48.);
+        let source = TextSource::new(Arc::new(self.layout(&doc)));
+        source
+            .render_on(gpu, source.bounds, 1.)
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Primes vertical substitution, placement and Vello glyph drawing on the
+/// existing warm-up worker, after the font collection and renderer are ready.
+pub struct VerticalGlyphWarmUp(pub Arc<TextProvider>);
+
+impl bae_gpu::WarmUp for VerticalGlyphWarmUp {
+    fn name(&self) -> &str {
+        "vertical text"
+    }
+    fn priority(&self) -> u8 {
+        2
+    }
+    fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
+        let doc = crate::layout::vertical_warmup_document();
+        let layout = self.0.layout(&doc);
+        if !layout.is_empty() {
+            VelloRenderer::shared(gpu)
+                .and_then(|r| r.render_region(gpu, pixel_bounds(&layout), 1., &layout))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 }

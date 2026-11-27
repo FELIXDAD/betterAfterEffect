@@ -21,10 +21,11 @@
 //! instead of building a new one (scrubbing). A request shortly after the
 //! current frame switches to an open-ended range and reads forward (playback).
 
+mod audio_input;
 mod encode;
 mod trim;
 
-pub use encode::{AvWriterEncoder, AvWriterFormat, default_movie_path};
+pub use encode::{AvWriterEncoder, AvWriterFormat, EncoderWarmUp, default_movie_path};
 pub use trim::AvTrimmer;
 
 use std::path::Path;

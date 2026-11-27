@@ -3,7 +3,7 @@
 use super::*;
 
 fn press(t: &mut ToolState, action: &str) -> Tool {
-    assert!(t.shortcut(action), "{action} is a tool shortcut");
+    assert!(t.shortcut(action, true), "{action} is a tool shortcut");
     // A tap: the key is up again before the next frame.
     t.spring(|_| false, false);
     t.current()
@@ -24,7 +24,7 @@ fn single_tool_shortcuts() {
         // Pressing again keeps it.
         assert_eq!(press(&mut t, action), tool, "{action} again");
     }
-    assert!(!t.shortcut("motion.play"));
+    assert!(!t.shortcut("motion.play", true));
 }
 
 #[test]
@@ -123,37 +123,37 @@ fn holding_a_tool_key_switches_back_on_release() {
     let mut t = ToolState::default();
     t.set(Tool::Selection);
     // H held, the pointer used, H released: back to Selection.
-    assert!(t.shortcut(ids::HAND));
+    assert!(t.shortcut(ids::HAND, true));
     assert_eq!(t.current(), Tool::Hand);
     assert!(t.spring(|a| a == ids::HAND, false));
     assert!(t.spring(|a| a == ids::HAND, true));
     // Key repeat while held: no cycling, no change.
-    assert!(t.shortcut(ids::HAND));
+    assert!(t.shortcut(ids::HAND, true));
     assert!(!t.spring(|_| false, false));
     assert_eq!(t.current(), Tool::Selection);
 
     // Q held and used: the shape tool is temporary too, and key repeat does not
     // cycle the group.
-    assert!(t.shortcut(ids::SHAPE));
+    assert!(t.shortcut(ids::SHAPE, true));
     assert!(t.spring(|a| a == ids::SHAPE, true));
-    assert!(t.shortcut(ids::SHAPE));
+    assert!(t.shortcut(ids::SHAPE, true));
     assert_eq!(t.current(), Tool::Rectangle);
     t.spring(|_| false, false);
     assert_eq!(t.current(), Tool::Selection);
 
     // Held without a click, but long enough: back as well.
-    assert!(t.shortcut(ids::ZOOM));
+    assert!(t.shortcut(ids::ZOOM, true));
     t.spring(|a| a == ids::ZOOM, false);
     t.momentary.as_mut().unwrap().since -= SPRING_HOLD;
     t.spring(|_| false, false);
     assert_eq!(t.current(), Tool::Selection);
 
     // A tap latches.
-    assert!(t.shortcut(ids::ZOOM));
+    assert!(t.shortcut(ids::ZOOM, true));
     t.spring(|_| false, false);
     assert_eq!(t.current(), Tool::Zoom);
     // Choosing a tool on the toolbar ends a pending spring.
-    assert!(t.shortcut(ids::HAND));
+    assert!(t.shortcut(ids::HAND, true));
     t.spring(|a| a == ids::HAND, true);
     t.set(Tool::Pen);
     t.spring(|_| false, false);
@@ -208,7 +208,8 @@ fn every_tool_is_in_one_group_and_named_in_chinese() {
 #[test]
 fn shortcuts_parse_and_do_not_clash() {
     let b = bindings();
-    assert_eq!(b.len(), SHORTCUTS.len() + NUDGES.len());
+    // + Esc (Switch to Last 3D View).
+    assert_eq!(b.len(), SHORTCUTS.len() + NUDGES.len() + 1 + GIZMOS.len());
     let mut chords: Vec<String> = b.iter().map(|b| b.chord.to_string()).collect();
     chords.sort();
     chords.dedup();

@@ -10,22 +10,75 @@
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, wgpu};
+use bae_model::PrimPath;
+use bae_render::effect::{LayerDependency, MaskSelect};
 use bae_render::{EffectParams, EncodeContext, GpuImage, IRect, ImageAlpha, RenderError};
 
 /// GPU access while an effect is encoded.
 pub trait EffectTarget {
+    /// A reusable intermediate; targets without frame caching return none.
+    fn cached_image(&mut self, _key: bae_render::FrameKey) -> Option<GpuImage> {
+        None
+    }
+    /// Keep a derived image across renders on this target.
+    fn remember_image(&mut self, _key: bae_render::FrameKey, _image: GpuImage) {}
+    /// Encode an existing declarative pass into this target and its texture pool.
+    fn declarative(
+        &mut self,
+        effect: &bae_plugin::DeclarativeEffect,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError>;
     /// The shared GPU context.
     fn gpu(&self) -> &Arc<GpuContext>;
     /// Working texture format.
     fn format(&self) -> wgpu::TextureFormat;
     /// The frame's command encoder.
     fn encoder(&mut self) -> &mut wgpu::CommandEncoder;
+    /// Source-stage input requested by this effect, if available.
+    fn effect_input(&self, _layer: &PrimPath) -> Option<&GpuImage> {
+        None
+    }
+    /// Input at the requested stage and comp time.
+    fn effect_layer(&self, _dependency: &LayerDependency) -> Option<&GpuImage> {
+        None
+    }
+    /// Layer-space coverage of the requested mask or mask stack.
+    fn effect_mask(&self, _select: &MaskSelect) -> Option<&GpuImage> {
+        None
+    }
+
     /// A working-format image covering `rect` (contents undefined), usable as a
     /// storage texture.
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError>;
+    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
+        self.allocate_format(rect, pixel_scale, self.format())
+    }
+    /// A pooled intermediate in a specific attachment format.
+    fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError>;
 }
 
 impl EffectTarget for EncodeContext<'_> {
+    fn cached_image(&mut self, key: bae_render::FrameKey) -> Option<GpuImage> {
+        EncodeContext::cached_image(self, key)
+    }
+    fn remember_image(&mut self, key: bae_render::FrameKey, image: GpuImage) {
+        EncodeContext::remember_image(self, key, image)
+    }
+    fn declarative(
+        &mut self,
+        effect: &bae_plugin::DeclarativeEffect,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        bae_render::Effect::render(effect, self, p, input, roi)
+    }
     fn gpu(&self) -> &Arc<GpuContext> {
         self.gpu
     }
@@ -38,8 +91,25 @@ impl EffectTarget for EncodeContext<'_> {
         self.encoder
     }
 
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
-        EncodeContext::allocate(self, rect, pixel_scale)
+    fn effect_input(&self, layer: &PrimPath) -> Option<&GpuImage> {
+        EncodeContext::effect_input(self, layer)
+    }
+
+    fn effect_layer(&self, dependency: &LayerDependency) -> Option<&GpuImage> {
+        EncodeContext::effect_layer(self, dependency)
+    }
+
+    fn effect_mask(&self, select: &MaskSelect) -> Option<&GpuImage> {
+        EncodeContext::effect_mask(self, select)
+    }
+
+    fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
+        EncodeContext::allocate_format(self, rect, pixel_scale, format)
     }
 }
 
@@ -72,6 +142,8 @@ pub struct Standalone {
     format: wgpu::TextureFormat,
     encoder: wgpu::CommandEncoder,
     pool: Vec<(wgpu::Texture, bool)>,
+    layers: Vec<(LayerDependency, GpuImage)>,
+    masks: Vec<(MaskSelect, GpuImage)>,
     /// Textures handed out (allocated or reused) since creation.
     pub allocations: usize,
 }
@@ -98,8 +170,20 @@ impl Standalone {
             format,
             encoder,
             pool: Vec::new(),
+            layers: Vec::new(),
+            masks: Vec::new(),
             allocations: 0,
         }
+    }
+
+    /// Supplies pre-rendered dependency images for a test or benchmark.
+    pub fn set_effect_inputs(
+        &mut self,
+        layers: Vec<(LayerDependency, GpuImage)>,
+        masks: Vec<(MaskSelect, GpuImage)>,
+    ) {
+        self.layers = layers;
+        self.masks = masks;
     }
 
     /// Submits the recorded work and starts a new encoder.
@@ -152,6 +236,15 @@ impl Standalone {
 }
 
 impl EffectTarget for Standalone {
+    fn declarative(
+        &mut self,
+        effect: &bae_plugin::DeclarativeEffect,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        self.render_declarative(effect, p, input, roi)
+    }
     fn gpu(&self) -> &Arc<GpuContext> {
         &self.gpu
     }
@@ -164,9 +257,35 @@ impl EffectTarget for Standalone {
         &mut self.encoder
     }
 
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
+    fn effect_input(&self, layer: &PrimPath) -> Option<&GpuImage> {
+        self.layers
+            .iter()
+            .find(|(dependency, _)| dependency.layer == *layer)
+            .map(|(_, image)| image)
+    }
+
+    fn effect_layer(&self, dependency: &LayerDependency) -> Option<&GpuImage> {
+        self.layers
+            .iter()
+            .find(|(key, _)| key == dependency)
+            .map(|(_, image)| image)
+    }
+
+    fn effect_mask(&self, select: &MaskSelect) -> Option<&GpuImage> {
+        self.masks
+            .iter()
+            .find(|(key, _)| key == select)
+            .map(|(_, image)| image)
+    }
+
+    fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
         self.allocations += 1;
-        alloc(&self.gpu, &mut self.pool, rect, pixel_scale, self.format)
+        alloc(&self.gpu, &mut self.pool, rect, pixel_scale, format)
     }
 }
 
@@ -186,6 +305,7 @@ impl Standalone {
             encoder,
             pool,
             allocations,
+            ..
         } = self;
         let gpu = gpu.clone();
         let working = *format;

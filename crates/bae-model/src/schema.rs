@@ -252,6 +252,7 @@ const LAYER: &[AttrDef] = &[
     choice("kind", "solid", LAYER_KINDS).doc("Layer kind; required."),
     prim_ref("source").doc("Comp (pre-comp) or Asset (footage, solid) providing the pixels/audio."),
     int("label", 1),
+    string("comment"),
     time("start_time", 0).doc("Comp time of layer time 0."),
     time("in_point", 0).doc("Comp time."),
     time_none("out_point").doc("Comp time; none = end of the comp."),
@@ -259,6 +260,9 @@ const LAYER: &[AttrDef] = &[
         .fixed()
         .doc("Time stretch in percent."),
     boolean("enabled", true).doc("Video switch."),
+    boolean("effects_enabled", true)
+        .kinds(VISUAL)
+        .doc("Effect switch (fx): off renders the layer without its effects; projects without it read true."),
     boolean("audio_enabled", true),
     boolean("solo", false),
     boolean("locked", false),
@@ -278,6 +282,8 @@ const LAYER: &[AttrDef] = &[
         .doc("AE 'Preserve Underlying Transparency' (T switch): draw only where layers below are opaque."),
     boolean("collapse_transformation", false).doc("Continuous rasterization for vectors."),
     boolean("motion_blur", false),
+    choice("frame_blending", "off", &["off", "frame_mix", "pixel_motion"])
+        .doc("AE Frame Blending switch; renders only when the comp switch is on too."),
     choice("quality", "best", &["best", "draft", "wireframe"]),
     choice("sampling", "bilinear", &["bilinear", "bicubic"]),
     boolean("guide", false),
@@ -302,6 +308,16 @@ const LAYER: &[AttrDef] = &[
     prim_ref("text:path")
         .kinds(&["text"])
         .doc("Mask used as the text path."),
+    // AE's Path Options (Text > Path Options) of text on a path.
+    boolean("text:reverse_path", false).kinds(&["text"]),
+    boolean("text:perpendicular_to_path", true).kinds(&["text"]),
+    boolean("text:force_alignment", false).kinds(&["text"]),
+    float("text:first_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path before the text."),
+    float("text:last_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path after the text."),
     choice("camera:type", "two_node", &["one_node", "two_node"]).kinds(&["camera"]),
     float("camera:zoom", 1777.8)
         .kinds(&["camera"])
@@ -310,6 +326,22 @@ const LAYER: &[AttrDef] = &[
     float("camera:focus_distance", 1777.8).kinds(&["camera"]),
     float("camera:aperture", 25.3).kinds(&["camera"]),
     float("camera:blur_level", 100.0).kinds(&["camera"]),
+    int("camera:iris_shape", 1)
+        .kinds(&["camera"])
+        .doc("AE's Iris Shape: 1 Fast Rectangle, 3–10 the polygon's blade count."),
+    float("camera:iris_rotation", 0.0)
+        .kinds(&["camera"])
+        .doc("Degrees."),
+    float("camera:iris_roundness", 0.0)
+        .kinds(&["camera"])
+        .doc("Percent."),
+    float("camera:iris_aspect_ratio", 1.0).kinds(&["camera"]),
+    float("camera:iris_diffraction_fringe", 0.0).kinds(&["camera"]),
+    float("camera:highlight_gain", 0.0).kinds(&["camera"]),
+    float("camera:highlight_threshold", 1.0)
+        .kinds(&["camera"])
+        .doc("0–1."),
+    float("camera:highlight_saturation", 0.0).kinds(&["camera"]),
     choice(
         "light:type",
         "spot",
@@ -331,9 +363,20 @@ const LAYER: &[AttrDef] = &[
     boolean("light:casts_shadows", false).kinds(&["light"]),
     float("light:shadow_darkness", 100.0).kinds(&["light"]),
     float("light:shadow_diffusion", 0.0).kinds(&["light"]),
-    boolean("material:casts_shadows", false).kinds(VISUAL),
-    boolean("material:accepts_shadows", true).kinds(VISUAL),
+    int("material:casts_shadows", 0)
+        .kinds(VISUAL)
+        .doc("AE's Casts Shadows: 0 Off, 1 On, 2 Only (casts, not drawn)."),
+    int("material:accepts_shadows", 1)
+        .kinds(VISUAL)
+        .doc("AE's Accepts Shadows: 0 Off, 1 On, 2 Only (shows only the shadows on it)."),
     boolean("material:accepts_lights", true).kinds(VISUAL),
+    // Material Options reflectance (AE-CMP-441), percent.
+    float("material:ambient", 100.0).kinds(VISUAL),
+    float("material:diffuse", 50.0).kinds(VISUAL),
+    float("material:specular_intensity", 50.0).kinds(VISUAL),
+    float("material:specular_shininess", 5.0).kinds(VISUAL),
+    float("material:metal", 100.0).kinds(VISUAL),
+    float("material:light_transmission", 0.0).kinds(VISUAL),
 ];
 
 const SHAPE_TRANSFORM: &[AttrDef] = &[
@@ -388,7 +431,10 @@ pub static SCHEMAS: &[PrimSchema] = &[
             time("work_area_start", 0),
             time_none("work_area_duration").doc("None = to the end."),
             time("display_start_time", 0),
+            AttrDef::new("guides", ValueType::FloatList, DefaultValue::None, false)
+                .doc("Viewer guides: pairs of (0 horizontal / 1 vertical, comp pixels)."),
             boolean("motion_blur", false),
+            boolean("frame_blending", false).doc("AE Enable Frame Blending (comp switch)."),
             AttrDef::new(
                 "shutter_angle",
                 ValueType::Float,
@@ -402,6 +448,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
                 false,
             ),
             int("motion_blur_samples", 16),
+            int("motion_blur_adaptive_limit", 128).doc("16–256 (AE-ANI-104)."),
             choice(
                 "renderer",
                 "classic_3d",
@@ -409,6 +456,9 @@ pub static SCHEMAS: &[PrimSchema] = &[
             ),
             boolean("preserve_frame_rate", false),
             boolean("preserve_resolution", false),
+            boolean("hide_shy_layers", false)
+                .doc("Timeline: hide layers whose Shy switch is on (AE Hide Shy Layers)."),
+            boolean("draft_3d", false).doc("AE Draft 3D: fast 3D previews."),
             int("label", 15),
         ],
     },
@@ -558,18 +608,35 @@ pub static SCHEMAS: &[PrimSchema] = &[
                 "simultaneously",
                 &["simultaneously", "individually"],
             ),
-            float("repeater:copies", 3.0),
+            float("repeater:copies", 1.0),
             float("repeater:offset", 0.0),
             choice("repeater:composite", "below", COMPOSITE),
-            vec2("repeater:position", [100.0, 0.0]),
+            vec2("repeater:position", [0.0, 0.0]),
             vec2("repeater:scale", [100.0, 100.0]),
             float("repeater:rotation", 0.0),
             float("repeater:start_opacity", 100.0),
             float("repeater:end_opacity", 100.0),
-            float("offset:amount", 0.0),
+            float("offset:amount", 10.0),
             float("round_corners:radius", 10.0),
-            float("twist:angle", 0.0),
-            float("pucker_bloat:amount", 0.0),
+            float("twist:angle", 10.0),
+            float("pucker_bloat:amount", 10.0),
+            float("offset:line_join", 1.0),
+            float("offset:miter_limit", 4.0),
+            float("offset:copies", 1.0),
+            float("offset:copy_offset", 1.0),
+            float("wiggle_paths:size", 10.0),
+            float("wiggle_paths:detail", 10.0),
+            float("wiggle_paths:points", 1.0),
+            float("wiggle_paths:frequency", 2.0),
+            float("wiggle_paths:correlation", 50.0),
+            float("wiggle_paths:temporal_phase", 0.0),
+            float("wiggle_paths:spatial_phase", 0.0),
+            float("wiggle_paths:seed", 0.0),
+            float("zig_zag:size", 5.0),
+            float("zig_zag:detail", 10.0),
+            float("zig_zag:points", 1.0),
+            vec2("twist:center", [0.0; 2]),
+            vec2("repeater:anchor_point", [0.0; 2]),
         ],
     },
     PrimSchema {
@@ -613,6 +680,89 @@ pub static SCHEMAS: &[PrimSchema] = &[
         ],
     },
     PrimSchema {
+        prim_type: PrimType::MOTION_TRACKER,
+        doc: "A motion tracker in a layer's trackers folder.",
+        attrs: &[
+            string("name"),
+            choice(
+                "track_type",
+                "transform",
+                &["transform", "stabilize", "parallel", "perspective"],
+            ),
+            boolean("position", true).fixed(),
+            boolean("rotation", false).fixed(),
+            boolean("scale", false).fixed(),
+            choice("channel", "luminance", &["rgb", "luminance", "saturation"]),
+            float("enhance_radius", 2.0).fixed(),
+            boolean("track_fields", false).fixed(),
+            boolean("subpixel", true).fixed(),
+            boolean("adapt", false).fixed(),
+            choice("enhance", "none", &["none", "blur", "sharpen"]),
+            choice(
+                "low_confidence",
+                "continue",
+                &["continue", "stop", "extrapolate", "adapt"],
+            ),
+            float("threshold", 80.0).fixed(),
+            prim_ref("target"),
+            string("target_property"),
+            vec2("origin", [0.0; 2]).fixed(),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::TRACK_POINT,
+        doc: "A feature and its search window in source-layer pixels.",
+        attrs: &[
+            string("name"),
+            vec2("feature_center", [0.0; 2]),
+            vec2("feature_size", [16.0; 2]),
+            vec2("search_offset", [0.0; 2]),
+            vec2("search_size", [64.0; 2]),
+            float("confidence", 100.0),
+            vec2("attach_point", [0.0; 2]),
+            vec2("attach_offset", [0.0; 2]),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::PAINT_STROKE,
+        doc: "A paint stroke under a Paint effect (AE's Brush / Clone / Eraser strokes), \
+              in layer space; shown from `in_point` to `out_point` (layer time).",
+        attrs: &[
+            string("name"),
+            choice("tool", "brush", &["brush", "clone", "eraser"]).fixed(),
+            bezier("path").doc("The stroke's path (layer pixels)."),
+            float("start", 0.0).doc("Percent of the path drawn from."),
+            float("end", 100.0).doc("Percent of the path drawn to (Write On animates it)."),
+            color("color", [1.0, 1.0, 1.0, 1.0]),
+            float("diameter", 10.0),
+            float("angle", 0.0),
+            float("hardness", 100.0),
+            float("roundness", 100.0),
+            float("spacing", 25.0),
+            choice("channels", "rgba", &["rgba", "rgb", "alpha"]),
+            float("opacity", 100.0),
+            float("flow", 100.0),
+            choice("mode", "normal", BLEND_MODES),
+            choice(
+                "erase",
+                "layer_and_paint",
+                &["layer_and_paint", "paint", "last_stroke"],
+            )
+            .fixed(),
+            prim_ref("clone:source").doc("Clone Stamp: the source layer (none = this layer)."),
+            vec2("clone:position", [0.0, 0.0]).doc("Clone Stamp: where the source is sampled."),
+            time("clone:time", 0).doc("Clone Stamp: the source time (Lock Source Time)."),
+            time("clone:time_shift", 0).doc("Clone Stamp: source time offset."),
+            boolean("clone:lock_time", false).fixed(),
+            vec2("transform:anchor_point", [0.0, 0.0]),
+            vec2("transform:position", [0.0, 0.0]),
+            vec2("transform:scale", [100.0, 100.0]),
+            float("transform:rotation", 0.0),
+            time("in_point", 0).fixed(),
+            time("out_point", 0).fixed(),
+        ],
+    },
+    PrimSchema {
         prim_type: PrimType::MARKER,
         doc: "Comp or layer marker (layer markers use layer time).",
         attrs: &[
@@ -625,6 +775,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             string("cue_point_name"),
             int("label", 0),
             boolean("protected_region", false),
+            // Layer markers: Segmentation Marker instead of Comment Marker (AE 26).
+            boolean("segment", false),
         ],
     },
     PrimSchema {
@@ -683,6 +835,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
                     "smooth",
                 ],
             ),
+            float("smoothness", 100.0),
             float("ease_high", 0.0),
             float("ease_low", 0.0),
             boolean("randomize_order", false),
