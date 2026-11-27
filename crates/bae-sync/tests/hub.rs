@@ -663,7 +663,10 @@ fn a_slow_reader_is_not_flooded_by_its_own_hellos() {
     assert!(peak <= limits.max_backlog + SIZE + (256 << 10), "{peak}");
     // Without flow control each `Hello` made the relay send everything the
     // reader lacked again: five to six times the project here. A stale `Hello`
-    // still costs one more copy of what was on its way (in the socket buffers)
-    // when the backlog drained, but not one per `Hello`.
-    assert!(data < 2 * DOCS * SIZE, "{data}");
+    // still costs one more copy of what was on its way when the backlog
+    // drained, but not one per `Hello`. Flow control cannot see what the
+    // kernel's socket buffers hold, so how much that is depends on the
+    // platform (1.4 times the project on Linux; larger loopback buffers, as
+    // Windows and macOS autotuning may give, send more).
+    assert!(data < 3 * DOCS * SIZE, "{data}");
 }
