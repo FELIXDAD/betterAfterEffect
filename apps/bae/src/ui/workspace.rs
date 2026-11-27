@@ -280,6 +280,10 @@ impl Workspace {
         requests
     }
 
+    pub fn cache_free_space(&mut self, dir: &std::path::Path, free: u64) {
+        self.settings.set_cache_free_space(dir, free);
+    }
+
     /// Answers a Choose Folder… button.
     pub fn set_setting(&mut self, key: &str, value: String) {
         self.settings.set(key, value);

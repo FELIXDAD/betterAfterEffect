@@ -48,6 +48,7 @@ fn a_new_composition_viewer_can_present_previews_from_disk() {
         "disk.disk_cache_folder",
         dir.path().to_string_lossy().as_ref(),
     );
+    p.set(bae_prefs::keys::DISK_LIMIT_GB, 1);
     let prefs = Arc::new(bae_prefs::PrefsStore::new(p));
     let cache = crate::disk_frames::DiskFrames::new(dir.path().to_path_buf(), &prefs);
     cache.run(&gpu).unwrap();

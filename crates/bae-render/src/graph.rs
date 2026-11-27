@@ -1119,6 +1119,7 @@ impl Builder<'_, '_> {
             }
         }
         attach_shadows(comp, &mut planned);
+        self.attach_model_shadows(comp, &mut planned);
         // Casts Shadows: Only: a caster that is not drawn itself.
         planned.retain(|(index, _)| {
             comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
@@ -1141,6 +1142,55 @@ impl Builder<'_, '_> {
             ops.push(op);
         }
         Ok(())
+    }
+
+    /// 3D models with Casts Shadows on throw shadows on the lit layers of
+    /// their 3D group that accept shadows (drawn into the layers' shadow
+    /// maps, `exec/mesh.rs`).
+    fn attach_model_shadows(&self, comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
+        use crate::light::{ModelCaster, ShadowMode};
+        let models: Arc<[ModelCaster]> = planned
+            .iter()
+            .filter(|(index, _)| {
+                let layer = &comp.layers[*index];
+                matches!(layer.content, LayerContent::Model(_))
+                    && layer.material.casts_shadows != ShadowMode::Off
+            })
+            .filter_map(|(_, op)| match op.input {
+                OpInput::Image(id) => match &self.nodes[id.index()].kind {
+                    NodeKind::Mesh(m) => {
+                        m.models
+                            .first()
+                            .filter(|m| m.opacity > 0.0)
+                            .map(|m| ModelCaster {
+                                model: m.model.clone(),
+                                matrix: m.matrix,
+                            })
+                    }
+                    _ => None,
+                },
+                OpInput::Solid { .. } => None,
+            })
+            .collect();
+        if models.is_empty() {
+            return;
+        }
+        for (index, op) in planned.iter_mut() {
+            let layer = &comp.layers[*index];
+            let Some(lighting) = &op.lighting else {
+                continue;
+            };
+            if matches!(layer.content, LayerContent::Model(_))
+                || layer.material.accepts_shadows == ShadowMode::Off
+                || !lighting.lights.iter().any(|l| l.casts_shadows)
+            {
+                continue;
+            }
+            op.lighting = Some(Arc::new(crate::light::Lighting {
+                models: models.clone(),
+                ..(**lighting).clone()
+            }));
+        }
     }
 
     /// Takes the model layers out of `planned` and joins them into one
@@ -1335,7 +1385,7 @@ impl Builder<'_, '_> {
         let Some(lighting) = &op.lighting else {
             return;
         };
-        if lighting.casters.is_empty()
+        if (lighting.casters.is_empty() && lighting.models.is_empty())
             || !lighting.samples.is_empty()
             || lighting.shadow_slots().is_empty()
         {
@@ -1361,6 +1411,10 @@ impl Builder<'_, '_> {
                 crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
                 crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
             }
+        }
+        for m in lighting.models.iter() {
+            (Arc::as_ptr(&m.model) as usize).hash(&mut h);
+            m.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
         }
         let base = h.finish();
         let slot_keys: Vec<u64> = lighting
@@ -2131,6 +2185,7 @@ impl Builder<'_, '_> {
                         samples,
                         rect: content_rect,
                         shadow_map: None,
+                        models: Arc::new([]),
                     })
                 })
             });
