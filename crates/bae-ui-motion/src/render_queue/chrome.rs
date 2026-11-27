@@ -339,26 +339,9 @@ pub(super) fn twirl(ui: &mut egui::Ui, open: &mut bool, name: &str) -> egui::Res
 pub(super) fn chevron_box(ui: &mut egui::Ui, name: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(18.0, ROW_H - 1.0), Sense::click());
     let resp = resp.labeled(egui::WidgetType::Button, name);
-    let p = ui.painter();
-    let fill = if resp.hovered() {
-        color::FIELD_HOVER
-    } else {
-        color::FIELD
-    };
-    p.rect_filled(rect, 3.0, fill);
-    p.rect_stroke(
-        rect,
-        3.0,
-        Stroke::new(1.0, color::FIELD_BORDER),
-        egui::StrokeKind::Inside,
-    );
-    let ink = if ui.is_enabled() {
-        color::ICON
-    } else {
-        color::TEXT_DISABLED
-    };
+    let ink = bae_ui::widgets::field_frame(ui.painter(), rect, resp.hovered(), ui.is_enabled());
     icons::paint(
-        p,
+        ui.painter(),
         Rect::from_center_size(rect.center(), Vec2::splat(10.0)),
         Icon::ChevronDown,
         ink,
@@ -405,23 +388,7 @@ pub(super) fn field_menu(
     let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H - 1.0), Sense::click());
     let resp = resp.labeled_value(egui::WidgetType::ComboBox, name, value);
     let p = ui.painter();
-    let fill = if resp.hovered() {
-        color::FIELD_HOVER
-    } else {
-        color::FIELD
-    };
-    p.rect_filled(rect, 3.0, fill);
-    p.rect_stroke(
-        rect,
-        3.0,
-        Stroke::new(1.0, color::FIELD_BORDER),
-        egui::StrokeKind::Inside,
-    );
-    let ink = if ui.is_enabled() {
-        color::TEXT
-    } else {
-        color::TEXT_DISABLED
-    };
+    let ink = bae_ui::widgets::field_frame(p, rect, resp.hovered(), ui.is_enabled());
     p.text(
         pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
