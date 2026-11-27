@@ -174,7 +174,7 @@ pub(crate) fn show_item(
             }
             // Filled from the project in AE (Reveal in Composition): greyed.
             Sub(title, []) => {
-                ui.add_enabled(false, egui::Button::new(tr(title)));
+                ui.add_enabled_ui(false, |ui| common::submenu(ui, tr(title), &mut |_| {}));
             }
             Sub(title, list) => common::submenu(ui, tr(title), &mut |ui| {
                 chosen = chosen.or(show_item(ui, cx, list, off, kind));
@@ -222,6 +222,23 @@ pub(crate) const VIEWER_BLANK: &[Entry] = &[
     Sep,
     Menu("Composition/Composition Flowchart"),
     Menu("Composition/Composition Mini-Flowchart"),
+];
+
+/// Composition panel, right-click on a text layer with a Type tool (AE's text
+/// menu, MenuID 0296): editing, the animators, the writing direction, the
+/// text panels.
+pub(crate) const VIEWER_TEXT: &[Entry] = &[
+    Own("Edit Text..."),
+    Sep,
+    Menu("Animation/Animate Text"),
+    Menu("Animation/Add Text Selector"),
+    Menu("Animation/Remove All Text Animators"),
+    Sep,
+    Own("Horizontal"),
+    Own("Vertical"),
+    Sep,
+    Own("Show Text Panels"),
+    Own("Reveal Source Text in Timeline"),
 ];
 
 /// Right-click on a layer, in the Composition panel and the Timeline (AE 26 on

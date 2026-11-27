@@ -571,21 +571,13 @@ impl EncoderThread {
             .spawn(move || {
                 let mut copy = Duration::ZERO;
                 for (index, mapped) in receiver.iter().enumerate() {
-                    let pushed = mapped.write_to(&mut *encoder).and_then(|elapsed| {
-                        copy += elapsed;
-                        if let Some(track) = &mut audio {
-                            track.frame(index, |samples| {
-                                encoder
-                                    .push_audio(&bae_media::AudioBuffer {
-                                        sample_rate: ExportAudio::RATE,
-                                        channels: 2,
-                                        samples: samples.as_flattened().to_vec(),
-                                    })
-                                    .map_err(media_error)
-                            })?;
-                        }
-                        Ok(())
-                    });
+                    // The audio leads the video it accompanies (#793).
+                    let pushed = match &mut audio {
+                        Some(track) => track.push_ahead_of(index, &mut *encoder),
+                        None => Ok(()),
+                    }
+                    .and_then(|()| mapped.write_to(&mut *encoder))
+                    .map(|elapsed| copy += elapsed);
                     if let Err(error) = pushed {
                         // Wait for the frames before this one; keep them.
                         let _ = encoder.finish();
@@ -819,6 +811,8 @@ pub struct ExportSettings {
     pub bits: Option<u8>,
     /// Encoder threads for image sequences; `None`: one per core.
     pub threads: Option<usize>,
+    /// Maximum number of GPU frames awaiting readback.
+    pub frames_in_flight: usize,
     /// Alpha.
     pub alpha: ExportAlpha,
     /// Movies: average bit rate in bits per second (AE's H.264 "target
@@ -839,6 +833,7 @@ impl ExportSettings {
             compression: None,
             bits: None,
             threads: None,
+            frames_in_flight: READBACK_DEPTH,
             alpha: ExportAlpha::default(),
             bit_rate: None,
             pcm_audio: format.is_quicktime(),
@@ -1610,10 +1605,11 @@ pub fn export_frames(
             && has_frame_run(&job.settings.path)
             && job.times.first().is_some_and(|(frame, _)| frame.is_some()));
     let float_work = renderer.work_format(job.request) == wgpu::TextureFormat::Rgba32Float;
+    let depth = job.settings.frames_in_flight.clamp(1, READBACK_DEPTH);
     let mut run = Run {
-        readback: ExportReadback::new(renderer.gpu().clone(), READBACK_DEPTH),
+        readback: ExportReadback::new(renderer.gpu().clone(), depth),
         sink: None,
-        pending: VecDeque::with_capacity(READBACK_DEPTH + 1),
+        pending: VecDeque::with_capacity(depth + 1),
         stats: ExportStats::default(),
         frames: Vec::with_capacity(job.times.len()),
         on_frame,
@@ -1700,7 +1696,11 @@ pub fn export_frames(
                 draw_calls: rendered.stats.draw_calls,
             });
             drop(rendered);
-            run.collect_ready()?;
+            if depth == 1 {
+                run.wait_one()?;
+            } else {
+                run.collect_ready()?;
+            }
         }
         // Frames already rendered (in flight on the GPU) are written too.
         while run.wait_one()? {}

@@ -16,6 +16,7 @@ pub(crate) fn register(registry: &mut Registry) {
     ]);
     registry.prewarm.push(prewarm);
     cc::register(registry);
+    crate::effects::audio_visual::register(registry);
     registry.effects.push(crate::effects::compound::fill());
     registry.effects.extend([
         strokes::stroke(),

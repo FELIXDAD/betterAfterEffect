@@ -16,6 +16,7 @@
 //! The crate has no UI, GPU or platform dependency (without `file`), so domain
 //! command crates can read preferences too.
 
+mod expr_themes;
 pub mod i18n;
 pub mod pages;
 pub mod schema;
@@ -28,12 +29,21 @@ use serde_json::{Map, Value};
 
 pub use schema::{DefaultValue, Item, Kind, LABEL_NAMES, Opt, Os, PAGES, Page, Pref, Style, When};
 
+/// Ten percent of free space, expressed in the whole GiB the control accepts.
+pub fn automatic_disk_limit_gb(free: u64) -> u64 {
+    ((free / 10) >> 30).min(1024)
+}
+
 /// File name in the config directory.
 pub const FILE_NAME: &str = "preferences.json";
 
 /// Preference values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preferences {
+    // Machine-dependent values are stored here until explicitly overridden.
+    ram_default: Value,
+    disk_default: Value,
+    ram_max: i64,
     values: BTreeMap<&'static str, Value>,
     /// Keys this version does not know (kept for newer versions).
     extra: Map<String, Value>,
@@ -43,11 +53,15 @@ impl Default for Preferences {
     fn default() -> Self {
         let values = schema::all()
             .iter()
+            .filter(|p| !matches!(p.key, keys::RAM_RESERVED_GB | keys::DISK_LIMIT_GB))
             .map(|p| (p.key, default_json(p)))
             .collect();
         Self {
             values,
             extra: Map::new(),
+            ram_default: default_json(schema::find(keys::RAM_RESERVED_GB).unwrap()),
+            disk_default: default_json(schema::find(keys::DISK_LIMIT_GB).unwrap()),
+            ram_max: 1024,
         }
     }
 }
@@ -80,6 +94,7 @@ fn validate(p: &Pref, v: &Value) -> Option<Value> {
         Kind::Color => Value::from(parse_color(v.as_str()?).map(format_color)?),
         Kind::Timecode => Value::from(parse_timecode(v.as_str()?).map(|_| v.as_str())??),
         Kind::Text | Kind::Path => Value::from(v.as_str()?),
+        Kind::AudioOutput => Value::from(v.as_str().filter(|id| !id.is_empty())?),
     })
 }
 
@@ -115,6 +130,9 @@ impl Preferences {
     /// to its default. Returns the keys that were replaced.
     pub fn from_json(data: &Map<String, Value>) -> (Self, Vec<String>) {
         let mut prefs = Self::default();
+        if let Some(theme) = data.get(keys::EXPR_THEME) {
+            prefs.set(keys::EXPR_THEME, theme.clone());
+        }
         let mut fixed = Vec::new();
         for (key, value) in data {
             match schema::find(key) {
@@ -134,10 +152,11 @@ impl Preferences {
                 }
             }
         }
+        prefs.apply_transparency_preset();
         (prefs, fixed)
     }
 
-    /// All values (and unknown keys) as a JSON object.
+    /// Stored values, including unknown keys. Automatic hardware limits stay local.
     pub fn to_json(&self) -> Map<String, Value> {
         let mut out = self.extra.clone();
         for (k, v) in &self.values {
@@ -148,7 +167,11 @@ impl Preferences {
 
     /// Raw value of `key` (`None` for an unknown key).
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.values.get(key)
+        self.values.get(key).or(match key {
+            keys::RAM_RESERVED_GB => Some(&self.ram_default),
+            keys::DISK_LIMIT_GB => Some(&self.disk_default),
+            _ => None,
+        })
     }
 
     /// Sets `key`; invalid values are clamped or rejected. Returns whether the
@@ -160,13 +183,87 @@ impl Preferences {
         let Some(v) = validate(p, &value.into()) else {
             return false;
         };
-        self.values.insert(p.key, v.clone()) != Some(v)
+        let v = if key == keys::RAM_RESERVED_GB {
+            Value::from(v.as_i64().unwrap().min(self.ram_max))
+        } else {
+            v
+        };
+        if self.values.get(p.key) == Some(&v) {
+            if key == keys::EXPR_THEME && self.selected_expression_theme().is_some() {
+                self.update_expression_palette(key);
+                return true;
+            }
+            return false;
+        }
+        self.values.insert(p.key, v);
+        match p.key {
+            keys::TRANSPARENCY_PRESET => self.apply_transparency_preset(),
+            keys::TRANSPARENCY_FIRST | keys::TRANSPARENCY_SECOND => {
+                self.values
+                    .insert(keys::TRANSPARENCY_PRESET, Value::from("custom"));
+            }
+            _ => self.update_expression_palette(key),
+        }
+        true
+    }
+
+    fn apply_transparency_preset(&mut self) {
+        let (first, second) = match self.str(keys::TRANSPARENCY_PRESET) {
+            "light" => ("#cccccc", "#ffffff"),
+            "medium" => ("#808080", "#b3b3b3"),
+            "dark" => ("#333333", "#666666"),
+            "red" => ("#cc6666", "#ffcccc"),
+            "orange" => ("#cc9966", "#ffe6cc"),
+            "green" => ("#66aa66", "#cce6cc"),
+            "blue" => ("#6699cc", "#cce6ff"),
+            "purple" => ("#9966cc", "#e6ccff"),
+            _ => return,
+        };
+        self.values
+            .insert(keys::TRANSPARENCY_FIRST, Value::from(first));
+        self.values
+            .insert(keys::TRANSPARENCY_SECOND, Value::from(second));
     }
 
     /// Resets `key` to its default.
     pub fn reset(&mut self, key: &str) {
-        if let Some(p) = schema::find(key) {
-            self.values.insert(p.key, default_json(p));
+        if matches!(key, keys::RAM_RESERVED_GB | keys::DISK_LIMIT_GB) {
+            self.values.remove(key);
+        } else if let Some(p) = schema::find(key) {
+            self.set(p.key, default_json(p));
+        }
+    }
+
+    /// Use physical RAM for the default reserve and its editable upper bound.
+    pub fn set_installed_ram(&mut self, bytes: u64) {
+        let gib = (bytes.saturating_add(1 << 29) >> 30) as i64;
+        self.ram_max = (gib - 2).clamp(3, 1024);
+        self.ram_default = Value::from(((gib * 3 + 8) / 16).clamp(3, self.ram_max));
+        if self.values.contains_key(keys::RAM_RESERVED_GB) {
+            self.set(keys::RAM_RESERVED_GB, self.int(keys::RAM_RESERVED_GB));
+        }
+    }
+
+    pub fn ram_reserve_max(&self) -> i64 {
+        self.ram_max
+    }
+
+    /// An explicit cache budget takes priority over the measured default.
+    pub fn set_cache_free_space(&mut self, free: u64) {
+        self.disk_default = Value::from(automatic_disk_limit_gb(free));
+    }
+
+    pub fn explicit_disk_limit_gb(&self) -> Option<u64> {
+        self.values.get(keys::DISK_LIMIT_GB).and_then(Value::as_u64)
+    }
+
+    /// Restore factory values, keeping this machine's current measurements.
+    pub fn factory_defaults(&self) -> Self {
+        Self {
+            ram_default: self.ram_default.clone(),
+            disk_default: self.disk_default.clone(),
+            ram_max: self.ram_max,
+            ..Self::default()
         }
     }
 
@@ -239,6 +336,17 @@ impl Preferences {
         self.str(&format!("labels.label_name_{index}"))
     }
 
+    /// Directory owned by BAE below the selected or system cache root.
+    pub fn preview_cache_dir(&self, default_root: &std::path::Path) -> std::path::PathBuf {
+        let chosen = self.str("disk.disk_cache_folder");
+        let root = if chosen.is_empty() {
+            default_root
+        } else {
+            std::path::Path::new(chosen)
+        };
+        root.join("BAE Preview Frames")
+    }
+
     /// Auto-save interval in minutes, or `None` when auto-save is off.
     pub fn auto_save_minutes(&self) -> Option<u64> {
         self.bool(keys::AUTO_SAVE)
@@ -248,7 +356,12 @@ impl Preferences {
 
 /// Keys features read (the schema has them all).
 pub mod keys {
+    pub const CACHE_FRAMES_WHEN_IDLE: &str = "previews.cache_frames_when_idle";
+    pub const TRANSPARENCY_PRESET: &str = "grids_guides.transparency_grid_colors_preset";
+    pub const TRANSPARENCY_FIRST: &str = "grids_guides.transparency_grid_color_1";
+    pub const TRANSPARENCY_SECOND: &str = "grids_guides.transparency_grid_color_2";
     pub const PREVIEW_CACHE_MIB: &str = "memory_cpu.preview_cache_mib";
+    pub const DISK_LIMIT_GB: &str = "disk.max_disk_cache_size_gb";
     pub const RAM_RESERVED_GB: &str = "memory_cpu.ram_reserved_for_other_apps_gb";
     pub const LEVELS_OF_UNDO: &str = "general.levels_of_undo";
     // Appearance
@@ -372,8 +485,27 @@ impl PrefsStore {
     /// Replaces the values (Preferences dialog OK), saves them when the store has a
     /// file, and notifies subscribers. Unchanged values do nothing.
     pub fn set(&self, prefs: Preferences) -> std::io::Result<()> {
+        if self.publish(prefs) {
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// Update the effective limits without writing machine measurements to disk.
+    pub fn update_capacity(&self, ram: Option<u64>, free: Option<u64>) {
+        let mut prefs = (*self.current()).clone();
+        if let Some(ram) = ram {
+            prefs.set_installed_ram(ram);
+        }
+        if let Some(free) = free {
+            prefs.set_cache_free_space(free);
+        }
+        self.publish(prefs);
+    }
+
+    fn publish(&self, prefs: Preferences) -> bool {
         if *self.current() == prefs {
-            return Ok(());
+            return false;
         }
         let prefs = Arc::new(prefs);
         *self
@@ -389,7 +521,7 @@ impl PrefsStore {
         {
             f(&prefs);
         }
-        self.save()
+        true
     }
 
     /// Writes the current values to the file (no-op without one).

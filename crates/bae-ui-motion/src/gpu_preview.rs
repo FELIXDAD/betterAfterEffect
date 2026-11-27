@@ -216,6 +216,7 @@ pub(crate) struct GpuPreview {
     pub(super) playback: super::playback::PlaybackPreview,
     changes: StageChanges,
     sources_gen: Option<u64>,
+    solid_reload: u64,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
@@ -223,7 +224,8 @@ pub(crate) struct GpuPreview {
     /// pixel read: (texel, value).
     target: Option<OutputTarget>,
     direct_source: Option<bae_render::GpuImage>,
-    sampled: Option<((u32, u32, u64), [u8; 4])>,
+    sampled: Option<(PixelKey, [u8; 4])>,
+    pending_pixel: Option<(PixelKey, bae_gpu::transfer::PendingReadback)>,
     /// How the viewer shows the frame (Show Channel, Exposure).
     pub display: bae_render::Display,
     /// Region of interest (comp pixels): only it is rendered.
@@ -257,15 +259,23 @@ pub(crate) struct GpuPreview {
     waiting: bool,
 }
 
+type PixelKey = (u32, u32, u64);
+
 type LiveKey = ((u64, Time, u32), (bae_render::Display, Option<IRect>));
 
 impl GpuPreview {
     /// A preview on the app's GPU context, if the app has one (the headless test
     /// harness and agents do not).
-    pub fn new(resources: &Resources) -> Option<Self> {
+    pub fn new(resources: &Resources, ui: &egui::Context) -> Option<Self> {
         let gpu = resources.get::<Arc<GpuContext>>()?.clone();
         let registry = resources.get::<Arc<ViewportTextureRegistry>>()?.clone();
-        Some(Self::with(gpu, registry))
+        let mut preview = Self::with(gpu, registry);
+        let ui = ui.clone();
+        preview
+            .engine
+            .anim
+            .prepare_preview_audio(move || ui.request_repaint());
+        Some(preview)
     }
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
@@ -283,11 +293,13 @@ impl GpuPreview {
             playback,
             changes: StageChanges::default(),
             sources_gen: None,
+            solid_reload: 0,
             last: None,
             rect: None,
             target: None,
             direct_source: None,
             sampled: None,
+            pending_pixel: None,
             display: bae_render::Display::default(),
             roi: None,
             last_view: None,
@@ -350,6 +362,23 @@ impl GpuPreview {
         }
     }
 
+    pub(super) fn reload_solid(&mut self, generation: u64, item: &bae_model::PrimPath) {
+        if self.solid_reload == generation {
+            return;
+        }
+        let event = bae_model::StageEvent {
+            origin: bae_model::EventOrigin::Local,
+            author: None,
+            sublayers: vec![],
+            changes: vec![bae_model::Change::Resynced { path: item.clone() }],
+        };
+        self.engine.renderer.invalidate(&event);
+        self.engine.anim.clear_compiled();
+        self.last = None;
+        self.playback.invalidate_source(&event);
+        self.solid_reload = generation;
+    }
+
     /// Render `comp` (if it changed) and return the texture to draw. `None` until
     /// the shell has registered the texture with egui (the frame after the first
     /// publish) or when rendering failed.
@@ -364,16 +393,20 @@ impl GpuPreview {
     ) -> Option<PreviewImage> {
         if self.cached.take().is_some() {
             self.sampled = None;
+            self.pending_pixel = None;
         }
         self.sync_sources(resources);
         self.sync_effects(resources);
-        // A value drag in a panel: motion blur samples and effects reading other
-        // frames evaluate the uncommitted value too (#593).
+        // A value or keyframe drag in a panel: motion blur samples and effects
+        // reading other frames evaluate the uncommitted values too (#593).
         let overrides = resources
             .get::<crate::session::SharedSession>()
-            .and_then(|s| s.lock().scrub.as_ref().map(|s| s.overrides(stage)))
+            .map(|s| s.lock().live_overrides(stage))
             .unwrap_or_default();
         let live = (!overrides.is_empty()).then(|| overrides.clone());
+        self.engine.anim.set_nested_switches(
+            crate::prefs::current(resources).bool("composition.switches_affect_nested_comps"),
+        );
         self.engine.anim.set_overrides(overrides);
         if self.changes.sync(stage, |event| match event {
             Some(event) => bae_render::CompEvaluator::invalidate(&mut self.engine.anim, event),
@@ -388,6 +421,9 @@ impl GpuPreview {
                 return None;
             }
         };
+        if self.engine.anim.audio_preparation_pending() {
+            return self.image();
+        }
         // A 3D view other than Active Camera (the output never changes).
         if let Some(camera) = camera {
             rc.camera = Some(camera);
@@ -497,8 +533,13 @@ impl GpuPreview {
             self.target_shown = true;
             self.live_texture = None;
             self.sampled = None;
+            self.pending_pixel = None;
         }
-        // Back from a snapshot: show the frame again.
+        self.image()
+    }
+
+    /// The frame to draw; back from a snapshot, the frame is shown again.
+    fn image(&mut self) -> Option<PreviewImage> {
         if !self.target_shown
             && let Some(t) = &self.target
             && self
@@ -560,6 +601,7 @@ impl GpuPreview {
             self.direct_source = None;
             self.cached = Some((texture, rect));
             self.sampled = None;
+            self.pending_pixel = None;
         }
     }
 
@@ -607,11 +649,16 @@ impl GpuPreview {
             sources.map(|s| s.0.generation()),
             effects.map(|e| e.0.generation()),
         );
+        let nested_switches =
+            crate::prefs::current(resources).bool("composition.switches_affect_nested_comps");
         match &self.live_scene {
-            Some(scene) if scene.key == scene_key => scene.clone(),
+            Some(scene) if scene.key == scene_key && scene.nested_switches == nested_switches => {
+                scene.clone()
+            }
             _ => {
                 let scene = Arc::new(crate::live_preview::LiveScene {
                     key: scene_key,
+                    nested_switches,
                     snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
                     sources: sources.cloned(),
                     effects: effects.cloned(),
@@ -698,6 +745,7 @@ impl GpuPreview {
                 self.direct_source = Some(source);
                 self.live_generation = self.live_generation.wrapping_add(1);
                 self.sampled = None;
+                self.pending_pixel = None;
             }
             if measure_layer_times
                 && let Some((comp, times)) = frame.layer_times
@@ -728,10 +776,10 @@ impl GpuPreview {
     }
 
     /// Straight (unpremultiplied) 8-bit RGBA of the published frame at comp
-    /// point `p`, as shown (display-encoded); `None` outside the frame. Reads
-    /// one texel back from the GPU (blocking, only when the pointer moved to
-    /// another texel or the frame changed).
-    pub fn pixel(&mut self, p: [f64; 2]) -> Option<[u8; 4]> {
+    /// point `p`, transparent outside the image. Starts at most one readback
+    /// at a time and requests a redraw when the requested texel is pending;
+    /// until it arrives, the previous reading.
+    pub fn pixel(&mut self, p: [f64; 2], repaint: &egui::Context) -> Option<[u8; 4]> {
         let (texture, rect) = match &self.cached {
             Some((texture, rect)) => (texture, *rect),
             None => (self.target.as_ref()?.view().texture(), self.rect?),
@@ -744,17 +792,42 @@ impl GpuPreview {
         let u = (p[0] - f64::from(rect.x0)) / rw;
         let v = (p[1] - f64::from(rect.y0)) / rh;
         if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
-            return None;
+            return Some([0; 4]);
         }
         let texel = (
             ((u * f64::from(w)) as u32).min(w - 1),
             ((v * f64::from(h)) as u32).min(h - 1),
             self.last.map_or(0, |k| k.0 ^ u64::from(k.2)),
         );
+        if let Some((key, pending)) = &self.pending_pixel {
+            self.gpu.poll();
+            if let Some(result) = pending.try_finish() {
+                if let Ok(image) = result {
+                    let px = image.pixel(0, 0);
+                    let a = px[3];
+                    let straight = |c: u8| {
+                        (u32::from(c) * 255 + u32::from(a) / 2)
+                            .checked_div(u32::from(a))
+                            .unwrap_or(0)
+                            .min(255) as u8
+                    };
+                    self.sampled =
+                        Some((*key, [straight(px[0]), straight(px[1]), straight(px[2]), a]));
+                }
+                self.pending_pixel = None;
+            }
+        }
         if let Some((t, c)) = self.sampled
             && t == texel
         {
             return Some(c);
+        }
+        repaint.request_repaint_after(std::time::Duration::from_millis(8));
+        // While the new texel is read back, the last reading stands in (the
+        // Info panel and the pen's mask colour follow the moving pointer).
+        let last = self.sampled.map(|(_, c)| c);
+        if self.pending_pixel.is_some() {
+            return last;
         }
         let region = bae_gpu::transfer::TextureRegion {
             mip_level: 0,
@@ -779,19 +852,8 @@ impl GpuPreview {
             bae_gpu::transfer::TextureReadback::record(&self.gpu, &mut encoder, texture, region)
                 .ok()?;
         self.gpu.queue().submit([encoder.finish()]);
-        let image = readback.map().wait(&self.gpu).ok()?;
-        let px = image.pixel(0, 0);
-        let a = px[3];
-        let straight = |c: u8| {
-            if a == 0 {
-                0
-            } else {
-                ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
-            }
-        };
-        let c = [straight(px[0]), straight(px[1]), straight(px[2]), a];
-        self.sampled = Some((texel, c));
-        Some(c)
+        self.pending_pixel = Some((texel, readback.map()));
+        last
     }
 
     #[cfg(test)]

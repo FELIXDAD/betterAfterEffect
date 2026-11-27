@@ -14,18 +14,11 @@ use bae_model::{
     layer_styles as styles, psd::LayerImage,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ImportKind {
-    #[default]
-    Footage,
-    Composition,
-    RetainSize,
-}
+pub use bae_model::psd::ImportKind;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Params {
@@ -40,6 +33,8 @@ pub struct Params {
     pub replace: Option<PrimPath>,
     #[serde(default)]
     pub keep_name: bool,
+    #[serde(default)]
+    pub keep_interpretation: bool,
     /// In compositions copy the source style onto each instance; otherwise let the
     /// instance inherit the source style (AE's merged-styles footage).
     pub editable: bool,
@@ -48,6 +43,7 @@ pub struct Params {
     pub fps: f64,
     pub duration: Option<Time>,
     pub label: Option<i64>,
+    pub folder_label: Option<i64>,
 }
 pub struct ImportPhotoshop;
 impl Command for ImportPhotoshop {
@@ -71,7 +67,7 @@ impl Command for ImportPhotoshop {
             assets
         };
         if let Some(rel) = &p.folder {
-            parent = crate::import::folder_path(tx, &parent, rel)?;
+            parent = crate::import::folder_path(tx, &parent, rel, p.folder_label)?;
         }
         let (item, kind) = if p.kind == ImportKind::Footage {
             let layer = if let Some(sel) = p.selection {
@@ -98,6 +94,7 @@ impl Command for ImportPhotoshop {
                     CreateFolderParams {
                         name: Some(format!("{stem} {}", crate::names::localized("Layers"))),
                         parent: Some(parent),
+                        label: p.folder_label,
                     },
                 )?
                 .path;
@@ -170,6 +167,7 @@ fn footage(
                 item: item.clone(),
                 file,
                 keep_name: p.keep_name,
+                keep_interpretation: p.keep_interpretation,
             },
         )?;
         item.clone()
@@ -178,8 +176,11 @@ fn footage(
             .run(
                 tx,
                 ImportParams {
+                    precompose: false,
+                    folder_label: p.folder_label,
                     parent: Some(parent.clone()),
                     comp: None,
+                    create_comp: false,
                     files: vec![file],
                 },
             )?

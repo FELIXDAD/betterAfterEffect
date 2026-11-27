@@ -33,6 +33,32 @@ fn sequence(dir: &std::path::Path, prefix: &str, frames: u8) -> std::path::PathB
 }
 
 #[test]
+fn alphabetical_sequences_decode_in_filename_order_without_frame_numbers() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("apple.png");
+    let second = dir.path().join("zebra.png");
+    write_solid_png(&second, 2, 2, [200, 0, 0, 255]);
+    write_solid_png(&first, 2, 2, [0, 100, 0, 255]);
+    let open = OpenOptions {
+        sequence: bae_media::SequenceMode::Alphabetical,
+        ..OpenOptions::sequence(RATE)
+    };
+    let library = library();
+    let info = library.info(&second, &open).unwrap();
+    assert_eq!(info.path, first);
+    assert_eq!(info.sequence.unwrap().pattern, "*.png");
+    let pixels = |i| {
+        library
+            .frame_cpu(&second, &open, &FrameRequest::new(i))
+            .unwrap()
+            .pixel(0, 0)
+            .to_vec()
+    };
+    assert_eq!(pixels(0), [0, 100, 0, 255]);
+    assert_eq!(pixels(1), [200, 0, 0, 255]);
+}
+
+#[test]
 fn time_mapping_hashes_and_end_hold() {
     let dir = tempfile::tempdir().unwrap();
     let first = sequence(dir.path(), "shot", 5);

@@ -8,6 +8,7 @@ pub(super) struct ExportAudio {
     times: Vec<Time>,
     frame_duration: Time,
     block_samples: i64,
+    next_movie_frame: usize,
     first: i64,
     pcm: Vec<[f32; 2]>,
 }
@@ -29,12 +30,43 @@ impl ExportAudio {
             frame_duration: job.rate.frame_duration(),
             block_samples: time_to_sample(duration, Self::RATE).clamp(1, MAX_SAMPLES),
             first: 0,
+            next_movie_frame: 0,
             pcm: Vec::new(),
         }
     }
 
     pub(super) fn is_empty(&self) -> bool {
         self.mix.is_empty()
+    }
+
+    /// Feed audio one second ahead of video so interleaved PCM movie writers
+    /// can accept the next video frame (#793).
+    pub(super) fn push_ahead_of(
+        &mut self,
+        index: usize,
+        encoder: &mut dyn bae_media::Encoder,
+    ) -> Result<(), RenderError> {
+        let lead = (1.0 / self.frame_duration.as_seconds().max(1e-6)).ceil() as usize;
+        let end = index.saturating_add(lead.max(1)).min(self.times.len());
+        if self.next_movie_frame >= end {
+            return Ok(());
+        }
+        while self.next_movie_frame < end {
+            self.frame(self.next_movie_frame, |samples| {
+                encoder
+                    .push_audio(&bae_media::AudioBuffer {
+                        sample_rate: Self::RATE,
+                        channels: 2,
+                        samples: samples.as_flattened().to_vec(),
+                    })
+                    .map_err(media_error)
+            })?;
+            self.next_movie_frame += 1;
+        }
+        if self.next_movie_frame == self.times.len() {
+            encoder.end_audio().map_err(media_error)?;
+        }
+        Ok(())
     }
 
     pub(super) fn frame(
@@ -88,6 +120,7 @@ mod tests {
             frame_duration: d,
             block_samples: 3000,
             first: 0,
+            next_movie_frame: 0,
             pcm: Vec::new(),
         };
         let mut written = 0;

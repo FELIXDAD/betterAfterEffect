@@ -199,3 +199,102 @@ fn type_selection_drags_and_extends_by_character_then_styles_once() {
     h.stage.undo(&h.author).unwrap();
     assert!(h.doc(&layer).runs.is_empty());
 }
+
+#[test]
+fn vertical_box_and_selected_range_survive_editing() {
+    let mut h = H::new();
+    h.tools().lock().set(Tool::TypeVertical);
+    h.drag((100., 50.), (300., 250.), Modifiers::NONE);
+    h.type_text(vec![Event::Text("中12A".into())]);
+    let r = h.commit_text();
+    h.apply(&r);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let d = h.doc(&layer);
+    assert_eq!(d.line_orientation, bae_model::LineOrientation::Vertical);
+    assert_eq!(d.box_size, Some([200., 200.]));
+    crate::ae_panels::character::prewarm();
+    let start = std::time::Instant::now();
+    let layout = loop {
+        if let Some(l) = crate::ae_panels::character::hit_layout(&d) {
+            break l;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(15),
+            "font scan"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let pos = h.v3(&layer, "transform:position");
+    let at = |i: usize, t: f64| {
+        let c = &layout.chars[i];
+        (pos[0] + c.origin.x, pos[1] + c.origin.y + c.advance * t)
+    };
+    h.drag(at(1, 0.05), at(2, 0.95), Modifiers::NONE);
+    let selected = h.session().lock().text_range(Some(&layer)).unwrap();
+    assert_eq!(selected, 1..3);
+    h.run(
+        "text.set_style",
+        json!({"layers":[layer],"range":selected,"style":{"baseline_direction":"tate_chu_yoko"}}),
+    );
+    // Set while editing: the editor's glyphs follow at once (the two digits share a cell).
+    h.frame(Vec::new(), Modifiers::NONE);
+    let e = h.viewer.type_tool.editing.as_ref().expect("still editing");
+    let chars = &e.preview_layout().expect("vertical preview").chars;
+    assert_eq!(chars[1].origin.y, chars[2].origin.y);
+    h.escape();
+    h.tools().lock().edit_text_request = Some(layer.clone());
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.tools().lock().current(), Tool::TypeVertical);
+    h.type_text(vec![Event::Text("尾".into())]);
+    let r = h.commit_text();
+    h.apply(&r);
+    let d = h.doc(&layer);
+    assert_eq!(d.text, "中12A尾");
+    assert_eq!(
+        d.style_at(2).baseline_direction,
+        bae_model::BaselineDirection::TateChuYoko
+    );
+    assert_eq!(
+        d.style_at(3).baseline_direction,
+        bae_model::BaselineDirection::Default
+    );
+}
+
+/// With a Type tool, right-clicking a text layer shows AE's text menu; its
+/// Vertical runs the writing direction action, and the Layer menu has no
+/// such item (AE 26).
+#[test]
+fn the_text_menu_sets_the_writing_direction() {
+    let mut h = H::new();
+    let text = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": h.comp, "kind": "text", "text": "Hello World"}),
+        )["path"],
+    );
+    h.tools().lock().set(Tool::TypeHorizontal);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let c = {
+        let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+        let l = comp.layer(&text).unwrap();
+        let (a, b) = crate::render::layer_bounds(l).unwrap();
+        let c = l.world_matrix.transform_point3(((a + b) / 2.0).extend(0.0));
+        (c.x, c.y)
+    };
+    h.right_click(c.0, c.1);
+    assert!(h.labeled("Edit Text...").is_some(), "the text menu");
+    assert!(h.labeled("Horizontal").is_some());
+    let r = h.choose("Vertical");
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == crate::actions::ids::TEXT_ORIENTATION)
+        .expect("writing direction");
+    assert_eq!(inv.params["orientation"], json!("vertical"));
+    assert!(
+        crate::menus::items()
+            .iter()
+            .all(|(id, _)| !id.contains("convert_to_vertical")),
+        "not in the Layer menu"
+    );
+}

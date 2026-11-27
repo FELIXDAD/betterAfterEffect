@@ -17,7 +17,7 @@
       snapshot = {
         items: new Map(), layers: new Map(), layerRows: new Map(), properties: new Map(),
         folders: new Map(), itemRows: new Map(), effects: new Map(), effectInfo: new Map(),
-        masks: new Map()
+        masks: new Map(), markers: new Map()
       };
     }
     return snapshot;
@@ -102,7 +102,30 @@
   TextDocument.prototype.toString = function () { return this.text; };
   TextDocument.prototype.resetCharStyle = function () {};
   TextDocument.prototype.resetParagraphStyle = function () {};
+  function Shape() {
+    this.vertices = [];
+    this.inTangents = [];
+    this.outTangents = [];
+    this.closed = false;
+  }
+  function KeyframeEase(speed, influence) {
+    if (!Number.isFinite(speed) || !Number.isFinite(influence) || influence < 0.1 || influence > 100)
+      throw new RangeError("invalid keyframe speed or influence");
+    this.speed = speed;
+    this.influence = influence;
+  }
+  function MarkerValue(comment, chapter, url, frameTarget, cuePointName) {
+    this.comment = String(comment || "");
+    this.chapter = String(chapter || "");
+    this.url = String(url || "");
+    this.frameTarget = String(frameTarget || "");
+    this.cuePointName = String(cuePointName || "");
+    this.duration = 0;
+    this.label = 0;
+    this.protectedRegion = false;
+  }
   var fromHost = function (v) {
+    if (v && Array.isArray(v.vertices)) return Object.assign(new Shape(), v);
     if (v && typeof v === "object" && !Array.isArray(v) && typeof v.text === "string") {
       var d = new TextDocument(v.text);
       for (var k in v) if (k !== "text") d[k] = v[k];
@@ -257,7 +280,9 @@
             return add({ kind: "solid", color: color, name: name, width: w, height: h, pixelAspect: pa, duration: d });
           },
           addText: function (t) {
-            return add({ kind: "text", text: t === undefined ? undefined : String(t instanceof TextDocument ? t.text : t) });
+            var layer = add({ kind: "text", text: t === undefined ? undefined : String(t) });
+            if (t instanceof TextDocument) layer.text.sourceText.setValue(t);
+            return layer;
           },
           addBoxText: function (size, t) { return this.addText(t); },
           addNull: function (d) { return add({ kind: "null", duration: d }); },
@@ -269,7 +294,16 @@
             return add({ kind: type === "comp" ? "pre_comp" : "footage", source: item._p, duration: d });
           },
           byName: function (n) { return comp.layer(n); },
-          precompose: function () { unsupported("LayerCollection.precompose"); },
+          precompose: function (indices, name, moveAllAttributes) {
+            var rows = comp._i().layers;
+            var layers = indices.map(function (i) {
+              if (!Number.isInteger(i) || !rows[i - 1]) throw new RangeError("invalid layer index");
+              return rows[i - 1].path;
+            });
+            return new CompItem(H("invoke", { id: "layer.precompose", params: {
+              layers: layers, name: name, mode: moveAllAttributes === false ? "leave" : "move"
+            } }).comp);
+          },
         });
       },
     },
@@ -290,6 +324,7 @@
       },
     },
     selectedProperties: { get: function () { return []; } },
+    markerProperty: { get: function () { return markerProperty(this); } },
   });
 
   // ---- properties -----------------------------------------------------------
@@ -320,6 +355,7 @@
       H("set", { path: this._p, attr: this._a, value: toHost(v), time: t, key: true });
     },
     setValuesAtTimes: function (times, values) {
+      if (times.length !== values.length) throw new RangeError("expected one value per time");
       for (var i = 0; i < times.length; i++) this.setValueAtTime(times[i], values[i]);
     },
     setValueAtKey: function (i, v) { this.setValueAtTime(this.keyTime(i), v); },
@@ -346,7 +382,10 @@
       return best;
     },
     setInterpolationTypeAtKey: function (i, inType, outType) {
-      var name = function (t) { return t === undefined ? null : INTERP[t] || null; };
+      var name = function (t) {
+        if (!INTERP[t]) throw new RangeError("invalid keyframe interpolation");
+        return INTERP[t];
+      };
       H("setInterpolation", {
         path: this._p, attr: this._a, index: i,
         in: name(inType), out: name(outType === undefined ? inType : outType),
@@ -369,6 +408,57 @@
   INTERP[6612] = "linear";
   INTERP[6613] = "bezier";
   INTERP[6614] = "hold";
+
+  function keyData(p, i) {
+    var k = keyTimes(p)[i - 1];
+    if (!k) throw new RangeError("invalid keyframe index");
+    return k;
+  }
+  function editKey(p, i, fields) {
+    H("editKey", { path: p._p, attr: p._a, index: i, fields: fields });
+  }
+  ["In", "Out"].forEach(function (side) {
+    var field = side.toLowerCase();
+    Property.prototype["key" + side + "InterpolationType"] = function (i) {
+      return KeyframeInterpolationType[keyData(this, i)["interp_" + field].toUpperCase()];
+    };
+    Property.prototype["key" + side + "TemporalEase"] = function (i) {
+      var k = keyData(this, i), e = k["ease_" + field];
+      if (e.length) return e.map(function (v) { return new KeyframeEase(v.speed, v.influence); });
+      return Array.from({length: k.dimensions}, function () { return new KeyframeEase(0, 100 / 3); });
+    };
+  });
+  Property.prototype.setTemporalEaseAtKey = function (i, incoming, outgoing) {
+    var dims = keyData(this, i).dimensions;
+    outgoing = outgoing === undefined ? incoming : outgoing;
+    if (incoming.length !== dims || outgoing.length !== dims) throw new RangeError("invalid number of ease dimensions");
+    editKey(this, i, { ease_in: incoming, ease_out: outgoing, interp_in: "bezier", interp_out: "bezier" });
+  };
+  function markerProperty(owner) {
+    var p = Object.create(Property.prototype);
+    Property.call(p, owner._p, "marker", "Marker", "ADBE Marker", owner);
+    function rows() { return cachedRead("markers", owner._p, "markers", { path: owner._p }); }
+    function at(i) {
+      var row = rows()[i - 1];
+      if (!row) throw new RangeError("invalid marker index");
+      return row;
+    }
+    Object.defineProperty(p, "numKeys", {get: function () { return rows().length; }});
+    p.keyTime = function (i) { return at(i).time; };
+    p.keyValue = function (i) { return Object.assign(new MarkerValue(), at(i).value); };
+    p.setValueAtTime = function (t, v) { H("setMarker", {path: owner._p, time: t, value: v}); };
+    p.setValueAtKey = function (i, v) { p.setValueAtTime(p.keyTime(i), v); };
+    p.removeKey = function (i) { H("invoke", {id: "marker.delete", params: {markers: [at(i).path]}}); };
+    p.nearestKeyIndex = function (t) {
+      var best = 0, dist = Infinity;
+      rows().forEach(function (r, i) {
+        var d = Math.abs(t - r.time);
+        if (d < dist) { dist = d; best = i + 1; }
+      });
+      return best;
+    };
+    return p;
+  }
 
   // A property group that can be called like a function, as in AE
   // (`layer.effect("Blur")("Blurriness")`). `children()` returns its members.
@@ -479,17 +569,26 @@
   ];
 
   var masksGroup = function (layer) {
-    return group("Masks", "ADBE Mask Parade", layer, function () {
-      return layerMasks(layer._p).map(function (m) {
-        var mg = group(m.name, "ADBE Mask Atom", null, function () {
+    function member(m) {
+        var mg = group(m.name, "ADBE Mask Atom", masks, function () {
           return MASK_PROPS.map(function (d) { return new Property(m.path, d[2], d[0], d[1], mg); });
         });
         MASK_PROPS.forEach(function (d) {
           Object.defineProperty(mg, d[3], { get: function () { return new Property(m.path, d[2], d[0], d[1], mg); } });
         });
         return mg;
-      });
+    }
+    var masks = group("Masks", "ADBE Mask Parade", layer, function () {
+      return layerMasks(layer._p).map(member);
+    }, {
+      canAddProperty: function (name) { return name === "ADBE Mask Atom" || name === "Mask"; },
+      addProperty: function (name) {
+        if (!masks.canAddProperty(name)) throw new Error("unknown mask type " + name);
+        var path = H("invoke", {id: "mask.create", params: {layer: layer._p, kind: "rect"} }).mask;
+        return member(layerMasks(layer._p).find(function (m) { return m.path === path; }));
+      }
     });
+    return masks;
   };
 
   var textGroup = function (layer) {
@@ -571,7 +670,7 @@
     _groups: function () {
       var kind = this._i().kind, out = [];
       if (kind === "text") out.push(this.text);
-      out.push(this.mask, this.effect, this.transform);
+      out.push(this.mask, this.effect, this.transform, this.marker);
       return out;
     },
     get numProperties() { return this._groups().length; },
@@ -585,12 +684,14 @@
       }
       // Lenient: transform properties and Source Text directly on the layer.
       for (var j = 0; j < groups.length; j++) {
+        if (!(groups[j] instanceof PropertyGroup)) continue;
         var p = groups[j].property(which);
         if (p && groups[j].matchName !== "ADBE Effect Parade" && groups[j].matchName !== "ADBE Mask Parade") return p;
       }
       return null;
     },
     get transform() { return transformGroup(this); },
+    get marker() { return markerProperty(this); },
     get effect() { return effectsGroup(this); },
     get Effects() { return effectsGroup(this); },
     get mask() { return masksGroup(this); },
@@ -684,6 +785,9 @@
 
   g.app = app;
   g.TextDocument = TextDocument;
+  g.MarkerValue = MarkerValue;
+  g.KeyframeEase = KeyframeEase;
+  g.Shape = Shape;
   g.PropertyType = Object.freeze({ PROPERTY: 6212, INDEXED_GROUP: 6213, NAMED_GROUP: 6214 });
   var modes = {};
   for (var mode of H("blendModes")) modes[mode.toUpperCase()] = mode;
@@ -738,5 +842,5 @@
 export const {
   app, bae, Item, FolderItem, AVItem, FootageItem, CompItem, Layer, AVLayer,
   TextLayer, ShapeLayer, CameraLayer, LightLayer, Property, PropertyGroup,
-  TextDocument, KeyframeInterpolationType, PropertyType, BlendingMode,
+  TextDocument, Shape, MarkerValue, KeyframeEase, KeyframeInterpolationType, PropertyType, BlendingMode,
 } = globalThis;

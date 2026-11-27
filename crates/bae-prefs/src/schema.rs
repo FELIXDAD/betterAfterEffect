@@ -54,6 +54,8 @@ pub enum Kind {
         options: &'static [Opt],
         style: Style,
     },
+    /// System default or the stable ID of a native audio output device.
+    AudioOutput,
     /// Label index 0..=16, shown as label names with swatches.
     Label,
     /// `#rrggbb` color swatch.
@@ -127,6 +129,8 @@ pub struct Pref {
     /// The label is only the accessible name (AE draws none: a value inline
     /// after its checkbox, a radio group under its group title, a path display).
     pub quiet: bool,
+    /// A setting BAE does not do yet: drawn greyed.
+    pub unsupported: bool,
 }
 
 impl Pref {
@@ -146,6 +150,7 @@ impl Pref {
             enabled: None,
             indent: false,
             quiet: false,
+            unsupported: false,
         }
     }
     pub(crate) const fn unit(mut self, unit: &'static str) -> Self {
@@ -168,6 +173,10 @@ impl Pref {
     }
     pub(crate) const fn quiet(mut self) -> Self {
         self.quiet = true;
+        self
+    }
+    pub(crate) const fn unsupported(mut self) -> Self {
+        self.unsupported = true;
         self
     }
 }
@@ -234,6 +243,9 @@ pub(crate) const fn choice(
         DefaultValue::Str(v),
     )
 }
+pub(crate) const fn audio_output(key: &'static str, text: &'static str, v: &'static str) -> Pref {
+    Pref::new(key, text, Kind::AudioOutput, DefaultValue::Str(v))
+}
 pub(crate) const fn label(key: &'static str, text: &'static str, v: i64) -> Pref {
     Pref::new(key, text, Kind::Label, DefaultValue::Int(v))
 }
@@ -278,6 +290,29 @@ pub enum Item {
     Only(Os, &'static Item),
 }
 
+impl Item {
+    /// Whether every setting in it is one BAE does not do yet (a group drawn
+    /// greyed as a whole); items without settings do not count.
+    pub fn unsupported(items: &[Item]) -> bool {
+        fn settings<'a>(items: &'a [Item], out: &mut Vec<&'a Pref>) {
+            for item in items {
+                match item {
+                    Item::P(p) => out.push(p),
+                    Item::Row(list) | Item::Group(_, list) => settings(list, out),
+                    Item::Cols(cols) => cols.iter().for_each(|c| settings(c, out)),
+                    Item::When(_, item) | Item::Only(_, item) => {
+                        settings(std::slice::from_ref(*item), out)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut found = Vec::new();
+        settings(items, &mut found);
+        !found.is_empty() && found.iter().all(|p| p.unsupported)
+    }
+}
+
 /// A page of the dialog.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Page {
@@ -290,6 +325,11 @@ pub struct Page {
 
 /// Preferences AE 26 keeps without a control in the dialog.
 pub static HIDDEN: &[Pref] = &[
+    b(
+        crate::keys::CACHE_FRAMES_WHEN_IDLE,
+        "Cache Frames When Idle",
+        true,
+    ),
     // AE 26 removed Levels of Undo from the dialog; AE's own default is 99. BAE
     // keeps its deep undo stack by default (bae_model::DEFAULT_UNDO_LIMIT).
     int("general.levels_of_undo", "Levels of Undo", 1000, 1, 100_000)
@@ -378,4 +418,35 @@ pub fn find(key: &str) -> Option<&'static Pref> {
 /// The page with `id`.
 pub fn page(id: &str) -> Option<&'static Page> {
     PAGES.iter().find(|p| p.id == id)
+}
+
+#[cfg(test)]
+mod unsupported_tests {
+    use super::*;
+
+    /// The greyed group and settings come from the generator's data, not from
+    /// names in the dialog.
+    #[test]
+    fn unsupported_settings_come_from_the_generated_pages() {
+        let groups: Vec<_> = PAGES
+            .iter()
+            .flat_map(|p| p.items)
+            .filter_map(|i| match i {
+                Item::Group(title, list) => Some((*title, Item::unsupported(list))),
+                _ => None,
+            })
+            .collect();
+        assert!(groups.contains(&("Mercury Transmit", true)));
+        assert!(groups.contains(&("Memory", false)));
+        let mut greyed = Vec::new();
+        for page in PAGES {
+            visit_here(page.items, &mut |p: &'static Pref| {
+                if p.unsupported {
+                    greyed.push(p.key);
+                }
+            });
+        }
+        assert!(greyed.contains(&"project.dynamic_link_highest_number"));
+        assert!(greyed.contains(&"export.preview_output_during_render_queue"));
+    }
 }

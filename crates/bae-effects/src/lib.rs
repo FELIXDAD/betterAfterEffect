@@ -56,7 +56,9 @@ pub use catalog::{EffectInfo, Form, category_zh};
 pub use categories::color::ocio::embed_color_file;
 pub use categories::simulation::{particle_scene_projection, particle_world_projection};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
-pub use effects::color::lumetri::{LumetriCurve, lumetri_key_edits};
+pub use effects::color::lumetri::{
+    LumetriCurve, LumetriLut, lumetri_key_edits, prepare_lumetri_lut,
+};
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
 
@@ -387,6 +389,11 @@ fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
                 .or_else(|| {
                     (m == effects::liquify::MATCH_NAME)
                         .then(|| effects::liquify::options_zh(p.id))
+                        .flatten()
+                })
+                .or_else(|| {
+                    (m == effects::puppet::MATCH_NAME)
+                        .then(|| effects::puppet::options_zh(p.id))
                         .flatten()
                 })
                 .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;

@@ -17,9 +17,11 @@
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
-use bae_model::{BaselineOption, TextDocument, TextStyle};
+use bae_model::{BaselineOption, TextDocument, TextJoin, TextStyle};
 use bae_vector::paint::{LineJoin, Rgba, paint_color};
-use kurbo::{Point, Rect};
+use kurbo::{Affine, Point, Rect, Vec2};
+
+mod vertical;
 use parley::{
     Alignment, AlignmentOptions, FontData, FontFamily, FontFamilyName, FontStyle, FontWeight,
     FontWidth, GenericFamily, StyleProperty,
@@ -121,6 +123,8 @@ pub struct PositionedGlyph {
 /// Glyphs sharing one font face, size and synthesis.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GlyphRun {
+    /// Glyph-local transform in layer axes (before positioning).
+    pub basis: Affine,
     pub paint: TextPaint,
     /// Font data (the same type as `vello::peniko::FontData`).
     pub font: FontData,
@@ -150,6 +154,8 @@ pub enum CharKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextChar {
     pub right_to_left: bool,
+    /// Height of a tate-chu-yoko cell containing this horizontal character.
+    pub combined_em: Option<f64>,
     pub paint: TextPaint,
     /// Char indices (Unicode scalar values) into `TextDocument.text`.
     pub source: Range<usize>,
@@ -157,9 +163,9 @@ pub struct TextChar {
     pub line: usize,
     /// Word index (words are separated by whitespace and line breaks).
     pub word: usize,
-    /// Left end of the advance on the baseline, layer pixels.
+    /// The start of the advance on the baseline, in layer pixels.
     pub origin: Point,
-    /// Advance in pixels (tracking excluded).
+    /// Advance to the next character, including tracking, in layer pixels.
     pub advance: f64,
     pub kind: CharKind,
 }
@@ -167,11 +173,11 @@ pub struct TextChar {
 /// One composed line.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLine {
-    /// Baseline y in layer pixels.
+    /// Baseline y for a row, or centre x for a column, in layer pixels.
     pub baseline: f64,
-    /// x of the line start after alignment.
+    /// Start along the line after alignment (x for a row, y for a column).
     pub x: f64,
-    /// Measured width (trailing spaces and trailing tracking excluded).
+    /// Inline extent, excluding trailing spaces and trailing tracking.
     pub width: f64,
     /// Ascent and descent of the line's fonts in pixels (positive).
     pub ascent: f64,
@@ -184,6 +190,7 @@ pub struct TextLine {
 /// animate it per character and to answer `sourceRectAtTime`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLayout {
+    pub orientation: bae_model::LineOrientation,
     pub runs: Vec<GlyphRun>,
     pub lines: Vec<TextLine>,
     pub chars: Vec<TextChar>,
@@ -203,6 +210,7 @@ impl TextLayout {
     /// An empty layout (no glyphs).
     pub fn empty(paint: TextPaint) -> Self {
         Self {
+            orientation: bae_model::LineOrientation::Horizontal,
             runs: Vec::new(),
             lines: Vec::new(),
             chars: Vec::new(),
@@ -222,9 +230,12 @@ impl TextLayout {
     /// Nearest insertion point in source-character coordinates, including RTL runs.
     pub fn cursor_at(&self, x: f64, y: f64) -> Option<usize> {
         let distance = |l: &TextLine| {
-            (l.baseline - l.ascent - y)
-                .max(y - l.baseline - l.descent)
-                .max(0.)
+            let r = self.line_rect(l);
+            if self.vertical() {
+                (r.x0 - x).max(x - r.x1).max(0.)
+            } else {
+                (r.y0 - y).max(y - r.y1).max(0.)
+            }
         };
         let line = self
             .lines
@@ -244,15 +255,69 @@ impl TextLayout {
                 } else {
                     right
                 };
-                [(c.origin.x, left), (c.origin.x + c.advance, right)]
+                [(false, left), (true, right)].map(|(end, index)| {
+                    let [a, b] = self.caret_edge(c, end);
+                    let dx = (a.x.min(b.x) - x).max(x - a.x.max(b.x)).max(0.);
+                    let dy = (a.y.min(b.y) - y).max(y - a.y.max(b.y)).max(0.);
+                    (dx * dx + dy * dy, index)
+                })
             })
-            .min_by(|a, b| (x - a.0).abs().total_cmp(&(x - b.0).abs()))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, i)| i)
             .or_else(|| {
                 self.chars
                     .get(line.chars.start.checked_sub(1)?)
                     .map(|c| c.source.end)
             })
+    }
+
+    pub fn vertical(&self) -> bool {
+        self.orientation == bae_model::LineOrientation::Vertical
+    }
+
+    /// Physical rectangle of a horizontal line or vertical column.
+    pub fn line_rect(&self, line: &TextLine) -> Rect {
+        if self.vertical() {
+            Rect::new(
+                line.baseline - line.descent,
+                line.x,
+                line.baseline + line.ascent,
+                line.x + line.width,
+            )
+        } else {
+            Rect::new(
+                line.x,
+                line.baseline - line.ascent,
+                line.x + line.width,
+                line.baseline + line.descent,
+            )
+        }
+    }
+
+    /// The two endpoints of a caret at the visual start or end of a cluster.
+    pub fn caret_edge(&self, c: &TextChar, end: bool) -> [Point; 2] {
+        let line = &self.lines[c.line];
+        let offset = if end { c.advance } else { 0. };
+        if let Some(em) = c.combined_em {
+            let x = c.origin.x + offset;
+            return [
+                Point::new(x, c.origin.y - em / 2.),
+                Point::new(x, c.origin.y + em / 2.),
+            ];
+        }
+        if self.vertical() {
+            let y = c.origin.y + offset;
+            [
+                Point::new(c.origin.x - line.descent, y),
+                Point::new(c.origin.x + line.ascent, y),
+            ]
+        } else {
+            let x = c.origin.x + offset;
+            [
+                Point::new(x, c.origin.y - line.ascent),
+                Point::new(x, c.origin.y + line.descent),
+            ]
+        }
     }
 
     /// Ink bounds of all glyphs in layer space (`sourceRectAtTime` with
@@ -295,12 +360,12 @@ impl TextLayout {
                 let top = f64::from(b.y_max);
                 let bottom = f64::from(b.y_min);
                 let r = Rect::new(
-                    x + f64::from(b.x_min) - lean * bottom.abs().max(0.0) - grow,
-                    y - top - grow,
-                    x + f64::from(b.x_max) + lean * top.max(0.0) + grow,
-                    y - bottom + grow,
+                    f64::from(b.x_min) - lean * bottom.abs().max(0.0) - grow,
+                    -top - grow,
+                    f64::from(b.x_max) + lean * top.max(0.0) + grow,
+                    -bottom + grow,
                 );
-                let r = r.inflate(stroke, stroke);
+                let r = run.basis.transform_rect_bbox(r.inflate(stroke, stroke)) + Vec2::new(x, y);
                 let r = self
                     .styles
                     .get(g.char_index)
@@ -314,7 +379,9 @@ impl TextLayout {
     /// Hash of everything that affects the pixels.
     pub fn content_hash(&self) -> u64 {
         let mut h = FxHasher::default();
+        self.orientation.hash(&mut h);
         for run in &self.runs {
+            run.basis.as_coeffs().map(f64::to_bits).hash(&mut h);
             hash_paint(&run.paint, &mut h);
             run.font.data.id().hash(&mut h);
             run.font.index.hash(&mut h);
@@ -359,7 +426,11 @@ pub fn document_paint(doc: &TextStyle) -> TextPaint {
         .map(|c| TextStroke {
             color: paint_color(c),
             width: doc.stroke_width,
-            join: LineJoin::Miter,
+            join: match doc.line_join {
+                TextJoin::Miter => LineJoin::Miter,
+                TextJoin::Round => LineJoin::Round,
+                TextJoin::Bevel => LineJoin::Bevel,
+            },
             miter_limit: 4.0,
         });
     TextPaint {
@@ -398,6 +469,11 @@ impl DisplayText {
                 }
                 '\r' | '\n' => push('\n', &mut text),
                 '\u{3}' => push('\u{2028}', &mut text),
+                // Hindi Digits: Arabic-Indic digits for 0-9.
+                '0'..='9' if doc.style_at(start + i).hindi_digits => push(
+                    char::from_u32(0x0660 + c as u32 - '0' as u32).unwrap_or(c),
+                    &mut text,
+                ),
                 _ if doc.style_at(start + i).all_caps => {
                     for u in c.to_uppercase() {
                         push(u, &mut text);
@@ -436,6 +512,17 @@ impl DisplayText {
     }
 }
 
+/// Representative upright, sideways, punctuation and combined glyphs for the
+/// background warm-up of the compositor and the editor's font collections.
+pub fn vertical_warmup_document() -> TextDocument {
+    let mut doc = TextDocument::new("文、A12", "Arial", 16.);
+    doc.line_orientation = bae_model::LineOrientation::Vertical;
+    doc.edit_styles(3..5, |s| {
+        s.baseline_direction = bae_model::BaselineDirection::TateChuYoko
+    });
+    doc
+}
+
 /// Lays out `doc` in layer space.
 pub fn layout_text(fonts: &mut FontSystem, doc: &TextDocument) -> TextLayout {
     shape_text(fonts, doc, false)
@@ -447,6 +534,7 @@ pub(crate) fn shape_text(
     individual_chars: bool,
 ) -> TextLayout {
     let mut out = TextLayout::empty(document_paint(&doc.style));
+    out.orientation = doc.line_orientation;
     out.box_rect = box_rect(doc);
     out.font = fonts.resolve(&doc.style.font);
     if doc.text.is_empty() {
@@ -481,6 +569,9 @@ pub(crate) fn shape_text(
         start += count;
         from = end;
     }
+    if out.vertical() {
+        vertical::compose(&mut out, doc);
+    }
     out
 }
 
@@ -514,7 +605,7 @@ fn shape_paragraph(
     let doc_len = source.end;
     let p = doc.paragraph_at(source.start);
     let justification = Justification::from_token(&p.justification);
-    let paragraph = out.box_rect;
+    let paragraph = out.box_rect.filter(|_| !out.vertical());
     let base = doc.style_at(source.start);
     let relevant = doc.runs.partition_point(|r| r.start <= source.start)
         ..doc.runs.partition_point(|r| r.start < source.end);
@@ -575,13 +666,38 @@ fn shape_paragraph(
             StyleProperty::LineHeight(parley::LineHeight::FontSizeRelative(AUTO_LEADING as f32)),
             range.clone(),
         );
-        let features = match (individual_chars || faces.len() > 1, style.small_caps) {
+        let features = match (
+            individual_chars || faces.len() > 1 || out.vertical() || !style.ligatures,
+            style.small_caps,
+        ) {
             (true, true) => Some(r#""liga" 0, "clig" 0, "dlig" 0, "smcp" 1"#),
             (true, false) => Some(r#""liga" 0, "clig" 0, "dlig" 0"#),
             (false, true) => Some(r#""smcp" 1"#),
             _ => None,
         };
-        if let Some(f) = features {
+        if out.vertical() {
+            // Apply vertical substitutions only to upright spans. A combined
+            // cell still shapes with the normal horizontal font features.
+            let mut spans = display.text[range.clone()].char_indices().peekable();
+            while let Some((start, c)) = spans.next() {
+                let upright = vertical::vertical_forms(c);
+                while spans
+                    .next_if(|(_, ch)| vertical::vertical_forms(*ch) == upright)
+                    .is_some()
+                {}
+                let end = spans.peek().map_or(range.len(), |(i, _)| *i);
+                let span = range.start + start..range.start + end;
+                if upright {
+                    let tags = match features {
+                        Some(f) => format!(r#"{f}, "vert" 1, "vrt2" 1"#),
+                        None => r#""vert" 1, "vrt2" 1"#.into(),
+                    };
+                    builder.push(StyleProperty::FontFeatures(tags.as_str().into()), span);
+                } else if let Some(f) = features {
+                    builder.push(StyleProperty::FontFeatures(f.into()), span);
+                }
+            }
+        } else if let Some(f) = features {
             builder.push(StyleProperty::FontFeatures(f.into()), range);
         }
     }
@@ -605,7 +721,17 @@ fn shape_paragraph(
     } else {
         layout.set_alignment(Alignment::Left, AlignmentOptions::default());
     }
-    layout.break_all_lines(box_width);
+    if base.no_break {
+        layout.break_all_lines(None);
+    } else {
+        layout.break_all_lines(box_width);
+        if p.every_line
+            && let Some(width) = box_width
+            && layout.len() > 1
+        {
+            balance_lines(&mut layout, width);
+        }
+    }
 
     let mut word = out.chars.last().map_or(0, |c| c.word);
     let mut prev_breaks_word = true;
@@ -642,6 +768,11 @@ fn shape_paragraph(
         let baseline = match (line_index, paragraph) {
             (0, Some(b)) => b.y0 + ascent,
             (0, None) => 0.0,
+            // Top-to-Top: the leading runs from the previous line's top.
+            _ if p.top_leading => {
+                let prev = &out.lines[line_index - 1];
+                prev.baseline + leading + ascent - prev.ascent
+            }
             _ => out.lines[line_index - 1].baseline + leading,
         } + if local_line == 0 {
             p.space_before
@@ -663,8 +794,25 @@ fn shape_paragraph(
         // Width for alignment: trailing spaces hang, trailing tracking is excluded.
         let visible = f64::from(m.advance - m.hanging_advance);
         let has_glyphs = line.runs().any(|r| !r.is_empty());
+        // Roman Hanging Punctuation: punctuation at either end sits outside
+        // the margin, so the rest of the line aligns to it.
+        let (left_hang, right_hang) = if p.hanging_punctuation {
+            let mut clusters = line
+                .runs()
+                .flat_map(|r| r.visual_clusters().collect::<Vec<_>>())
+                .filter(|c| !c.is_space_or_nbsp() && !c.is_hard_line_break());
+            let first = clusters.next();
+            let last = clusters.last();
+            let left = first.as_ref().map_or(0., |c| hanging_advance(display, c));
+            (
+                left,
+                last.as_ref().map_or(left, |c| hanging_advance(display, c)),
+            )
+        } else {
+            (0., 0.)
+        };
         let width = if has_glyphs {
-            (visible - letter_spacing).max(0.0)
+            (visible - letter_spacing - left_hang - right_hang).max(0.0)
         } else {
             0.0
         };
@@ -694,7 +842,7 @@ fn shape_paragraph(
         };
         // parley positions are relative to its own line origin (offset included
         // when justifying); place them at (x, baseline).
-        let mut pen = x;
+        let mut pen = if justified_line { x } else { x - left_hang };
         let line_chars_start = out.chars.len();
         for run in line.runs() {
             let synthesis = run.synthesis();
@@ -709,6 +857,7 @@ fn shape_paragraph(
                         BaselineOption::Subscript => -style.font_size * 0.2,
                     };
                 let mut out_run = GlyphRun {
+                    basis: Affine::IDENTITY,
                     paint,
                     font: run.font().clone(),
                     font_size: run.font_size(),
@@ -765,6 +914,7 @@ fn shape_paragraph(
                     pen += f64::from(cluster.advance());
                     out.chars.push(TextChar {
                         right_to_left: run.is_rtl(),
+                        combined_em: None,
                         paint,
                         source: src,
                         line: line_index,
@@ -791,6 +941,66 @@ fn shape_paragraph(
 }
 
 /// Whether a cluster is a paragraph break or soft return in the display text.
+/// The advance a punctuation cluster hangs by (Roman Hanging Punctuation).
+fn hanging_advance<B: parley::Brush>(
+    display: &DisplayText,
+    cluster: &parley::Cluster<'_, B>,
+) -> f64 {
+    let hangs = |c: char| {
+        matches!(
+            c,
+            ',' | '.'
+                | ':'
+                | ';'
+                | '!'
+                | '?'
+                | '\''
+                | '"'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '\u{2018}'
+                | '\u{2019}'
+                | '\u{201c}'
+                | '\u{201d}'
+                | '\u{ab}'
+                | '\u{bb}'
+        )
+    };
+    let text = &display.text[cluster.text_range()];
+    if !text.is_empty() && text.chars().all(hangs) {
+        f64::from(cluster.advance())
+    } else {
+        0.0
+    }
+}
+
+/// Adobe Every-line Composer: the narrowest width that keeps the line count,
+/// so words spread evenly over the paragraph's lines.
+fn balance_lines<B: parley::Brush>(layout: &mut parley::Layout<B>, width: f32) {
+    let lines = layout.len();
+    let (mut low, mut high) = (0.0, width);
+    for _ in 0..8 {
+        let middle = (low + high) * 0.5;
+        layout.break_all_lines(Some(middle));
+        if layout.len() > lines {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    // Break at that width but keep the box as the layout width, so justified
+    // lines still fill the box.
+    let mut breaker = layout.break_lines();
+    breaker.state_mut().set_layout_max_advance(width);
+    breaker.state_mut().set_line_max_advance(high);
+    while breaker.break_next().is_some() {
+        breaker.state_mut().set_line_max_advance(high);
+    }
+    breaker.finish();
+}
+
 fn is_break<B: parley::Brush>(display: &DisplayText, cluster: &parley::Cluster<'_, B>) -> bool {
     display.text[cluster.text_range()]
         .chars()
@@ -827,6 +1037,24 @@ mod tests {
         assert_eq!(t.source_at(t.text.len() - 1), 8);
         assert_eq!(t.source_at(2), 2, "CRLF break maps to the CR");
         assert_eq!(t.source_range(3..4, 9), 4..5, "C after CRLF is char 4");
+    }
+
+    /// Character panel menu: Hindi Digits keep their source indices; Line
+    /// Join reaches the stroke.
+    #[test]
+    fn hindi_digits_and_line_join() {
+        let mut d = doc("A19");
+        d.style.hindi_digits = true;
+        d.style.line_join = TextJoin::Round;
+        d.style.stroke_color = Some([1.; 4]);
+        d.style.stroke_width = 2.;
+        let t = DisplayText::new(&d, &d.text, 0);
+        assert_eq!(t.text, "A\u{661}\u{669}");
+        assert_eq!(t.source_at(3), 2);
+        assert_eq!(
+            document_paint(&d.style).stroke.unwrap().join,
+            LineJoin::Round
+        );
     }
 
     #[test]
