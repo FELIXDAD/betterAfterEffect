@@ -105,7 +105,7 @@ Authorization: Bearer <令牌>
 - **在线状态**（`Presence`）由 `Relay` 转发：新连接马上收到所有人的状态；连接断开时，Hub 替它向其他人发"离开"。
 - **权限**：握手成功的响应（101）带 `x-bae-access: read` 或 `x-bae-access: write`，是这个连接按令牌和工程得到的权限。客户端用 `HubTransport::access()` 读出，应用据此在只读时禁用编辑、不发修改。没有这个头的旧 Hub，客户端当作"未知"，照常发送。
 - **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。只读连接发来的单条消息最大 16 MiB（`read_only_max_message_kib`），更大的读到帧头就断开连接，不会先收进内存；发给它们的消息照样可以很大。
-  - 客户端用只读令牌连接时（`/v1/status` 返回 `"access": "read"`），会话要设 `SessionConfig::send_data = false`（`bae_sync::Connection` 按握手响应的 `x-bae-access` 自己处理）：本地的修改不发出去，只收别人的。不设的话，会话会在 Hub 每个 `Hello`（5 秒一次）之后、每次重连之后把本地修改再发一遍，一个文档里超过上限就每次都被断开。
+  - 客户端用只读令牌连接时（`/v1/status` 返回 `"access": "read"`），会话要设 `SessionConfig::send_data = false`（`bae_sync::Connection` 按握手响应的 `x-bae-access: read` 自动设置）：本地的修改不发出去，只收别人的。不设的话，会话会在 Hub 每个 `Hello`（5 秒一次）之后、每次重连之后把本地修改再发一遍，一个文档里超过上限就每次都被断开。
   - 上限不能设得太小：`Hello` 随文档数和编辑过它们的会话数增长（每个文档、每个编辑过它的会话约 11 字节），超过上限的话这个查看者根本连不上。
 - **超时**：Hub 60 秒一个字节都没有收到某个客户端发来的东西，就断开这个连接（按字节算：一条很大的消息上传超过 60 秒，只要字节还在到就不断开）。正常客户端每 5 秒发一次 `Hello`，所以只有死掉的链路（比如合上盖子的笔记本）才会被断开。反过来，Hub 每 5 秒给每个客户端发一次 `Hello`，`bae_sync::Connection` 20 秒一个字节都没收到就当 Hub 不在了（`hub_idle_timeout`；Hub 断电、VPN 断开时不会有重置，TCP 要很多分钟才发现），所以 Hub 不能关掉这个定期 `Hello`。
 - **重连**：断线后重新 `connect`，再调用 `SyncSession::reset()`。双方交换 `Hello` 后各自补发对方缺的部分，什么都不会丢。

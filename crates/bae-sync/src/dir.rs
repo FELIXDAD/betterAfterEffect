@@ -427,7 +427,7 @@ impl DirTransport {
     /// (`Updates`, `Snapshot`) fails, our presence is not published, no lock is
     /// taken, and there is no cleanup of departed clients' files (§4.7: no
     /// compaction, no absorbing, nothing deleted, not even stale presence
-    /// files). Run the session with [`crate::SessionConfig::read_only`].
+    /// files). Run the session without [`crate::SessionConfig::send_data`].
     pub fn open_read_only(
         project: impl AsRef<Path>,
         client: ClientId,

@@ -67,11 +67,9 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
    - `SnapshotRequest`：记下来，等本轮收到的数据都导入之后再导出快照发回去（同一个文档一轮只答一次）。这样快照包含请求之前收到的一切：共享目录在交付自己日志里的记录之后才可能请求（启动时、重新交付时），并用这份快照覆盖自己的日志（4.3）。已经取出来的请求总是全部回答：本轮收消息时出错、或者前面某个回答发不出去（比如这个文档的日志写不了），后面的照样回答，最后返回第一个错误。它们已经不在传输层的队列里了，丢掉就再没人回答（`snapshot_requests_taken_before_a_failure_are_answered`、`a_failed_snapshot_answer_does_not_hold_back_other_documents`）。
 3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。被推迟的部分只有之后的 `pump` 才会发出，所以关闭连接前（最后一次 `pump` 之后）要调用 `SyncSession::flush`：不管 `min_send_interval`（也不管下面的 `max_backlog`），立即把对方缺的发出去（不收消息，也不发 `Hello` 和在线状态）。
 4. **流量控制**（`SessionConfig::max_backlog`，默认 16 MiB，和 `HubLimits::max_backlog` 一样）：传输层报告交给它、还没发出去的字节数（`Transport::backlog()`：Hub 连接写缓冲里等对方读的，`ThreadedTransport` 队列里后台线程还没交给内层传输的；默认实现返回 0，`send` 返回前就做完 I/O 的传输不用管）。第 3 步每发一个文档之前看一眼：超过 `max_backlog` 就停下，这一轮不再发任何文档的数据（照常收消息、发 `Hello`、在线状态、回答快照请求），积压降下来之后从停下的那个文档接着发，每个文档都轮得到。因为是发之前检查，积压低于上限时一条消息不管多大都能发出去（新客户端第一次同步一个很大的工程层），所以最多积压 `max_backlog` 加一条消息。没有它的话，对方每个 `Hello`（每 5 秒一次；慢链路上一次大传输比这长）都会让我们把它还没收完的全部再排一份（3.1）。`Hello` 看不出哪些还在路上，所以积压降下来时还在路上的那部分可能再发一次，但每次积压清空最多一次，而不是每个 `Hello` 一次。`SyncStats::held_back` 记暂停的次数；`None` 关闭流量控制。
-5. **不发数据**（`SessionConfig::send_data = false`，默认 `true`）：第 3 步和快照请求的回答都不做，`flush` 也什么都不发；`Hello`、在线状态、收消息照常。用在不能写的连接上：只读令牌的 Hub 连接（`GET /v1/status` 返回 `"access": "read"`）。Hub 反正丢弃只读连接发来的数据，而且只收它们不太大的消息（3.1）：不这样设的话，查看者本地的修改会在 Hub 每个 `Hello` 之后、每次重连之后再发一遍，一个文档里超过上限就每次都被断开。本地修改留在本地，`unsynced` 照样列出它们（`a_session_without_send_data_only_receives`）。
+5. **不发数据**（`SessionConfig::send_data = false`，默认 `true`；只读）：第 3 步和快照请求的回答都不做，`flush` 也什么都不发；`Hello`、在线状态、收消息照常。用在不能写的连接上：只读令牌的 Hub 连接（握手响应 `x-bae-access: read`，3.1；`GET /v1/status` 返回 `"access": "read"`）、这个用户写不了的共享目录（`DirTransport::open_read_only`，4.5）。`Connection` 按对方给的权限自动设置（7.5）。Hub 反正丢弃只读连接发来的数据，而且只收它们不太大的消息（3.1）：不这样设的话，查看者本地的修改会在 Hub 每个 `Hello` 之后、每次重连之后再发一遍，一个文档里超过上限就每次都被断开。本地修改留在本地，`unsynced` 照样列出它们；什么都没交给传输，所以也没有"在路上"的记录，对方确认了我们的 `Hello` 也不会把它们算作已同步（`a_session_without_send_data_only_receives`）。被第 4 步挡下的文档同样没交给传输、不算在路上：对方确认我们的 `Hello` 后照样缺它们，积压降下来就发（`documents_held_back_are_not_on_their_way`）。
 
 在收到对方第一个 `Hello` 之前不发任何数据（不知道对方有什么，全量发送太浪费）。
-
-**只读**（`SessionConfig::read_only`）：对方不接受我们的修改（只读令牌、写不了的共享目录，见 7.5）时打开。会话不发任何文档数据（`Updates`、`Snapshot`，也不回答 `SnapshotRequest`，`flush` 什么都不发），`Hello` 和在线状态照发，照常接收。本地修改一直留在 `unsynced` 里。
 
 **丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发（发出之后对方又确认了我们的一个 `Hello` 时，所以两边都要定期发 `Hello`）。断线重连时调用 `SyncSession::reset()`。验证：`tests/convergence.rs` 的 `random_schedules_converge_while_edits_go_on`，随机调度（Hub 或直连、2–4 个节点、丢包、重复、乱序、重连、后加进来的文档、导入失败、没有定期 `Hello` 的节点）在网络变好之后，大家继续编辑的同时，坏网络期间丢的在几个 `Hello` 间隔内补齐，停下后一致。默认跑 24 个调度，`BAE_SYNC_STRESS_SEEDS=n` 跑 n 个。
 
@@ -188,7 +186,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 第一次扫描完后，传输层发一个 `Hello`（`client` 为 `shared-folder`），版本 = 目录里所有记录和基础快照版本的并集。会话据此把目录里还没有的本地修改（比如离线时的修改）写进自己的日志。
 - 会话发来的 `Hello`：如果某个文档目录里的版本没有被会话的版本包含，就从头重新交付这个文档的所有日志（用于 2.5 的场景），然后回一个自己的 `Hello`（会话 `reset()` 之后靠它恢复）。
 - 共享目录会话的推荐设置：`hello_interval = None`（目录不会丢数据），`min_send_interval` 几百毫秒（`FOLDER_SEND_INTERVAL` = 300 ms，`Target::session_config`）；关闭前调用 `flush`（2.4）。
-- **只读打开**（`DirTransport::open_read_only`）：这个用户写不了 `updates/` 时用（`open` 建锁文件失败，错误是 `PermissionDenied` 或 `ReadOnlyFilesystem`，`Connection` 自动改用它，7.5）。照常读所有日志，自己以前写的日志也当作别人的读，不修复；什么都不写：不加锁、不写日志、不写在线状态文件，也不清理（4.7）：不压缩、不接管、不删任何文件（别人的日志、临时文件、锁文件、超过一天的心跳文件都不删），也不写探测服务器时钟的临时文件；发来的 `Updates` / `Snapshot` 返回错误，在线状态忽略。会话要设 `read_only`。
+- **只读打开**（`DirTransport::open_read_only`）：这个用户写不了 `updates/` 时用（`open` 建锁文件失败，错误是 `PermissionDenied` 或 `ReadOnlyFilesystem`，`Connection` 自动改用它，7.5）。照常读所有日志，自己以前写的日志也当作别人的读，不修复；什么都不写：不加锁、不写日志、不写在线状态文件，也不清理（4.7）：不压缩、不接管、不删任何文件（别人的日志、临时文件、锁文件、超过一天的心跳文件都不删），也不写探测服务器时钟的临时文件；发来的 `Updates` / `Snapshot` 返回错误，在线状态忽略。会话要设 `send_data = false`（2.4 第 5 步）。
 - 会话发来的 `Updates` → 追加到自己的日志；`Snapshot` → 压缩重写自己的日志（快照不包含整个日志时改为追加，见 4.3）。
 
 ### 4.6 验证（`crates/bae-sync/tests/shared_dir.rs`）
@@ -391,7 +389,7 @@ closing.wait(超时); // 退出时等关闭完成
 
 - `Target::Folder(工程目录)`：`DirTransport` 放在 `ThreadedTransport` 里；会话用 4.5 的推荐设置（`hello_interval = None`、`min_send_interval = 300 ms`）。
 - `Target::Hub { url, token }`（feature `hub`）：`HubTransport` 放在 `ThreadedTransport` 里；会话用默认设置（每 5 秒 `Hello`；Hub 60 秒一个字节都收不到会断开）。
-- `ConnectionConfig`：`client`；初始 `presence`；`wake`（只在后台线程调用，从不在 `Connection` 的方法里直接调用；接到"请求重绘"上，不能阻塞）；可选的 `session`（不给就用 `Target::session_config`，`client` 和 `read_only` 由连接管理决定）；`backoff`；`folder`（`DirConfig`）；`io_tick`（后台 I/O 线程查看新消息的间隔，默认 Hub 2 ms、共享目录 10 ms）；`io_stall`（链路 I/O 卡住多久算没同步，默认 5 秒，7.4）；`hub_timeout`（连接、握手每一步的超时，默认 10 秒）；`hub_limits`；`hub_idle_timeout`（Hub 静默多久算断开，默认 20 秒，`None` 不检查，7.4）。
+- `ConnectionConfig`：`client`；初始 `presence`；`wake`（只在后台线程调用，从不在 `Connection` 的方法里直接调用；接到"请求重绘"上，不能阻塞）；可选的 `session`（不给就用 `Target::session_config`；`client` 换成上面的；`send_data` 在对方只给 `Read` 时关掉，这里设成 `false` 的话一直不发，用于只看不改的客户端）；`backoff`；`folder`（`DirConfig`）；`io_tick`（后台 I/O 线程查看新消息的间隔，默认 Hub 2 ms、共享目录 10 ms）；`io_stall`（链路 I/O 卡住多久算没同步，默认 5 秒，7.4）；`hub_timeout`（连接、握手每一步的超时，默认 10 秒）；`hub_limits`（`HubLimits::default()`：两个方向单条消息 256 MiB；会话自己的流量控制是 `SessionConfig::max_backlog`，按整个链路的积压算：I/O 线程的队列加上 WebSocket 写缓冲，2.6）；`hub_idle_timeout`（Hub 静默多久算断开，默认 20 秒，`None` 不检查，7.4）。
 - `Target` 的 `Debug` 不打印令牌，URL 里的 `?token=` 也换成 `…`。
 
 ### 7.2 线程
@@ -443,7 +441,7 @@ closing.wait(超时); // 退出时等关闭完成
 
 - Hub：握手响应里的 `x-bae-access`（3.1）。旧 Hub 不发，`access` 是 `Unknown`，照常发送修改，由 Hub 决定收不收。
 - 共享目录：连接线程上 `DirTransport::open` 在 `updates/` 里建锁文件，失败且错误是 `PermissionDenied` / `ReadOnlyFilesystem` 时改用 `DirTransport::open_read_only`（4.5），`access` 为 `Read`；否则为 `Write`。`open` 遇到 `PermissionDenied` 会先重试 2 秒（可能是清理者刚删掉、还处于"等待删除"的锁文件，4.7），所以连接写不了的目录要多等这 2 秒；这发生在连接线程上，不卡 `pump`。只读打开的目录不清理（4.5）。
-- `Read` 时会话设为 `read_only`（2.4）：不发任何修改，`Hello` 和在线状态照发（共享目录只读时在线状态不写），照常接收；本地修改留在 `unsynced` 里，状态栏如实显示。应用应在 `Read` 时禁用编辑。
+- `Read` 时会话的 `send_data` 关掉（2.4 第 5 步）：不发任何修改，`Hello` 和在线状态照发（共享目录只读时在线状态不写），照常接收；本地修改留在 `unsynced` 和 `Closing::unsynced` 里，状态栏如实显示。应用应在 `Read` 时禁用编辑。`Write` / `Unknown` 时用配置里的 `send_data`（默认 `true`）。Hub 对只读连接只收不太大的消息（`read_only_max_incoming`，3.1）：只读客户端本来就不发数据，本地改了多少都不会被断开（`a_read_only_token_reads_but_sends_no_edits`：上限 64 KiB、本地改了 256 KiB，连接一直不断）。
 - 还没做：不发 `x-bae-access` 的旧 Hub 不会再用 `GET /v1/status` 查一次。
 
 ### 7.6 在线状态
@@ -471,7 +469,7 @@ closing.wait(超时); // 退出时等关闭完成
 - 两个应用经共享目录、经 Hub 收敛，`unsynced` 清零，互相看到在线状态；什么都不变时 `generation` 不变。
 - Hub 停掉：三个应用都 `Offline`，`peers` 为 0，`access` 保留；重试间隔 200、400、800 ms（测试设置）。离线继续编辑。新 Hub 在同一端口、同一数据目录启动后，留下的两个自动重连、收敛，离线修改都在；对方的在线状态马上回来（心跳间隔设成 1 分钟、在线状态 3 分钟才过期，证明是重连时重新发布的；去掉 6.2 的修复或重连时的 `reset` 就超时）。
 - 错误令牌、没有令牌（401）、令牌不能开这个工程（403）、只读令牌开不存在的工程（404）、工程 ID 不合法（400）：`Failed`，之后 300 ms 内不再尝试，`retry()` 只试一次。
-- 只读令牌：`access = Read`；收得到别人的修改；自己的修改不发出去（`bytes_sent = 0`），`unsynced` 为真；在线状态照常可见。共享目录 `updates/` 不可写时同样，什么文件都不写（Unix；root 不受权限限制时跳过，测试时用去掉 `CAP_DAC_OVERRIDE` 的 root 跑过）。
+- 只读令牌：`access = Read`；收得到别人的修改；自己的修改不发出去（`bytes_sent = 0`），`unsynced` 为真；在线状态照常可见；Hub 的只读上限设成 64 KiB、本地改了 256 KiB 也不被断开（只连了一次）。配置里 `send_data = false` 的客户端在可写的共享目录上同样什么都不写，`access` 仍是 `Write`，`Closing::unsynced` 列出改过的文档（`a_viewer_sends_no_edits_where_it_could`）。共享目录 `updates/` 不可写时同样，什么文件都不写（Unix；root 不受权限限制时跳过，测试时用去掉 `CAP_DAC_OVERRIDE` 的 root 跑过）。
 - 关闭：最后一次修改被 `min_send_interval` 推迟时也能送到（共享目录 300 ms；Hub 测试里设成 1 秒，去掉 `flush` 就收不到），"离开"立即可见，`Closing` 成功；之后加入 Hub 的人也拿到。Hub 确认关闭这一点由 `tests/hub.rs` 验证（`ThreadedTransport(HubTransport)` 关闭时 20 MiB 的最后一条已经送到）；回环上直接丢弃也能送到，这里区分不出来。
 - 共享目录还不存在：按退避重试，出现后加入并写进去。同一个 `ClientId` 已经在用：先照常重试 2 秒，然后 `Failed`、不再自动重试，对方退出后 `retry()` 成功。丢弃或关闭后立即重新分享同一个目录（6 轮）不报冲突；旧链路的 I/O 卡在 NAS 读里超过 2 秒宽限时，新连接等它放开再连上，不报 `ClientIdInUse`（单元测试）。
 - 连接只接受 TCP、永不握手的地址：500 ms 里每次 `pump` 不到 0.1 ms（上限 250 ms），状态一直是 `Connecting`，`close` 也立即返回。连接线程已经做好链路、I/O 线程卡在读里时 `close` 或丢弃，调用线程不等（单元测试）。

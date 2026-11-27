@@ -455,7 +455,7 @@ fn a_folder_we_cannot_write_is_joined_read_only() {
     });
     assert_eq!(reader.conn.access(), Access::Read);
     assert_eq!(reader.conn.status().access, Access::Read);
-    assert!(reader.conn.session().config().read_only);
+    assert!(!reader.conn.session().config().send_data);
 
     reader.set_opacity(9.0);
     let started = Instant::now();
@@ -467,6 +467,38 @@ fn a_folder_we_cannot_write_is_joined_read_only() {
     assert_eq!(reader.conn.session().stats().bytes_sent, 0);
     assert!(!updates.join("root/reader.log").exists());
     assert!(!dir.join("presence/reader.presence").exists());
+}
+
+/// A session configured not to send data (a viewer) keeps it off on a
+/// folder it could write: the access is reported, the edits stay unsynced.
+#[test]
+fn a_viewer_sends_no_edits_where_it_could() {
+    let (_tmp, dir) = project_dir();
+    let mut cfg = config("viewer");
+    let mut session = Target::Folder(dir.clone()).session_config(cfg.client.clone());
+    session.send_data = false;
+    cfg.session = Some(session);
+    let mut v = App::join(&dir, cfg);
+    wait("viewer online", LONG, || {
+        v.pump();
+        v.conn.is_online()
+    });
+    assert_eq!(v.conn.access(), Access::Write);
+    assert!(!v.conn.session().config().send_data);
+    v.set_opacity(4.0);
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(500) {
+        v.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(v.conn.status().unsynced);
+    assert_eq!(v.conn.session().stats().bytes_sent, 0);
+    assert!(!dir.join("updates/root/viewer.log").exists());
+    let closing = v.conn.close(&mut v.stage);
+    assert_eq!(
+        closing.unsynced(),
+        [bae_sync::DocKey::sublayer(&SublayerId::root())]
+    );
 }
 
 /// Connecting to a hub that never answers (the handshake hangs until the

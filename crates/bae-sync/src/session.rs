@@ -159,21 +159,20 @@ pub struct SessionConfig {
     /// 16 MiB, the hub link's default `HubLimits::max_backlog`.
     pub max_backlog: Option<usize>,
     /// Send document data (`Updates`, and `Snapshot` answers to snapshot
-    /// requests). `false` on a link that may not write: a hub connection with
-    /// a read-only token (`GET /v1/status` says `"access": "read"`). The hub
-    /// drops such data anyway, and takes only small messages from read-only
-    /// connections (its `read_only_max_incoming`): a viewer with more local
-    /// edits than that in one document would be dropped each time it sent
-    /// them, which is after every `Hello` of the hub and every reconnect.
-    /// `Hello`s, presence and receiving go on as usual; local edits stay local
-    /// ([`unsynced`](SyncSession::unsynced) keeps listing them). Default `true`.
+    /// requests; also not on [`flush`](SyncSession::flush)). `false` on a link
+    /// that may not write: a hub connection with a read-only token (the
+    /// handshake's `x-bae-access: read`, `HubTransport::access`; `GET
+    /// /v1/status` says `"access": "read"`), a shared folder this user cannot
+    /// write ([`crate::DirTransport::open_read_only`]). [`crate::Connection`]
+    /// sets it from the access the remote granted. The hub drops such data
+    /// anyway, and takes only small messages from read-only connections (its
+    /// `read_only_max_incoming`): a viewer with more local edits than that in
+    /// one document would be dropped each time it sent them, which is after
+    /// every `Hello` of the hub and every reconnect. `Hello`s, presence and
+    /// receiving go on as usual; local edits stay local
+    /// ([`unsynced`](SyncSession::unsynced) keeps listing them, nothing counts
+    /// as on its way). Default `true`.
     pub send_data: bool,
-    /// The remote does not take our edits (a read-only hub token, a folder we
-    /// cannot write): never send document data (`Updates`, `Snapshot`, also
-    /// not in answer to a `SnapshotRequest`). `Hello` and presence still go
-    /// out and everything is received as usual. Local edits stay in
-    /// [`SyncSession::unsynced`].
-    pub read_only: bool,
 }
 
 impl SessionConfig {
@@ -187,7 +186,6 @@ impl SessionConfig {
             presence_ttl: Duration::from_secs(20),
             max_backlog: Some(DEFAULT_MAX_BACKLOG),
             send_data: true,
-            read_only: false,
         }
     }
 }
@@ -484,8 +482,7 @@ impl SyncSession {
     /// no `Hello` or presence goes out. Call it after the last [`pump`](Self::pump) before
     /// closing a link whose sends may be held back, or the last edits never
     /// leave. Sends nothing before the remote's first `Hello` (we do not know
-    /// what it has), and nothing without [`SessionConfig::send_data`] or when
-    /// [`SessionConfig::read_only`].
+    /// what it has), and nothing without [`SessionConfig::send_data`].
     ///
     /// Only [`PumpOutcome::sent`] and [`PumpOutcome::errors`] are filled in.
     /// Errors are transport failures, as in [`pump`](Self::pump).
@@ -645,7 +642,7 @@ impl SyncSession {
 
     /// Answer a `SnapshotRequest` (after this pump's import): a snapshot of the
     /// whole document. Documents we do not have are not answered, nor is
-    /// anything without `send_data` or when [`SessionConfig::read_only`].
+    /// anything without `send_data`.
     fn send_snapshot(
         &mut self,
         docs: &dyn DocSet,
@@ -653,7 +650,7 @@ impl SyncSession {
         doc: DocKey,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        if self.config.read_only || !self.config.send_data {
+        if !self.config.send_data {
             return Ok(());
         }
         let Some(version) = docs.version(&doc) else {
@@ -763,7 +760,7 @@ impl SyncSession {
         flow: bool,
         out: &mut PumpOutcome,
     ) -> Result<bool, SyncError> {
-        if self.config.read_only || !self.config.send_data {
+        if !self.config.send_data {
             return Ok(false);
         }
         let Some(mut remote) = self.remote.take() else {
@@ -1037,5 +1034,81 @@ mod tests {
         assert!(!kinds.contains(&"data"), "{kinds:?}");
         assert_eq!(s.stats().bytes_sent, 0);
         assert_eq!(s.unsynced(&docs), [key("a")]);
+        // Nothing sent, nothing on its way: the hub's next `Hello`, which
+        // acknowledges ours, still leaves the edit unsynced.
+        assert!(s.in_flight.0.is_empty());
+        let seq = s.hello_seq;
+        t.inbox.push_back(Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            client: hub,
+            versions: vec![(key("b"), theirs.oplog_vv())],
+            seq: 2,
+            ack: Some(seq),
+        });
+        s.pump(&mut docs, &mut t).unwrap();
+        assert!(s.in_flight.0.is_empty());
+        assert_eq!(s.unsynced(&docs), [key("a")]);
+    }
+
+    /// Flow control and the in-flight records (`Hello` `seq`/`ack`) work
+    /// together: a document held back for the backlog was not handed to the
+    /// transport, so it is not on its way. The remote's `Hello` that
+    /// acknowledges ours and lacks it leaves it to be sent once the backlog
+    /// drained, and unsynced until then (were it recorded as in flight, it
+    /// would count as sent for good and never go out).
+    #[test]
+    fn documents_held_back_are_not_on_their_way() {
+        let mut docs = MemDocs::new();
+        for (i, doc) in ["a", "b", "c"].into_iter().enumerate() {
+            let d = bae_model::loro::LoroDoc::new();
+            d.get_map("m")
+                .insert("v", text(i as u64 + 11, 4000))
+                .unwrap();
+            d.commit();
+            let snapshot = d.export(bae_model::loro::ExportMode::Snapshot).unwrap();
+            docs.load(key(doc), &snapshot).unwrap();
+        }
+        let mut config = SessionConfig::new(ClientId::new("app").unwrap());
+        // Our `Hello`s are numbered and acknowledged (a hub link); only the
+        // first goes out here.
+        config.hello_interval = Some(Duration::from_secs(3600));
+        config.max_backlog = Some(1000);
+        let mut s = SyncSession::new(config);
+        let hub = ClientId::new("hub").unwrap();
+        let hello = |seq, ack| Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            client: hub.clone(),
+            versions: Vec::new(),
+            seq,
+            ack,
+        };
+        let mut t = Lagging::default();
+        // The hub has nothing (its first `Hello`, before it saw ours).
+        t.inbox.push_back(hello(1, None));
+        s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(t.data_sent(), ["a"]);
+        let in_flight = |s: &SyncSession| {
+            s.in_flight
+                .0
+                .keys()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(in_flight(&s), ["a"]);
+        assert_eq!(s.unsynced(&docs), [key("b"), key("c")]);
+        // The hub acknowledges our `Hello` and still lists nothing: `a` may
+        // be on its way, `b` and `c` were never sent.
+        t.inbox.push_back(hello(2, Some(s.hello_seq)));
+        s.pump(&mut docs, &mut t).unwrap();
+        assert!(t.data_sent().is_empty(), "the backlog holds them back");
+        assert_eq!(in_flight(&s), ["a"]);
+        assert_eq!(s.unsynced(&docs), [key("b"), key("c")]);
+        for want in ["b", "c"] {
+            t.backlog = 0;
+            s.pump(&mut docs, &mut t).unwrap();
+            assert_eq!(t.data_sent(), [want]);
+        }
+        assert_eq!(in_flight(&s), ["a", "b", "c"]);
+        assert!(s.unsynced(&docs).is_empty());
     }
 }

@@ -457,7 +457,7 @@ fn a_read_only_session_receives_but_never_sends_edits() {
     let (mut sa, mut sb) = (client_stage(&base), client_stage(&base));
     let mut a = SyncSession::new(SessionConfig::new(ClientId::new("writer").unwrap()));
     let mut config = SessionConfig::new(ClientId::new("reader").unwrap());
-    config.read_only = true;
+    config.send_data = false;
     let mut b = SyncSession::new(config);
     let (wa, wb) = (author("user:writer"), author("user:reader"));
     let (mut ra, mut rb) = (Rng::new(1), Rng::new(2));

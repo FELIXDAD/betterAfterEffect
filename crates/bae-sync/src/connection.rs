@@ -194,7 +194,9 @@ pub struct ConnectionConfig {
     /// Hook it to "request a repaint". It must not block.
     pub wake: Arc<dyn Fn() + Send + Sync>,
     /// Session settings; `None`: [`Target::session_config`]. `client` is
-    /// replaced by the one above, `read_only` follows [`Connection::access`].
+    /// replaced by the one above. [`SessionConfig::send_data`] is turned off
+    /// while the remote grants [`Access::Read`] ([`Connection::access`]);
+    /// `false` here keeps it off whatever the access (a viewer).
     pub session: Option<SessionConfig>,
     pub backoff: Backoff,
     /// Shared-folder settings.
@@ -209,7 +211,10 @@ pub struct ConnectionConfig {
     /// Hubs: timeout of each connect step (TCP connect, handshake).
     #[cfg(feature = "hub")]
     pub hub_timeout: Duration,
-    /// Hubs: message size and stall limits.
+    /// Hubs: message size, write-buffer and stall limits of the link
+    /// ([`HubLimits::default`]: 256 MiB messages both ways). The session's
+    /// flow control is its own `max_backlog`, counted over the link's whole
+    /// backlog (its I/O thread's queue and the WebSocket's write buffer).
     #[cfg(feature = "hub")]
     pub hub_limits: HubLimits,
     /// Hubs: a link on which not a byte arrived for this long is lost (the hub
@@ -594,6 +599,9 @@ pub struct Connection {
     target: Target,
     config: ConnectionConfig,
     session: SyncSession,
+    /// [`SessionConfig::send_data`] as configured: the session sends data
+    /// while this is set and the remote grants more than [`Access::Read`].
+    send_data: bool,
     phase: Phase,
     access: Access,
     /// Failed attempts in a row since the last stable link.
@@ -629,7 +637,7 @@ impl Connection {
             .clone()
             .unwrap_or_else(|| target.session_config(config.client.clone()));
         session_config.client = config.client.clone();
-        session_config.read_only = false;
+        let send_data = session_config.send_data;
         let mut session = SyncSession::new(session_config);
         if let Some(p) = config.presence.clone() {
             session.set_presence(p);
@@ -640,6 +648,7 @@ impl Connection {
             target,
             config,
             session,
+            send_data,
             phase: Phase::Closed,
             access: Access::Unknown,
             failures: 0,
@@ -909,7 +918,7 @@ impl Connection {
                 // A new remote: both sides say what they have, then send
                 // each other what is missing. Our presence goes out again.
                 self.session.reset();
-                self.session.config_mut().read_only = !link.access.can_write();
+                self.session.config_mut().send_data = self.send_data && link.access.can_write();
                 self.access = link.access;
                 self.in_use_since = None;
                 // Ours now: no longer counts as being let go.
@@ -1130,7 +1139,7 @@ impl Connection {
             Phase::Linked { transport, .. } => {
                 let c = self.session.config();
                 let mut at = if self.unsynced
-                    && !c.read_only
+                    && c.send_data
                     && self.session.is_connected()
                     && !c.min_send_interval.is_zero()
                 {

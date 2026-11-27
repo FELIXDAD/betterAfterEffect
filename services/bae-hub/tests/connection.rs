@@ -405,11 +405,15 @@ fn refused_connections_need_attention_not_a_retry_loop() {
 
 /// A read-only token: the hub says so in the handshake, the app gets
 /// everything but sends none of its own edits (and says they are unsynced);
-/// its presence still goes out.
+/// its presence still goes out. The hub takes only small messages from
+/// read-only connections (`read_only_max_incoming`): local edits larger than
+/// that do not get the reader dropped, since it never sends them.
 #[test]
 fn a_read_only_token_reads_but_sends_no_edits() {
     let data = tempfile::tempdir().unwrap();
-    let hub = start(config(data.path()));
+    let mut cfg = config(data.path());
+    cfg.read_only_max_incoming = 64 << 10;
+    let hub = start(cfg);
     let base = base_snapshots();
     let mut w = App::join(hub.local_addr(), WRITE, "writer", &base);
     w.set_opacity(5.0);
@@ -429,12 +433,29 @@ fn a_read_only_token_reads_but_sends_no_edits() {
     assert_eq!(r.conn.status().access, Access::Read);
     assert_eq!(w.conn.access(), Access::Write);
 
-    // The app greys out editing; an edit made anyway stays local.
+    // The app greys out editing; edits made anyway stay local, also one over
+    // the hub's limit for read-only connections.
     r.create_layer("reader_only");
+    let big: String = (0..256 << 10)
+        .map(|i: u32| char::from(b'a' + (i.wrapping_mul(2_654_435_761) >> 27) as u8 % 26))
+        .collect();
+    r.stage.set_edit_target(&SublayerId::root()).unwrap();
+    r.stage
+        .transact(&r.who, "note", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main"),
+                attr: "note".into(),
+                value: Some(Value::String(big)),
+            })
+        })
+        .unwrap();
     pump_for(&mut [&mut w, &mut r], Duration::from_millis(500));
     assert!(!w.has_layer("reader_only"));
     assert!(r.conn.status().unsynced);
     assert_eq!(r.conn.session().stats().bytes_sent, 0);
+    assert!(!r.conn.session().config().send_data);
+    assert!(r.conn.is_online());
+    assert_eq!(r.conn.connect_attempts(), 1, "never dropped");
 
     // It keeps receiving, and is seen.
     w.set_opacity(6.0);

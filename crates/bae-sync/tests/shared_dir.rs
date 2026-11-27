@@ -599,7 +599,7 @@ fn a_folder_opened_read_only_is_read_but_never_written() {
     let mut stage = Project::open(&dir).unwrap().stage;
     let mut config = SessionConfig::new(ClientId::new("reader").unwrap());
     config.hello_interval = None;
-    config.read_only = true;
+    config.send_data = false;
     let mut session = SyncSession::new(config);
     session.set_presence(bae_sync::PresenceState::default());
     for _ in 0..3 {
@@ -1397,7 +1397,7 @@ fn a_folder_opened_read_only_cleans_nothing_up() {
     let mut stage = Project::open(&dir).unwrap().stage;
     let mut session_config = SessionConfig::new(id);
     session_config.hello_interval = None;
-    session_config.read_only = true;
+    session_config.send_data = false;
     let mut session = SyncSession::new(session_config);
     for _ in 0..5 {
         let out = session.pump(&mut stage, &mut reader).unwrap();

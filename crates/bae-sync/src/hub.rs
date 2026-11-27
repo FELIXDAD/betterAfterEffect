@@ -448,7 +448,7 @@ impl HubTransport {
     /// Client side: what the hub said this connection may do
     /// ([`ACCESS_HEADER`]); [`Access::Unknown`] if it did not say (older
     /// hubs). A read-only connection's edits are dropped by the hub, so the
-    /// client should not send them ([`crate::SessionConfig::read_only`]).
+    /// client should not send them ([`crate::SessionConfig::send_data`]).
     /// Server side: what [`accept_granting`](Self::accept_granting) announced.
     pub fn access(&self) -> Access {
         self.access
