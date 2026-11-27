@@ -342,6 +342,31 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     (rest.is_empty() || rest.starts_with('/')).then_some(rest)
 }
 
+/// Files in the selected image's directory with the same extension, in filename order.
+pub fn alphabetical_frames(file: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let dir = file
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path
+            .extension()
+            .zip(file.extension())
+            .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+            && !path
+                .file_name()
+                .is_some_and(|s| s.to_string_lossy().starts_with('.'))
+            && path.is_file()
+        {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -44,8 +44,11 @@ impl AutoSave {
         now: Instant,
         prefs: &Preferences,
         doc: &crate::document::Document,
+        queue: Option<&bae_ui_motion::SharedRenderQueue>,
     ) -> Option<anyhow::Result<PathBuf>> {
-        if self.deadline(prefs).is_none_or(|d| now < d) {
+        let started = queue.is_some_and(|q| q.lock().take_render_start());
+        let on_render = started && prefs.bool("project.auto_save_on_render_queue");
+        if !on_render && self.deadline(prefs).is_none_or(|d| now < d) {
             return None;
         }
         self.since = now;
@@ -53,17 +56,13 @@ impl AutoSave {
             return None;
         }
         let target = target(doc.location(), &doc.display_name(), prefs)?;
-        Some(
-            std::fs::create_dir_all(target.parent().unwrap_or(Path::new(".")))
-                .map_err(anyhow::Error::from)
-                .and_then(|()| {
-                    if target.exists() {
-                        std::fs::remove_dir_all(&target)?;
-                    }
-                    doc.save_copy(&target)
-                })
-                .map(|()| target),
-        )
+        if target.exists() && !target.join("project.json").is_file() {
+            return Some(Err(anyhow::anyhow!(
+                "Auto-save destination already in use: {}",
+                target.display()
+            )));
+        }
+        Some(doc.save_copy(&target).map(|()| target))
     }
 }
 
@@ -142,11 +141,14 @@ mod tests {
         let doc = crate::document::Document::new(None);
         let mut auto = AutoSave::default();
         let start = auto.since;
-        assert!(auto.tick(start, &prefs, &doc).is_none(), "not due yet");
+        assert!(
+            auto.tick(start, &prefs, &doc, None).is_none(),
+            "not due yet"
+        );
         let due = auto.deadline(&prefs).unwrap();
         assert_eq!(due - start, Duration::from_secs(5 * 60));
         // Due, but nothing changed: no copy, timer restarts.
-        assert!(auto.tick(due, &prefs, &doc).is_none());
+        assert!(auto.tick(due, &prefs, &doc, None).is_none());
         assert!(auto.deadline(&prefs).unwrap() > due);
         let mut off = prefs.clone();
         off.set(keys::AUTO_SAVE, false);

@@ -64,11 +64,13 @@ fn position(h: &Ui, layer: &PrimPath) -> [f64; 3] {
     }
 }
 
-/// The magnification dropdown's text ("Fit", "50%" …).
+/// The magnification popup's text: "Fit" while fitted (AE shows the fitted
+/// value in parentheses, "(50%)"), else the step ("200%").
 fn magnification(h: &Ui) -> String {
-    let labels = [
-        "Fit", "12.5%", "25%", "33.3%", "50%", "100%", "200%", "400%",
-    ];
+    if !find_texts(h, |t| t.starts_with('(') && t.ends_with("%)")).is_empty() {
+        return "Fit".to_owned();
+    }
+    let labels = ["12.5%", "25%", "33.3%", "50%", "100%", "200%", "400%"];
     labels
         .into_iter()
         .find(|l| h.root().query_by_label(l).is_some())
@@ -351,7 +353,6 @@ fn tools_without_viewer_actions_do_nothing_there() {
     let c = canvas(&h).center();
     for (m, k) in [
         (Modifiers::COMMAND, Key::B),
-        (Modifiers::COMMAND, Key::P),
         (Modifiers::ALT, Key::W),
         (Modifiers::NONE, Key::C),
         (Modifiers::SHIFT, Key::D),

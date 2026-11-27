@@ -32,9 +32,9 @@ fn keys_unique_and_defaults_valid() {
     let mut seen = std::collections::HashSet::new();
     let defaults = Preferences::default();
     // 214 controls in R1's data: 205 stored values (label entries hold a color and
-    // a name; buttons, notes, the device table and the preview hold none) + 1 hidden,
+    // a name; buttons, notes, the device table and the preview hold none) + 2 hidden,
     // BAE's Appearance > Language and Memory & CPU > GPU Preview Cache.
-    assert_eq!(schema::all().len(), 208);
+    assert_eq!(schema::all().len(), 209);
     for p in schema::all() {
         assert!(seen.insert(p.key), "duplicate key {}", p.key);
         let v = defaults.get(p.key).unwrap();
@@ -279,4 +279,27 @@ fn file_roundtrip_and_corrupt_fallback() {
     let (odd, _) = PrefsStore::open(&path);
     assert_eq!(odd.current().levels_of_undo(), 1000);
     assert_eq!(odd.current().auto_save_minutes(), Some(30));
+}
+
+#[test]
+fn measured_limits_follow_the_machine_until_the_user_sets_a_value() {
+    let mut p = Preferences::default();
+    p.set_installed_ram(128 << 30);
+    p.set_cache_free_space(431 << 30);
+    assert_eq!(p.int(keys::RAM_RESERVED_GB), 24);
+    assert_eq!(p.int(keys::DISK_LIMIT_GB), 43);
+    assert!(!p.to_json().contains_key(keys::DISK_LIMIT_GB));
+    p.set(keys::RAM_RESERVED_GB, 500);
+    p.set(keys::DISK_LIMIT_GB, 60);
+    p.set_cache_free_space(300 << 30);
+    assert_eq!(p.int(keys::RAM_RESERVED_GB), 126);
+    assert_eq!(p.int(keys::DISK_LIMIT_GB), 60);
+    let mut reopened = Preferences::from_json(&p.to_json()).0;
+    reopened.set_installed_ram(16 << 30);
+    reopened.set_cache_free_space(300 << 30);
+    assert_eq!(reopened.int(keys::RAM_RESERVED_GB), 14);
+    assert_eq!(reopened.int(keys::DISK_LIMIT_GB), 60);
+    let reset = reopened.factory_defaults();
+    assert_eq!(reset.int(keys::RAM_RESERVED_GB), 3);
+    assert_eq!(reset.int(keys::DISK_LIMIT_GB), 30);
 }

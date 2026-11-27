@@ -14,6 +14,47 @@ pub const PROJECT: &str = "/project";
 
 pub struct SetProjectSettings;
 
+/// Edit a descriptive XMP property of a project or project item.
+pub struct SetMetadata;
+
+pub(crate) fn is_metadata_field(field: &str) -> bool {
+    matches!(field.split_once(':'), Some(("dc" | "xmpDM", name)) if !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric()))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct MetadataParams {
+    #[serde(default)]
+    pub items: Vec<PrimPath>,
+    pub field: String,
+    pub text: String,
+}
+
+impl Command for SetMetadata {
+    type Params = MetadataParams;
+    type Output = ();
+    const ID: &'static str = "item.set_metadata";
+    const TITLE: &'static str = "Edit Metadata";
+    const DESCRIPTION: &'static str =
+        "Edit an XMP text property in the project. Omit items for project metadata.";
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        if !is_metadata_field(&p.field) {
+            return Err(fail("expected a Dublin Core or Dynamic Media field"));
+        }
+        if p.items.is_empty() {
+            let path = PrimPath::new(PROJECT).map_err(|e| fail(e.to_string()))?;
+            if !tx.stage().has_prim(&path) {
+                create(tx, &path, PrimType::PROJECT, None)?;
+            }
+            return set(tx, &path, &p.field, Value::String(p.text));
+        }
+        for path in &p.items {
+            tx.stage().require_prim(path)?;
+            set(tx, path, &p.field, Value::String(p.text.clone()))?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct ProjectSettingsParams {
     /// Bits per channel: `8`, `16` or `32`.

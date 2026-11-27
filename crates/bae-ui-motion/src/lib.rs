@@ -31,6 +31,7 @@ mod common;
 mod context_menu;
 pub mod demo;
 pub mod dialogs;
+pub mod disk_frames;
 pub mod effects;
 mod expr;
 mod expr_menu;
@@ -49,6 +50,7 @@ pub mod menus;
 mod paint_panels;
 mod panel_columns;
 mod panels;
+mod path_menu;
 mod path_nulls;
 mod playback;
 mod prefs;
@@ -62,6 +64,7 @@ mod render;
 pub mod render_queue;
 pub mod scopes;
 pub mod scripts;
+mod scriptui;
 pub mod session;
 mod source_view_menu;
 mod timeline;
@@ -141,6 +144,7 @@ impl AppModule for MotionUiModule {
         app.add_module(bae_motion::MotionModule);
         app.add_module(bae_script::ScriptModule);
         bae_ui::i18n::register(scripts::ZH);
+        bae_ui::i18n::register(scriptui::ZH);
         // Every module registers its own Chinese strings and panels.
         for register in MODULES {
             register(app);
@@ -237,6 +241,7 @@ impl AppModule for MotionUiModule {
         let scripts_dir = app
             .resource::<bae_platform::AppDirs>()
             .map(|d| d.data.join("Scripts"));
+        scriptui::install(app, scripts_dir.as_deref());
         let menu = app.registry::<MenuItemSpec>();
         if let Some(dir) = &scripts_dir {
             scripts::register_menu(&menu, &owner, dir);

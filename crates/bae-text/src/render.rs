@@ -24,6 +24,34 @@ use vello::{FontEmbolden, Glyph, NormalizedCoord};
 use crate::fonts::FontSystem;
 use crate::layout::{GlyphRun, PositionedGlyph, TextLayout, TextPaint, layout_text};
 
+/// Rasterize a family sample for the Character menu during background warm-up.
+pub fn font_menu_sample(fonts: &mut FontSystem, family: &str, width: u16, height: u16) -> Vec<u8> {
+    let doc = TextDocument::new("Aa", family, 32.0);
+    let layout = layout_text(fonts, &doc);
+    let mut ctx = vello_cpu::RenderContext::new(width, height);
+    if let Some(bounds) = layout.bounds(false) {
+        let w = f64::from(width);
+        let h = f64::from(height);
+        let scale = ((w - 2.0) / bounds.width().max(1.0))
+            .min((h - 2.0) / bounds.height().max(1.0))
+            .min(1.0);
+        let center = bounds.center();
+        let transform = Affine::translate((w * 0.5 - center.x * scale, h * 0.5 - center.y * scale))
+            * Affine::scale(scale);
+        draw_cpu(&mut ctx, &layout, transform);
+    }
+    ctx.flush();
+    let mut pixmap = vello_cpu::Pixmap::new(width, height);
+    ctx.render(&mut pixmap, &mut vello_cpu::Resources::new());
+    pixmap
+        .data_as_u8_slice()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| pixel[3])
+        .collect()
+}
+
 /// Appends `text` to `scene` with `transform` (layer space → target pixels).
 pub fn encode(scene: &mut vello::Scene, text: &TextLayout, transform: Affine) {
     encode_clipped(scene, text, transform, None);
@@ -153,10 +181,15 @@ fn draw(
         .font_size(run.font_size)
         .transform(transform)
         .normalized_coords(coords);
-    if skew != 0.0 {
+    if skew != 0.0 || run.basis != Affine::IDENTITY {
         // Vello applies the glyph transform in font space (y up): leaning right
         // moves points above the baseline (y > 0) to +x.
-        builder = builder.glyph_transform(Some(Affine::new([1.0, 0.0, skew, 1.0, 0.0, 0.0])));
+        builder = builder.glyph_transform(Some(
+            Affine::FLIP_Y
+                * run.basis
+                * Affine::FLIP_Y
+                * Affine::new([1.0, 0.0, skew, 1.0, 0.0, 0.0]),
+        ));
     }
     if run.embolden > 0.0 {
         let e = f64::from(run.embolden);
@@ -310,6 +343,34 @@ pub fn draw_cpu(ctx: &mut vello_cpu::RenderContext, text: &TextLayout, transform
     }
 }
 
+/// Rasterizes the editable layer preview with the same outlines and paints as
+/// a render, `scale` pixels per layer pixel (the screen's, so it stays sharp
+/// on Retina and zoomed in), at most 4096 pixels on a side.
+pub fn preview_image(layout: &TextLayout, scale: f64) -> Option<(Rect, vello_cpu::Pixmap)> {
+    let ink = layout.bounds(true)?.inflate(1., 1.).expand();
+    let scale = (4096. / ink.width().max(ink.height())).min(scale.max(0.01));
+    let width = (ink.width() * scale).ceil() as u16;
+    let height = (ink.height() * scale).ceil() as u16;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let mut ctx = vello_cpu::RenderContext::new(width, height);
+    draw_cpu(
+        &mut ctx,
+        layout,
+        Affine::scale(scale) * Affine::translate((-ink.x0, -ink.y0)),
+    );
+    let mut image = vello_cpu::Pixmap::new(width, height);
+    ctx.render(&mut image, &mut vello_cpu::Resources::new());
+    let rect = Rect::new(
+        ink.x0,
+        ink.y0,
+        ink.x0 + f64::from(width) / scale,
+        ink.y0 + f64::from(height) / scale,
+    );
+    Some((rect, image))
+}
+
 /// Layer-space outlines of a run's glyphs (`None` for glyphs without one),
 /// with faux italic shear and faux bold expansion applied.
 fn glyph_outlines(run: &GlyphRun) -> Vec<Option<BezPath>> {
@@ -348,7 +409,7 @@ fn glyph_outlines(run: &GlyphRun) -> Vec<Option<BezPath>> {
                 let e = f64::from(run.embolden);
                 path = kurbo::expand_path(&path, Diagonal2::new(e, e), Join::Miter, 4.0, 0.01);
             }
-            Some(Affine::translate((f64::from(g.x), f64::from(g.y))) * path)
+            Some(Affine::translate((f64::from(g.x), f64::from(g.y))) * run.basis * path)
         })
         .collect()
 }
@@ -414,8 +475,6 @@ impl LayerSource for TextSource {
 #[derive(Debug, Default)]
 pub struct TextProvider {
     fonts: Mutex<Option<FontSystem>>,
-    /// The fonts are loaded (scanning the system fonts takes a while).
-    ready: std::sync::atomic::AtomicBool,
     cache: Mutex<SourceCache<TextSource>>,
 }
 
@@ -441,7 +500,6 @@ impl TextProvider {
     pub fn with_fonts(fonts: FontSystem) -> Self {
         Self {
             fonts: Mutex::new(Some(fonts)),
-            ready: std::sync::atomic::AtomicBool::new(true),
             cache: Mutex::default(),
         }
     }
@@ -456,24 +514,19 @@ impl TextProvider {
     /// text layer.
     pub fn load_fonts(&self) {
         self.fonts.lock().get_or_insert_with(FontSystem::new);
-        self.ready.store(true, std::sync::atomic::Ordering::Release);
     }
 
     /// The fonts for the render path. On an interactive thread it never waits
     /// for the warm-up still scanning them (the frame is drawn again later).
     fn render_fonts(&self) -> Result<parking_lot::MutexGuard<'_, Option<FontSystem>>, RenderError> {
-        if !self.ready.load(std::sync::atomic::Ordering::Acquire)
-            && bae_render::is_interactive_thread()
-            && bae_gpu::warm_up::is_running()
-        {
+        if bae_render::is_interactive_thread() && bae_gpu::warm_up::is_running() {
             return match self.fonts.try_lock() {
                 Some(fonts) if fonts.is_some() => Ok(fonts),
-                _ => Err(bae_render::warming_up("the font list")),
+                _ => Err(bae_render::warming_up("text layout")),
             };
         }
         let mut fonts = self.fonts.lock();
         fonts.get_or_insert_with(FontSystem::new);
-        self.ready.store(true, std::sync::atomic::Ordering::Release);
         Ok(fonts)
     }
 
@@ -533,6 +586,13 @@ impl SourceProvider for TextProvider {
         crate::TEXT_PROVIDER
     }
 
+    /// The glyphs' filled outlines in layer pixels, for Advanced 3D
+    /// extrusion (04).
+    fn outlines(&self, content: &CustomContent) -> Option<Arc<bae_render::source::Outlines>> {
+        let layout = self.layout_of(content).ok()?;
+        Some(Arc::new(text_outlines(&layout)))
+    }
+
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
         if let Some(hit) = self.cache.lock().get(content.hash) {
             return Ok(hit);
@@ -586,5 +646,101 @@ impl bae_gpu::WarmUp for TextProvider {
             .render_on(gpu, source.bounds, 1.)
             .map(drop)
             .map_err(|e| e.to_string())
+    }
+}
+
+/// Primes vertical substitution, placement and Vello glyph drawing on the
+/// existing warm-up worker, after the font collection and renderer are ready.
+pub struct VerticalGlyphWarmUp(pub Arc<TextProvider>);
+
+impl bae_gpu::WarmUp for VerticalGlyphWarmUp {
+    fn name(&self) -> &str {
+        "vertical text"
+    }
+    fn priority(&self) -> u8 {
+        2
+    }
+    fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
+        let doc = crate::layout::vertical_warmup_document();
+        let layout = self.0.layout(&doc);
+        let _ = preview_image(&layout, 1.);
+        if !layout.is_empty() {
+            VelloRenderer::shared(gpu)
+                .and_then(|r| r.render_region(gpu, pixel_bounds(&layout), 1., &layout))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+/// Flattened glyph fill outlines of `text` (layer pixels), consecutive
+/// glyphs of one colour in one fill.
+fn text_outlines(text: &TextLayout) -> bae_render::source::Outlines {
+    let mut out = bae_render::source::Outlines::default();
+    for run in &text.runs {
+        let outlines = glyph_outlines(run);
+        let mut paths = outlines.iter();
+        for_batches(
+            text,
+            run,
+            Affine::IDENTITY,
+            |glyphs, matrix, paint, opacity| {
+                let batch: Vec<&BezPath> = paths.by_ref().take(glyphs.len()).flatten().collect();
+                let Some(mut color) = paint.fill else {
+                    return;
+                };
+                color[3] *= opacity;
+                if out.fills.last().is_none_or(|f| f.color != color) {
+                    out.fills.push(bae_render::source::OutlineFill {
+                        color,
+                        contours: Vec::new(),
+                    });
+                }
+                let contours = &mut out.fills.last_mut().expect("pushed").contours;
+                for path in batch {
+                    kurbo::flatten(matrix * path, 0.25, |el| match el {
+                        kurbo::PathEl::MoveTo(p) => contours.push(vec![[p.x, p.y]]),
+                        kurbo::PathEl::LineTo(p) => {
+                            if let Some(c) = contours.last_mut() {
+                                c.push([p.x, p.y]);
+                            }
+                        }
+                        _ => {}
+                    });
+                }
+            },
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod outline_tests {
+    use super::*;
+
+    /// The letter O: its outside and its hole, in layer pixels around the
+    /// baseline.
+    #[test]
+    fn letters_give_their_outlines() {
+        let mut fonts = crate::FontSystem::new();
+        let doc = bae_model::TextDocument::new("O", "ArialMT", 40.0);
+        let layout = crate::layout_text(&mut fonts, &doc);
+        if layout.runs.is_empty() {
+            return; // no font here
+        }
+        let out = text_outlines(&layout);
+        let contours: Vec<&Vec<[f64; 2]>> = out.fills.iter().flat_map(|f| &f.contours).collect();
+        assert_eq!(contours.len(), 2, "outside and hole");
+        let ys: Vec<f64> = contours
+            .iter()
+            .flat_map(|c| c.iter().map(|p| p[1]))
+            .collect();
+        let (lo, hi) = ys
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(l, h), &y| (l.min(y), h.max(y)));
+        assert!(
+            hi - lo > 20.0 && hi - lo < 40.0,
+            "an O 40 px high: {lo} … {hi}"
+        );
     }
 }

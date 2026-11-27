@@ -36,8 +36,8 @@ use item_menu::{ItemAction, LogMode, RenderLog};
 use templates::{Library, NameDialog, Span, Store, Template};
 
 /// Formats offered in the panel and by `bae render --format`.
+/// WAV comes last, as in AE's Format menu.
 pub const FORMATS: &[ExportFormat] = &[
-    ExportFormat::Wav,
     ExportFormat::Png,
     ExportFormat::Tiff,
     ExportFormat::Exr,
@@ -51,6 +51,7 @@ pub const FORMATS: &[ExportFormat] = &[
     ExportFormat::ProRes422,
     ExportFormat::ProRes,
     ExportFormat::ProRes4444,
+    ExportFormat::Wav,
 ];
 
 /// AE 26's Render Settings templates in its menu order; BAE renders at Best
@@ -418,6 +419,7 @@ impl QueueOutput {
 pub struct RenderQueue {
     items: Vec<QueueItem>,
     next_id: u64,
+    started_since_autosave: bool,
     running: bool,
     /// Items of the running render (queued when Render was pressed; later ones
     /// wait for the next Render, the snapshot does not have their edits).
@@ -493,6 +495,11 @@ impl RenderQueue {
     /// Whether the worker is rendering.
     pub fn is_running(&self) -> bool {
         self.running
+    }
+
+    /// A render started for this document since the last auto-save poll.
+    pub fn take_render_start(&mut self) -> bool {
+        std::mem::take(&mut self.started_since_autosave)
     }
 
     /// Queues `comp` over its work area, using H.264 on macOS and PNG elsewhere, in a folder
@@ -591,6 +598,7 @@ impl RenderQueue {
     /// the project). A running render is stopped; the worker finishes the
     /// frame it is on and finds nothing left.
     pub fn clear(&mut self) {
+        self.started_since_autosave = false;
         for item in &self.items {
             item.cancel.store(true, Ordering::Relaxed);
         }
@@ -733,6 +741,36 @@ impl RenderQueue {
             ctx.request_repaint();
         }
     }
+}
+
+/// Desktop feedback for a single render batch (including when the window is minimized).
+#[derive(Debug, Clone, Copy)]
+pub enum RenderEvent {
+    Progress(u8),
+    Finished { succeeded: bool },
+}
+
+#[derive(Clone)]
+pub struct RenderFeedback(pub Arc<dyn Fn(RenderEvent) + Send + Sync>);
+
+/// The active frame counter for the Info and Flowchart panels.
+pub(crate) fn panel_progress(resources: &Resources, stage: &Stage) -> Option<String> {
+    if !crate::prefs::current(resources)
+        .bool("appearance.show_rendering_progress_in_info_flowchart")
+    {
+        return None;
+    }
+    let queue = resources.get::<SharedRenderQueue>()?.lock();
+    queue.items().iter().find_map(|item| {
+        let ItemStatus::Rendering { done, total } = item.status else {
+            return None;
+        };
+        Some(format!(
+            "{} {}  {done}/{total}",
+            tr("Rendering"),
+            bae_motion::query::display_name_of(stage, &item.comp)
+        ))
+    })
 }
 
 /// The queue as an app resource.
@@ -1076,12 +1114,13 @@ pub fn start(
         .map(|s| provider_list(&s.0))
         .unwrap_or_default();
     let effects = resources.get::<PreviewEffects>().map(|e| e.0.clone());
+    let prefs = crate::prefs::current(resources);
+    let nested_switches = prefs.bool("composition.switches_affect_nested_comps");
     {
         let mut queue = queue.lock();
         if !queue.begin() {
             return Ok(());
         }
-        let prefs = crate::prefs::current(resources);
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         queue.render_threads = Some(render_threads(&prefs, cores));
         queue.sequence_files_per_folder = prefs
@@ -1089,12 +1128,33 @@ pub fn start(
             .then(|| prefs.int("export.segment_sequences_files").clamp(1, 99999) as usize);
     }
     let snapshot = crate::preview_snapshot::PreviewSnapshot::take(stage);
-    let queue = queue.clone();
-    std::thread::Builder::new()
+    let feedback = resources.get::<RenderFeedback>().cloned();
+    let worker_queue = queue.clone();
+    let worker = std::thread::Builder::new()
         .name("bae-render-queue".into())
-        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers, effects.as_deref()))
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .spawn(move || {
+            run_worker(
+                &worker_queue,
+                &snapshot,
+                gpu,
+                &providers,
+                effects.as_deref(),
+                nested_switches,
+                feedback.as_ref(),
+            )
+        });
+    let mut q = queue.lock();
+    match worker {
+        Ok(_) => {
+            q.started_since_autosave = true;
+            Ok(())
+        }
+        Err(error) => {
+            q.running = false;
+            q.batch.clear();
+            Err(error.to_string())
+        }
+    }
 }
 
 fn provider_list(registry: &Registry<dyn SourceProvider>) -> Vec<Arc<dyn SourceProvider>> {
@@ -1112,7 +1172,19 @@ pub(crate) fn run_worker(
     gpu: Arc<GpuContext>,
     providers: &[Arc<dyn SourceProvider>],
     effects: Option<&Registry<dyn bae_render::Effect>>,
+    nested_switches: bool,
+    feedback: Option<&RenderFeedback>,
 ) {
+    let report = |event| {
+        if let Some(feedback) = feedback {
+            (feedback.0)(event);
+        }
+    };
+    let mut last_percent = 0;
+    let mut completed = 0usize;
+    let mut succeeded = true;
+    let count = queue.lock().batch.len().max(1);
+    report(RenderEvent::Progress(0));
     let stage = snapshot.restore();
     let mut renderer = Renderer::with_config(
         gpu,
@@ -1128,6 +1200,7 @@ pub(crate) fn run_worker(
         renderer.sync_effects(effects);
     }
     let mut evaluator = AnimEvaluator::new(None);
+    evaluator.set_nested_switches(nested_switches);
     let comp_frames = |comp: &PrimPath| {
         let stage = stage.as_ref().ok()?;
         bae_motion::query::comp_info(stage, comp).map(|c| c.frame_count())
@@ -1141,6 +1214,13 @@ pub(crate) fn run_worker(
             Err(error) => ItemStatus::Failed(error.clone()),
             Ok(stage) => {
                 let mut progress = |done: usize, total: usize| {
+                    let percent = ((100 * completed + done.saturating_mul(100) / total.max(1))
+                        / count)
+                        .min(100) as u8;
+                    if percent != last_percent {
+                        report(RenderEvent::Progress(percent));
+                        last_percent = percent;
+                    }
                     log.progress(&job, done, total);
                     let mut q = queue.lock();
                     q.set_status(job.id, ItemStatus::Rendering { done, total });
@@ -1151,6 +1231,8 @@ pub(crate) fn run_worker(
                 }
             }
         };
+        completed += 1;
+        succeeded &= matches!(status, ItemStatus::Done { .. });
         let log_file = log.finish(&job, &status);
         let mut q = queue.lock();
         if let Some(it) = q.item_mut(job.id) {
@@ -1168,6 +1250,9 @@ pub(crate) fn run_worker(
         q.set_status(job.id, status);
     }
     let mut q = queue.lock();
+    report(RenderEvent::Finished {
+        succeeded: succeeded && completed == count,
+    });
     q.running = false;
     q.batch.clear();
     if let Some(ctx) = &q.repaint {
@@ -1802,19 +1887,29 @@ fn item_ui(
                         ui.close();
                     }
                 }
-            });
+            })
+            .response
+            .labeled_value(egui::WidgetType::Button, &name("Log"), tr(label));
         });
     });
-    if let Some(path) = &item.log_file
-        && ui.link(path.display().to_string()).clicked()
-    {
-        reveal(path);
+    if let Some(path) = &item.log_file {
+        let link = ui.link(path.display().to_string());
+        bae_ui::a11y::value_source(&link, bae_ui::a11y::VERBATIM_VALUE);
+        if link.clicked() {
+            reveal(path);
+        }
     }
     let id = item.id;
     let multiple = item.outputs.len() > 1;
     let mut remove_output = None;
     for (index, module) in item.outputs.iter_mut().enumerate() {
         ui.push_id(("output_module", index), |ui| {
+            let module_name =
+                multiple.then(|| tr("Output Module {n}").replace("{n}", &(index + 1).to_string()));
+            let name = |what: &str| match &module_name {
+                Some(module) => bae_ui::a11y::context(&[&item_ctx, module, tr(what)]),
+                None => name(what),
+            };
             ui.add_enabled_ui(editable, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let mut om: Vec<_> = OM_TEMPLATES
@@ -2019,8 +2114,13 @@ fn item_ui(
                     ui.horizontal(|ui| {
                         ui.label(tr("Output To"));
                         if let Some(comp) = comp {
+                            let button =
+                                ui.add(egui::Button::new("▾").frame(false).small()).labeled(
+                                    egui::WidgetType::Button,
+                                    &name("File Name and Location Templates"),
+                                );
                             filenames::menu(
-                                ui,
+                                &button,
                                 id,
                                 index,
                                 module,
@@ -2049,6 +2149,8 @@ fn item_ui(
                         &name("Output To"),
                         &module.output,
                     );
+                    // The path is the user's, not UI text to translate.
+                    bae_ui::a11y::value_source(&file_link, bae_ui::a11y::FILE_NAME_VALUE);
                     let follows = extension_follows_format(&module.output, module.format);
                     if let Some(extension) = follows {
                         file_link.clone().on_hover_text(
@@ -2064,6 +2166,7 @@ fn item_ui(
                     if multiple
                         && ui
                             .small_button("−")
+                            .labeled(egui::WidgetType::Button, &name("Remove Output Module"))
                             .on_hover_text(tr("Remove Output Module"))
                             .clicked()
                     {
@@ -2179,6 +2282,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Render Settings", "渲染设置"),
     ("Log", "日志"),
     ("Output Module", "输出模块"),
+    ("Output Module {n}", "输出模块 {n}"),
     ("Output Module:", "输出模块:"),
     ("Render Settings:", "渲染设置:"),
     ("Best Settings", "最佳设置"),
@@ -3199,7 +3303,15 @@ mod tests {
             .store(true, Ordering::Relaxed);
 
         let snapshot = crate::preview_snapshot::PreviewSnapshot::take(&stage);
-        run_worker(&queue, &snapshot, gpu, &[], None);
+        let (send, received) = std::sync::mpsc::channel();
+        let feedback = RenderFeedback(Arc::new(move |event| send.send(event).unwrap()));
+        run_worker(&queue, &snapshot, gpu, &[], None, true, Some(&feedback));
+        let events: Vec<_> = received.try_iter().collect();
+        assert!(matches!(events.first(), Some(RenderEvent::Progress(0))));
+        assert!(matches!(
+            events.last(),
+            Some(RenderEvent::Finished { succeeded: false })
+        ));
 
         let q = queue.lock();
         assert!(!q.is_running());
