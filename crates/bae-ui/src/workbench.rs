@@ -714,6 +714,7 @@ impl Workbench {
     ) -> Vec<Invocation> {
         self.refresh_registries();
         crate::a11y::install(ui.ctx());
+        crate::theme::sync_contrast(ui);
         ime_undo_before(ui.ctx());
         // A modal dialog (the welcome / role picker, an external window such as
         // Preferences, a module dialog) owns the keyboard: no shortcuts and no

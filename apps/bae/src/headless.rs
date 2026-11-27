@@ -182,8 +182,14 @@ fn render_offscreen(
         if frame == 1
             && let Some(ids) = std::env::var_os("BAE_SMOKE_INVOKE")
         {
+            // `<action>{json params}` passes parameters, e.g.
+            // `app.settings{"page":"appearance"}`.
             for id in ids.to_string_lossy().split(',').filter(|s| !s.is_empty()) {
-                invocations.push(bae_ui::Invocation::new(id.trim()));
+                let (id, params) = id.split_at(id.find('{').unwrap_or(id.len()));
+                invocations.push(match serde_json::from_str(params) {
+                    Ok(params) => bae_ui::Invocation::with_params(id.trim(), params),
+                    Err(_) => bae_ui::Invocation::new(id.trim()),
+                });
             }
         }
         // Cycle through every workspace so each preset's panels get drawn.
@@ -196,6 +202,12 @@ fn render_offscreen(
             ));
         }
         for inv in invocations {
+            // Preferences is opened by the shell; show it here too (screenshots
+            // of its pages).
+            if inv.id == bae_ui::settings::ACTION {
+                workspace.show_settings(inv.params.get("page").and_then(|p| p.as_str()));
+                continue;
+            }
             if let Some(rest) = workspace.handle(inv, &document, resources) {
                 tracing::debug!("headless: unhandled `{}`", rest.id);
             }
