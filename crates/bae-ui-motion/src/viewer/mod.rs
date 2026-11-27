@@ -1221,6 +1221,7 @@ impl Panel for CompositionViewer {
             if let Some((generation, item)) = &session.lock().solid_reload {
                 gpu.reload_solid(*generation, item);
             }
+            gpu.purge(session.lock().purge);
             if editing {
                 self.idle = None;
                 gpu.playback.stop();

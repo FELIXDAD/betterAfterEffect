@@ -2,9 +2,11 @@
 mod sinc;
 use sinc::Sinc;
 
+use crate::conform::ConformedAudio;
 use bae_anim::{Curve, CurveKind, LayerTiming};
 use bae_model::{PrimPath, Stage, Time, Value};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::audio::{layer_file, sample_to_time};
 use crate::{AudioSource, FileAudio, MediaError};
@@ -23,6 +25,7 @@ struct Track {
 /// Each instance owns independent streaming decoders.
 #[derive(Default)]
 pub struct AudioMix {
+    cache: Option<Arc<ConformedAudio>>,
     tracks: Vec<Track>,
 }
 
@@ -83,8 +86,14 @@ impl AudioMix {
             tracks.retain(|(solo, _)| *solo);
         }
         Self {
+            cache: None,
             tracks: tracks.into_iter().map(|(_, t)| t).collect(),
         }
+    }
+
+    pub fn with_cache(mut self, cache: Option<Arc<ConformedAudio>>) -> Self {
+        self.cache = cache;
+        self
     }
 
     /// Probe enabled sources on the preview producer, before the first seek.
@@ -92,7 +101,7 @@ impl AudioMix {
         for track in &mut self.tracks {
             track.effects.prepare(rate);
             if let Some(path) = &track.file
-                && let Ok(mut decoder) = FileAudio::open(path)
+                && let Ok(mut decoder) = ConformedAudio::open_source(self.cache.as_deref(), path)
             {
                 let source_rate = f64::from(decoder.info().sample_rate);
                 let step = source_step(track.timing, source_rate, rate);
@@ -124,14 +133,20 @@ impl AudioMix {
     ) -> Result<(), MediaError> {
         out.fill([0.0; 2]);
         for track in &mut self.tracks {
-            track.add(start, rate, out)?;
+            track.add(start, rate, out, self.cache.as_deref())?;
         }
         Ok(())
     }
 }
 
 impl Track {
-    fn add(&mut self, start: i64, rate: u32, out: &mut [[f32; 2]]) -> Result<(), MediaError> {
+    fn add(
+        &mut self,
+        start: i64,
+        rate: u32,
+        out: &mut [[f32; 2]],
+        cache: Option<&ConformedAudio>,
+    ) -> Result<(), MediaError> {
         let first_at = |time: Time| {
             (i128::from(time.0) * i128::from(rate) + i128::from(Time::FLICKS_PER_SECOND) - 1)
                 .div_euclid(i128::from(Time::FLICKS_PER_SECOND)) as i64
@@ -145,7 +160,7 @@ impl Track {
         if self.source.is_none()
             && let Some(path) = &self.file
         {
-            self.source = Some(FileAudio::open(path)?);
+            self.source = Some(ConformedAudio::open_source(cache, path)?);
         }
         let source = self.source.as_mut();
         let src_rate = source
