@@ -511,13 +511,13 @@
 | Resolution ▸ Third | 8650755 | `motion.view.resolution` | `{"factor":3}` |  |  | B | ☐ |
 | Resolution ▸ Quarter | 8650756 | `motion.view.resolution` | `{"factor":4}` | Ctrl+Alt+Shift+J | Cmd+Opt+Shift+J | B | ☐ |
 | Resolution ▸ Custom... | 8650758 | `motion.view.resolution_custom` |  | Ctrl+Alt+J | Cmd+Opt+J | E | ⏸ |
-| Use Display Color Management | 589832 | `motion.view.use_display_color_management` |  | Shift+PadSlash | Shift+PadSlash / Control+Opt+/ | B | ⏸ |
-| Simulate Output ▸ No Output Simulation | 12517377 | `motion.view.simulate_output` | `{"profile":"none"}` |  |  | B | ⏸ |
-| Simulate Output ▸ HDTV (Rec. 709) | 12517379 | `motion.view.simulate_output` | `{"profile":"rec709"}` |  |  | B | ⏸ |
-| Simulate Output ▸ SDTV NTSC | 12517380 | `motion.view.simulate_output` | `{"profile":"ntsc"}` |  |  | B | ⏸ |
-| Simulate Output ▸ SDTV PAL | 12517381 | `motion.view.simulate_output` | `{"profile":"pal"}` |  |  | B | ⏸ |
-| Simulate Output ▸ Legacy Macintosh RGB (Gamma 1.8) | 12517382 | `motion.view.simulate_output` | `{"profile":"legacy_mac"}` |  |  | B | ⏸ |
-| Simulate Output ▸ Internet Standard RGB (sRGB) | 12517383 | `motion.view.simulate_output` | `{"profile":"srgb"}` |  |  | B | ⏸ |
+| Use Display Color Management | 589832 | `motion.view.use_display_color_management` |  | Shift+PadSlash | Shift+PadSlash / Control+Opt+/ | B | ✅ |
+| Simulate Output ▸ No Output Simulation | 12517377 | `motion.view.simulate_output` | `{"profile":"none"}` |  |  | B | ✅ |
+| Simulate Output ▸ HDTV (Rec. 709) | 12517379 | `motion.view.simulate_output` | `{"profile":"rec709"}` |  |  | B | ✅ |
+| Simulate Output ▸ SDTV NTSC | 12517380 | `motion.view.simulate_output` | `{"profile":"ntsc"}` |  |  | B | ✅ |
+| Simulate Output ▸ SDTV PAL | 12517381 | `motion.view.simulate_output` | `{"profile":"pal"}` |  |  | B | ✅ |
+| Simulate Output ▸ Legacy Macintosh RGB (Gamma 1.8) | 12517382 | `motion.view.simulate_output` | `{"profile":"legacy_mac"}` |  |  | B | ✅ |
+| Simulate Output ▸ Internet Standard RGB (sRGB) | 12517383 | `motion.view.simulate_output` | `{"profile":"srgb"}` |  |  | B | ✅ |
 | Simulate Output ▸ Kodak 5218 to Kodak 2383 | 12517384 | `motion.view.simulate_output` | `{"profile":"kodak_5218_2383"}` |  |  | B | ⏸ |
 | Simulate Output ▸ Universal Camera Film to Kodak 2383 | 12517385 | `motion.view.simulate_output` | `{"profile":"camera_film_2383"}` |  |  | B | ⏸ |
 | Simulate Output ▸ My Custom RGB | 12517387 | `motion.view.simulate_output` | `{"profile":"custom_rgb"}` |  |  | B | ⏸ |

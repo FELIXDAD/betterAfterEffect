@@ -1369,6 +1369,14 @@ impl Panel for CompositionViewer {
             g.display = self.display.render();
             g.roi = self.display.roi();
         }
+        // Display colour management for every preview (stills, playback,
+        // value drags).
+        let options = session.lock().view_options;
+        crate::display_color::update(
+            cx.stage,
+            options.display_color_management,
+            options.simulate_output,
+        );
         let frame_nr = ui.ctx().cumulative_frame_nr();
         let measure = session
             .lock()

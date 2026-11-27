@@ -902,6 +902,7 @@ dependencies = [
  "anyhow",
  "bae-anim",
  "bae-app",
+ "bae-color",
  "bae-gpu",
  "bae-media",
  "bae-model",
