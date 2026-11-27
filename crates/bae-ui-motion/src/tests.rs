@@ -4114,7 +4114,7 @@ fn previews_draw_proxies_at_the_item_size() {
     let footage = |eval: &mut AnimEvaluator, stage: &bae_model::Stage| {
         let rc = eval.evaluate(stage, &comp, bae_model::Time::ZERO).unwrap();
         match &rc.layers[0].content {
-            LayerContent::Footage(f) => (f.file.clone(), f.scaled, f.size),
+            LayerContent::Footage(f) => (f.file.clone(), f.proxy_of.is_some(), f.size),
             other => panic!("{other:?}"),
         }
     };
@@ -4126,6 +4126,12 @@ fn previews_draw_proxies_at_the_item_size() {
     );
     assert!(scaled);
     assert_eq!(size, Some([1920, 1080]), "drawn at the item's size");
+    // Cached frames drawn with the proxy depend on the item: turning its proxy
+    // off (an attribute of the item) redraws them.
+    let rc = preview
+        .evaluate(&h.stage, &comp, bae_model::Time::ZERO)
+        .unwrap();
+    assert!(rc.dependencies().iter().any(|d| d.path == item));
     let mut render = AnimEvaluator::new(None);
     assert!(
         !footage(&mut render, &h.stage).1,

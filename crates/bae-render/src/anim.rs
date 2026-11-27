@@ -184,9 +184,11 @@ impl AnimEvaluator {
         }
     }
 
-    /// Footage drawing `proxy` (with `file`) at `size` from `source_time`.
+    /// Footage drawing `proxy` (with `file`) for `item` at `size` from
+    /// `source_time`.
     fn proxy_footage(
         stage: &Stage,
+        item: &PrimPath,
         proxy: PrimPath,
         file: Option<PathBuf>,
         size: [u32; 2],
@@ -214,7 +216,7 @@ impl AnimEvaluator {
                 }
             }),
             blend: None,
-            scaled: true,
+            proxy_of: Some(item.clone()),
             asset: proxy,
         }
     }
@@ -749,7 +751,7 @@ impl AnimEvaluator {
                 };
                 let size = [dim("width"), dim("height")];
                 Ok(LayerContent::Footage(Self::proxy_footage(
-                    stage, proxy, file, size, *time,
+                    stage, comp, proxy, file, size, *time,
                 )))
             }
             LayerSource::Comp { comp, nested, .. } => match nested {
@@ -782,6 +784,7 @@ impl AnimEvaluator {
                 {
                     LayerContent::Footage(Self::proxy_footage(
                         stage,
+                        asset,
                         proxy,
                         file,
                         [info.width, info.height],
@@ -820,7 +823,7 @@ impl AnimEvaluator {
                             span,
                             pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
                         }),
-                    scaled: false,
+                    proxy_of: None,
                 }),
                 "model" => LayerContent::Model(crate::input::ModelRef {
                     asset: asset.clone(),

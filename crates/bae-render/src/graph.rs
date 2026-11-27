@@ -3370,7 +3370,7 @@ impl Builder<'_, '_> {
             }
             LayerContent::Footage(footage) => match self.sources.footage(footage)?.map(|source| {
                 // A proxy is drawn at the item's size.
-                match footage.size.filter(|_| footage.scaled) {
+                match footage.size.filter(|_| footage.proxy_of.is_some()) {
                     Some(size) => std::sync::Arc::new(crate::source::ScaledSource {
                         inner: source,
                         size,

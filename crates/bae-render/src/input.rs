@@ -218,8 +218,10 @@ impl RenderComp {
             });
             match &layer.content {
                 LayerContent::Comp(nested) => nested.collect_dependencies(out),
+                // A proxy depends on the item it stands in for (its Use Proxy
+                // switch; the proxy is a child of the item, so it is covered).
                 LayerContent::Footage(f) => out.push(Dependency {
-                    path: f.asset.clone(),
+                    path: f.proxy_of.as_ref().unwrap_or(&f.asset).clone(),
                     time: f.source_time,
                 }),
                 LayerContent::Model(m) => out.push(Dependency {
@@ -380,7 +382,7 @@ impl RenderLayer {
             file_revision: bae_model::asset::file_revision(&view),
             psd_layer: Some(selection),
             blend: None,
-            scaled: false,
+            proxy_of: None,
         };
         let mut stencil = Self::new(mask.path, LayerContent::Footage(footage));
         stencil.blend_mode = BlendMode::StencilAlpha;
@@ -705,7 +707,7 @@ impl LayerContent {
                 f.psd_layer.hash(h);
                 f.file_revision.hash(h);
                 f.blend.hash(h);
-                if f.scaled {
+                if f.proxy_of.is_some() {
                     f.size.hash(h);
                 }
             }
@@ -741,9 +743,10 @@ pub struct FootageRef {
     pub psd_layer: Option<bae_model::psd::LayerImage>,
     /// Frame blending, when the comp and layer switches are on.
     pub blend: Option<FrameBlend>,
-    /// `file` is a proxy (AE File ▸ Set Proxy): its frames are drawn at
-    /// `size`, the item's own size, whatever the proxy's resolution.
-    pub scaled: bool,
+    /// The footage item or comp this proxy stands in for (AE File ▸ Set
+    /// Proxy): `file` is the proxy, drawn at `size`, the item's own size,
+    /// whatever the proxy's resolution.
+    pub proxy_of: Option<PrimPath>,
 }
 
 /// Frame blending of a footage layer (AE-CMP-065): the source frames one comp
@@ -964,7 +967,7 @@ mod tests {
                 psd_layer: None,
                 file_revision: 0,
                 blend: None,
-                scaled: false,
+                proxy_of: None,
             }),
         ));
         let deps = comp.dependencies();
