@@ -334,6 +334,8 @@ pub mod ids {
     pub const RESOLUTION: &str = "motion.view.resolution";
     /// Layer > Mask and Shape Path > Free Transform Points (catalog id).
     pub const FREE_TRANSFORM: &str = "motion.layer.free_transform_points";
+    /// View > Split with New Locked Viewer (Cmd/Ctrl+Alt+Shift+N).
+    pub const SPLIT_LOCKED: &str = "motion.view.split_with_new_locked_viewer";
 }
 
 /// `(action id, English title, default chord, what it does)`; chords from AE 26's
@@ -517,6 +519,26 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// View > Split with New Locked Viewer: a new Composition viewer locked to
+/// the active comp, to the right of the focused viewer (else the main one).
+fn split_with_locked_viewer(cx: &mut PanelContext<'_>) {
+    let session = crate::common::session(cx.resources);
+    let Some(comp) = session.lock().active_comp.clone() else {
+        return;
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros());
+    let id = format!("composition:locked-{stamp}");
+    session.lock().viewer_pins.insert(id.clone(), comp);
+    let beside = cx
+        .focused_panel
+        .filter(|p| p.kind() == "composition")
+        .cloned()
+        .unwrap_or_else(|| bae_ui::PanelId::new("composition"));
+    cx.split_open(id, beside);
+}
+
 /// Whether a mask or shape path is selected: vertices in the Composition
 /// viewer, or its path property in the Timeline.
 fn path_selected(cx: &PanelContext<'_>) -> bool {
@@ -540,9 +562,11 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::NUDGE, "Nudge Layer Position"),
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
+            (ids::SPLIT_LOCKED, "Split with New Locked Viewer"),
             (crate::viewer::ZOOM_100, "Zoom to 100%"),
             (crate::viewer::FIT_UP_TO_100, "Fit up to 100%"),
         ])
+        .chain(crate::path_menu::ACTIONS.iter().copied())
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::view_options::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
@@ -647,8 +671,15 @@ pub fn bindings() -> Vec<Binding> {
         // passes it on to a drag or text it is editing.
         .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
         .chain(GIZMOS.iter().map(|(id, _, chord, _)| Binding::new(chord, id)))
+        // Cmd/Ctrl+T in the Composition and Timeline panels: Free Transform
+        // Points with a path selected, else the Type tools (AE; the Layer menu
+        // shows the shortcut).
+        .chain(FREE_TRANSFORM_PANELS.map(|k| Binding::new("Cmd+T", ids::FREE_TRANSFORM).when(k)))
         .collect()
 }
+
+/// Panels where Cmd/Ctrl+T is Free Transform Points when a path is selected.
+pub(crate) const FREE_TRANSFORM_PANELS: [&str; 2] = ["composition", "timeline"];
 
 /// The keymap extension holding [`bindings`].
 pub fn keymap_bindings() -> KeymapBindings {
@@ -1336,6 +1367,19 @@ impl ActionHandler for ToolActions {
             let mut t = tools.lock();
             t.set(Tool::Selection);
             t.free_transform_request = true;
+            return true;
+        }
+        if crate::path_menu::handle(&inv.id, cx) {
+            return true;
+        }
+        if inv.id == ids::FREE_TRANSFORM
+            && !crate::path_menu::can_free_transform(cx.stage, cx.resources)
+        {
+            // The key with no mask or path to transform: the Type tools.
+            return shared(cx.resources).lock().shortcut(ids::TYPE, false);
+        }
+        if inv.id == ids::SPLIT_LOCKED {
+            split_with_locked_viewer(cx);
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {

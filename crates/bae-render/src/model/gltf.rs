@@ -322,6 +322,7 @@ impl<'a> Reader<'a> {
             parts,
             materials,
             textures: self.textures(),
+            bounds_cache: Default::default(),
         })
     }
 

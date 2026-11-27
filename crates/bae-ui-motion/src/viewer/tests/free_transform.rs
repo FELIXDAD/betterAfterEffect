@@ -40,9 +40,11 @@ fn free_transform_points_moves_and_scales_a_mask() {
         "{:?}",
         b.vertices
     );
-    // Esc ends it; the menu command starts it again on the selected layer's mask.
+    // Esc ends it; the menu command starts it again on the mask selected in
+    // the Timeline.
     h.key(Key::Escape);
     assert!(h.viewer.select.free.is_none());
+    h.session().lock().selected_groups = vec![format!("{a}#{mask}")];
     let mut requests = PanelRequests::default();
     {
         let pid = PanelId::new("timeline");

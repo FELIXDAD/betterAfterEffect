@@ -30,6 +30,18 @@ pub trait Transport {
     fn close(&mut self) -> Result<(), SyncError> {
         Ok(())
     }
+    /// About how many bytes were handed to [`send`](Self::send) and have not
+    /// left yet: they wait in a write buffer (a hub connection whose peer reads
+    /// slowly) or a queue ([`crate::ThreadedTransport`], whose thread has not
+    /// written them yet). A session sends no document data while this is over
+    /// [`crate::SessionConfig::max_backlog`] and goes on once it drained, so a
+    /// slow link is not handed the same data again and again (flow control).
+    ///
+    /// The default, 0, is right for transports whose `send` finishes its I/O
+    /// before returning.
+    fn backlog(&self) -> usize {
+        0
+    }
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
@@ -41,6 +53,9 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
     fn close(&mut self) -> Result<(), SyncError> {
         (**self).close()
+    }
+    fn backlog(&self) -> usize {
+        (**self).backlog()
     }
 }
 
