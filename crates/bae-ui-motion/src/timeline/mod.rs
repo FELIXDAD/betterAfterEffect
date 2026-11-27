@@ -144,9 +144,17 @@ enum Drag {
         start: bool,
         end: bool,
     },
+    /// Keyframes in the time graph.
     Marquee {
         origin: Pos2,
-        additive: bool,
+        mode: MarqueeMode,
+        base: Vec<KeyRef>,
+    },
+    /// Layers, from the empty outline below them.
+    LayerMarquee {
+        origin: Pos2,
+        mode: MarqueeMode,
+        base: Vec<PrimPath>,
     },
     PickWhip {
         layers: Vec<PrimPath>,
@@ -188,6 +196,48 @@ struct TimelineLayers {
     parent_labels: Vec<String>,
 }
 
+/// How a marquee changes the selection it started from (AE): replace it,
+/// add to it (Shift), or toggle what it covers (Cmd/Ctrl).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MarqueeMode {
+    Replace,
+    Add,
+    Toggle,
+}
+
+impl MarqueeMode {
+    fn of(m: egui::Modifiers) -> Self {
+        if m.command {
+            MarqueeMode::Toggle
+        } else if m.shift {
+            MarqueeMode::Add
+        } else {
+            MarqueeMode::Replace
+        }
+    }
+
+    /// `base` with `inside` applied.
+    pub(crate) fn apply<T: Clone + PartialEq>(self, base: &[T], inside: Vec<T>) -> Vec<T> {
+        match self {
+            MarqueeMode::Replace => inside,
+            MarqueeMode::Add => {
+                let mut out = base.to_vec();
+                out.extend(inside.into_iter().filter(|x| !base.contains(x)));
+                out
+            }
+            MarqueeMode::Toggle => {
+                let mut out: Vec<T> = base
+                    .iter()
+                    .filter(|x| !inside.contains(x))
+                    .cloned()
+                    .collect();
+                out.extend(inside.into_iter().filter(|x| !base.contains(x)));
+                out
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct TimelinePanel {
     eval: EvalCache,
@@ -201,6 +251,11 @@ pub struct TimelinePanel {
     zoom_back: Option<(f32, Time)>,
     /// X: scroll the rows so the selected layer is at the top (next frame).
     scroll_to_selected: bool,
+    /// A middle-button drag that started over the timeline pans it.
+    middle_pan: bool,
+    /// The rows' scroll offset last frame, and the one a pan asks for.
+    rows_offset: f32,
+    pan_rows: Option<f32>,
     drag: Option<Drag>,
     switch_drag: Option<switches::SwitchDrag>,
     rename: Option<(PrimPath, String)>,
@@ -273,6 +328,28 @@ pub struct TimelinePanel {
 }
 
 /// Comp time ↔ x in the graph.
+/// Time zoom per Alt + wheel notch.
+const ALT_WHEEL_ZOOM: f32 = 1.25;
+
+/// Mouse wheel notches turned with Alt/Option held this frame (up > 0).
+fn alt_wheel_notches(i: &egui::InputState) -> f32 {
+    i.events
+        .iter()
+        .filter_map(|e| match e {
+            egui::Event::MouseWheel {
+                unit,
+                delta,
+                modifiers,
+                ..
+            } if modifiers.alt => Some(match unit {
+                egui::MouseWheelUnit::Point => delta.y / 50.0,
+                egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => delta.y,
+            }),
+            _ => None,
+        })
+        .sum()
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct TimeAxis {
     pub(crate) left: f32,
@@ -1018,38 +1095,85 @@ impl TimelinePanel {
         let graph_left = full.left() + cols.viewport + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
         let mut axis = self.axis(&info, graph_left, graph_w);
-        if cfg!(target_os = "macos")
+        // Zoom time: Alt + mouse wheel anywhere over the timeline (AE, every
+        // platform; the rows do not scroll), and on macOS a pinch or smart
+        // zoom over the time graph. Around the pointer over the graph, else
+        // around the current time.
+        let graph_area = Rect::from_min_max(pos2(graph_left, tabs.bottom()), full.max);
+        let notches = if ui.rect_contains_pointer(Rect::from_min_max(
+            pos2(full.left(), tabs.bottom()),
+            full.max,
+        )) {
+            ui.input(alt_wheel_notches)
+        } else {
+            0.0
+        };
+        if notches != 0.0 {
+            ui.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+        }
+        let pinch = cfg!(target_os = "macos") && ui.rect_contains_pointer(graph_area);
+        let smart = pinch && crate::viewer::smart_zoom(ui.ctx());
+        let factor = if pinch {
+            ui.input(|i| i.zoom_delta())
+        } else {
+            1.0
+        } * ALT_WHEEL_ZOOM.powf(notches);
+        if smart || factor != 1.0 {
+            let anchor = ui
+                .input(|i| i.pointer.hover_pos())
+                .filter(|p| graph_area.contains(*p))
+                .map_or_else(|| axis.x(session.lock().time(&info.path)), |p| p.x);
+            let time = axis.t(anchor);
+            let full_span = info.duration.0 as f64;
+            let min_span = (info.frame_duration().0 * 10).min(info.duration.0) as f64;
+            let span = if smart {
+                if self.zoom > 0.0 {
+                    full_span
+                } else {
+                    full_span / 2.0
+                }
+            } else {
+                axis.span.0 as f64 / f64::from(factor)
+            };
+            if full_span > min_span {
+                self.zoom = 1.0
+                    - ((span - min_span) / (full_span - min_span))
+                        .clamp(0.0, 1.0)
+                        .cbrt() as f32;
+                let new_axis = self.axis(&info, graph_left, graph_w);
+                self.scroll = time - (new_axis.t(anchor) - new_axis.start);
+                axis = self.axis(&info, graph_left, graph_w);
+                ui.ctx().request_repaint();
+            }
+        }
+        // Middle-button drag (AE): pans the time graph sideways when zoomed in,
+        // and the rows up and down.
+        let (middle_pressed, middle_down, delta) = ui.input(|i| {
+            (
+                i.pointer.button_pressed(egui::PointerButton::Middle),
+                i.pointer.middle_down(),
+                i.pointer.delta(),
+            )
+        });
+        if middle_pressed
             && ui.rect_contains_pointer(Rect::from_min_max(
-                pos2(graph_left, tabs.bottom()),
+                pos2(full.left(), tabs.bottom()),
                 full.max,
             ))
-            && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
         {
-            let smart = crate::viewer::smart_zoom(ui.ctx());
-            let factor = ui.input(|i| i.zoom_delta());
-            if smart || factor != 1.0 {
-                let time = axis.t(pointer.x);
-                let full_span = info.duration.0 as f64;
-                let min_span = (info.frame_duration().0 * 10).min(info.duration.0) as f64;
-                let span = if smart {
-                    if self.zoom > 0.0 {
-                        full_span
-                    } else {
-                        full_span / 2.0
-                    }
-                } else {
-                    axis.span.0 as f64 / f64::from(factor)
-                };
-                if full_span > min_span {
-                    self.zoom = 1.0
-                        - ((span - min_span) / (full_span - min_span))
-                            .clamp(0.0, 1.0)
-                            .cbrt() as f32;
-                    let new_axis = self.axis(&info, graph_left, graph_w);
-                    self.scroll = time - (new_axis.t(pointer.x) - new_axis.start);
-                    axis = self.axis(&info, graph_left, graph_w);
-                    ui.ctx().request_repaint();
-                }
+            self.middle_pan = true;
+        }
+        if !middle_down {
+            self.middle_pan = false;
+        }
+        if self.middle_pan {
+            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+            if delta.x != 0.0 && self.zoom > 0.0 {
+                self.scroll = axis.start - Time((f64::from(delta.x) * axis.per_point()) as i64);
+                axis = self.axis(&info, graph_left, graph_w);
+            }
+            if delta.y != 0.0 {
+                self.pan_rows = Some((self.rows_offset - delta.y).max(0.0));
             }
         }
         #[cfg(test)]
@@ -1158,9 +1282,11 @@ impl TimelinePanel {
                     .input(|i| i.pointer.press_origin())
                     .or_else(|| bg.interact_pointer_pos())
             {
+                let mode = MarqueeMode::of(ui.input(|i| i.modifiers));
                 self.drag = Some(Drag::Marquee {
                     origin: p,
-                    additive: ui.input(|i| i.modifiers.shift),
+                    mode,
+                    base: session.lock().selected_keys.clone(),
                 });
             }
             if bg.clicked() {
@@ -1204,6 +1330,9 @@ impl TimelinePanel {
         let mut area = egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false]);
+        if let Some(y) = self.pan_rows.take() {
+            area = area.vertical_scroll_offset(y);
+        }
         // X: the first selected layer's row at the top.
         if std::mem::take(&mut self.scroll_to_selected) {
             let selected = session.lock().selected_layers.clone();
@@ -1290,10 +1419,27 @@ impl TimelinePanel {
             // around the time graph, whose background owns presses near its edge.
             pos2(body.left() + cols.end - 8.0, body.bottom()),
         );
+        self.rows_offset = scrolled.state.offset.y;
         if outline_bg.height() > 0.0 {
             let bg = ui
-                .interact(outline_bg, ui.id().with("outline_bg"), Sense::click())
+                .interact(
+                    outline_bg,
+                    ui.id().with("outline_bg"),
+                    Sense::click_and_drag(),
+                )
                 .labeled(egui::WidgetType::Other, tr("Timeline Layer List"));
+            // A drag here selects the layers it covers (AE).
+            if bg.drag_started_by(egui::PointerButton::Primary)
+                && let Some(p) = ui
+                    .input(|i| i.pointer.press_origin())
+                    .or_else(|| bg.interact_pointer_pos())
+            {
+                self.drag = Some(Drag::LayerMarquee {
+                    origin: p,
+                    mode: MarqueeMode::of(ui.input(|i| i.modifiers)),
+                    base: session.lock().selected_layers.clone(),
+                });
+            }
             if bg.clicked() {
                 let mut s = session.lock();
                 s.selected_keys.clear();

@@ -91,6 +91,30 @@ impl AudioMix {
         }
     }
 
+    /// One footage item's own sound at its own time (the Footage panel's
+    /// preview): source time 0 at mix time 0, full level.
+    pub fn from_footage(stage: &Stage, asset: &PrimPath) -> Self {
+        let file = stage
+            .prim(asset)
+            .filter(|v| v.value("has_audio").and_then(Value::as_bool) == Some(true))
+            .and_then(|v| v.value("file:original")?.as_str().map(PathBuf::from));
+        Self {
+            cache: None,
+            tracks: file
+                .map(|file| Track {
+                    file: Some(file),
+                    source: None,
+                    kernel: None,
+                    timing: LayerTiming::default(),
+                    levels: [0.0; 2],
+                    automation: None,
+                    effects: crate::audio_fx::Rack::default(),
+                })
+                .into_iter()
+                .collect(),
+        }
+    }
+
     pub fn with_cache(mut self, cache: Option<Arc<ConformedAudio>>) -> Self {
         self.cache = cache;
         self

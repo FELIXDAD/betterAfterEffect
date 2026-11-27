@@ -3,6 +3,8 @@
 //! drawn by the compositor like a layer would be (same decoders and caches):
 //! a one-layer comp the size of the footage, published as a GPU texture. Movies
 //! and sequences get AE's time ruler and current time below the image.
+//! Spacebar with the panel focused plays the footage here, with its own sound
+//! (AE: the preview plays in the focused viewer).
 
 use std::sync::Arc;
 
@@ -16,10 +18,11 @@ use bae_render::{
 };
 use bae_ui::Accessible as _;
 use bae_ui::theme::{self, color};
-use bae_ui::{Panel, PanelContext, PanelKind, TabInfo, tr};
+use bae_ui::{Invocation, Panel, PanelContext, PanelKind, TabInfo, tr};
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::common;
+use crate::session::SharedSession;
 
 /// Height of the time ruler and of the bottom bar.
 const RULER: f32 = 22.0;
@@ -225,6 +228,14 @@ pub struct FootagePanel {
     time: Time,
     /// The footage the time belongs to.
     shown: Option<PrimPath>,
+    /// Playing here (Spacebar with the panel focused).
+    playing: Option<Playing>,
+}
+
+struct Playing {
+    started: std::time::Instant,
+    from: Time,
+    repeat: bool,
 }
 
 impl FootagePanel {
@@ -250,6 +261,60 @@ impl FootagePanel {
         Some(gpu)
     }
 
+    /// Spacebar: play the footage from the current time (from the start when
+    /// at its end), with its sound; the composition stops.
+    fn play(&mut self, cx: &PanelContext<'_>, f: &Footage) {
+        let session = common::session(cx.resources);
+        let mut s = session.lock();
+        s.stop();
+        let duration = f.duration.unwrap_or(Time::ZERO);
+        let from = if self.time + f.rate().frame_to_time(1) >= duration {
+            Time::ZERO
+        } else {
+            self.time
+        };
+        let repeat = s.preview.profiles[crate::session::PreviewShortcut::Space as usize].repeat;
+        s.sound_footage(cx, &f.asset, from, duration, repeat);
+        self.time = from;
+        self.playing = Some(Playing {
+            started: std::time::Instant::now(),
+            from,
+            repeat,
+        });
+    }
+
+    fn stop(&mut self, session: &SharedSession) {
+        if self.playing.take().is_some() {
+            session.lock().stop_footage_sound();
+        }
+    }
+
+    /// Advance the playing time; stops at the end unless the preview loops,
+    /// and when the composition starts playing.
+    fn advance(&mut self, ui: &Ui, session: &SharedSession, f: &Footage) {
+        let Some(play) = &self.playing else {
+            return;
+        };
+        let duration = f.duration.unwrap_or(Time::ZERO);
+        if session.lock().is_playing() || duration <= Time::ZERO {
+            self.stop(session);
+            return;
+        }
+        let mut t = play.from + Time::from_seconds(play.started.elapsed().as_secs_f64());
+        if t >= duration {
+            if play.repeat {
+                t = Time(t.0 % duration.0);
+            } else {
+                self.time = duration - f.rate().frame_to_time(1);
+                self.stop(session);
+                return;
+            }
+        }
+        let rate = f.rate();
+        self.time = rate.frame_to_time(rate.time_to_frame(t));
+        ui.ctx().request_repaint();
+    }
+
     fn footage(cx: &PanelContext<'_>) -> Option<Footage> {
         let asset = common::session(cx.resources).lock().footage_view.clone()?;
         Footage::of(cx.stage, &asset)
@@ -259,6 +324,25 @@ impl FootagePanel {
 impl Panel for FootagePanel {
     fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
         self.display.menu(ui);
+    }
+
+    fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
+        if action.id != crate::actions::ids::PLAY {
+            return false;
+        }
+        // A still has nothing to play (AE).
+        if let Some(f) = Self::footage(cx).filter(Footage::timed) {
+            if self.playing.is_some() {
+                self.stop(&common::session(cx.resources));
+            } else {
+                self.play(cx, &f);
+            }
+        }
+        true
+    }
+
+    fn on_close(&mut self, cx: &mut PanelContext<'_>) {
+        self.stop(&common::session(cx.resources));
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
@@ -277,9 +361,14 @@ impl Panel for FootagePanel {
         let full = ui.max_rect();
         ui.allocate_rect(full, Sense::hover());
         let footage = Self::footage(cx);
+        let session = common::session(cx.resources);
         if footage.as_ref().map(|f| &f.asset) != self.shown.as_ref() {
+            self.stop(&session);
             self.shown = footage.as_ref().map(|f| f.asset.clone());
             self.time = Time::ZERO;
+        }
+        if let Some(f) = &footage {
+            self.advance(ui, &session, f);
         }
         let timed = footage.as_ref().is_some_and(Footage::timed);
         let bottom = BAR + if timed { RULER } else { 0.0 };
@@ -287,7 +376,9 @@ impl Panel for FootagePanel {
         if timed && let Some(f) = &footage {
             let ruler =
                 Rect::from_min_size(pos2(full.min.x, view.max.y), vec2(full.width(), RULER));
-            self.ruler(ui, ruler, f);
+            if self.ruler(ui, ruler, f) {
+                self.stop(&session);
+            }
         }
         let p = ui.painter_at(full);
         p.rect_filled(view, 0.0, self.display.background(ui));
@@ -324,7 +415,8 @@ impl Panel for FootagePanel {
 impl FootagePanel {
     /// AE's time ruler: the footage's duration with the current-time indicator,
     /// click or drag to move it.
-    fn ruler(&mut self, ui: &Ui, r: Rect, f: &Footage) {
+    /// Returns whether the pointer moved the time (that stops playback).
+    fn ruler(&mut self, ui: &Ui, r: Rect, f: &Footage) -> bool {
         let resp = ui.interact(r, ui.id().with("footage-ruler"), Sense::click_and_drag());
         let p = ui.painter_at(r);
         p.rect_filled(r, 0.0, color::PANEL);
@@ -344,11 +436,14 @@ impl FootagePanel {
             0.0,
             color::ACCENT_DIM,
         );
-        if let Some(pos) = resp.interact_pointer_pos() {
+        let moved = if let Some(pos) = resp.interact_pointer_pos() {
             let t = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
             let frame = (t * last as f32).round() as i64;
             self.time = rate.frame_to_time(frame);
-        }
+            true
+        } else {
+            false
+        };
         // Ticks: one per second.
         let seconds = duration.as_seconds().max(0.0);
         let step = (seconds / 20.0).ceil().max(1.0);
@@ -376,6 +471,7 @@ impl FootagePanel {
             color::ACCENT,
             Stroke::NONE,
         ));
+        moved
     }
 
     /// The bottom bar: magnification and, for movies, the current time.

@@ -471,6 +471,8 @@ pub struct Session {
     last_scrub: Option<Time>,
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
+    /// The Footage panel's preview owns the device (its own sound).
+    footage_sound: bool,
     /// Preview panel options (range, play from, frame rate, skip …).
     pub preview: PreviewProfiles,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -1310,6 +1312,7 @@ impl Session {
     }
 
     pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        self.footage_sound = false;
         self.prepare_mix(cx, info);
         self.play(info);
         let options = self.preview_options().clone();
@@ -1363,7 +1366,48 @@ impl Session {
     /// Keep the audio mix current (once per composition edit). While playing,
     /// a new mix restarts the device and the clock at the current frame: a late
     /// device or a live layer edit. The shell ticks the clock.
+    /// Play `asset`'s own sound from `from` over `0..duration` (the Footage
+    /// panel's preview). The composition's mix is prepared again when it plays.
+    pub(crate) fn sound_footage(
+        &mut self,
+        cx: &bae_ui::PanelContext<'_>,
+        asset: &PrimPath,
+        from: Time,
+        duration: Time,
+        repeat: bool,
+    ) {
+        let Some(output) = &self.output else {
+            return;
+        };
+        let mix = bae_media::mix::AudioMix::from_footage(cx.stage, asset).with_cache(
+            cx.resources
+                .get::<Arc<bae_media::conform::ConformedAudio>>()
+                .cloned(),
+        );
+        self.mix_revision = None;
+        if mix.is_empty() {
+            output.stop();
+            return;
+        }
+        output.prepare(mix);
+        output.seek(from, TimeRange::new(Time::ZERO, duration), repeat);
+        self.footage_sound = true;
+    }
+
+    /// Silence the Footage panel's preview sound.
+    pub(crate) fn stop_footage_sound(&mut self) {
+        if std::mem::take(&mut self.footage_sound)
+            && let Some(output) = &self.output
+        {
+            output.stop();
+        }
+    }
+
     pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        // The Footage panel's sound plays until that preview stops.
+        if self.footage_sound && self.playback.is_none() {
+            return;
+        }
         if self.prepare_mix(cx, info)
             && let Some(pb) = &self.playback
             && pb.caching.is_none()
