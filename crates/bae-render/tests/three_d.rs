@@ -939,3 +939,94 @@ fn collapsed_3d_precomp_layers_join_the_scene() {
         "{centre}"
     );
 }
+
+/// Models receive the shadows of models (AE's Advanced 3D: spot and
+/// parallel lights): a small cube in front of a slab, lit at an angle by a
+/// parallel light, darkens the slab beside it when it casts shadows.
+#[test]
+fn models_receive_model_shadows() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-model-receive-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let boxed = |name: &str, z: f64| {
+        let mut obj = String::new();
+        for zz in [-z, z] {
+            for y in [-1.0, 1.0] {
+                for x in [-1.0, 1.0] {
+                    obj += &format!("v {x} {y} {zz}\n");
+                }
+            }
+        }
+        for f in [
+            "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+        ] {
+            obj += &format!("f {f}\n");
+        }
+        let file = dir.join(name);
+        std::fs::write(&file, obj).unwrap();
+        file
+    };
+    let (cube, slab) = (boxed("cube.obj", 1.0), boxed("slab.obj", 0.05));
+    let mut r = Renderer::new(gpu);
+    use bae_render::light::{Falloff, Light, LightKind, ShadowMode};
+    let model = |name: &str, file: &std::path::Path, m: DMat4| {
+        let mut l = RenderLayer::new(
+            p(&format!("/comps/main/layers/{name}")),
+            LayerContent::Model(bae_render::ModelRef {
+                asset: p(&format!("/assets/{name}")),
+                file: Some(file.to_owned()),
+            }),
+        );
+        l.matrix_3d = Some(m);
+        l
+    };
+    let mut scene = |casts: ShadowMode| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut caster = model(
+            "cube",
+            &cube,
+            DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+                * DMat4::from_scale(DVec3::splat(0.4)),
+        );
+        caster.material.casts_shadows = casts;
+        let receiver = model(
+            "slab",
+            &slab,
+            DMat4::from_translation(DVec3::new(100.0, 100.0, 50.0))
+                * DMat4::from_scale(DVec3::splat(2.0)),
+        );
+        comp.layers = vec![caster, receiver];
+        let d = DVec3::new(0.3, 0.0, 1.0).normalize();
+        comp.lights = vec![Light {
+            kind: LightKind::Parallel,
+            world: DMat4::from_translation(DVec3::new(100.0, 100.0, -300.0))
+                * bae_render::camera::look_at(d),
+            point_of_interest: DVec3::new(100.0, 100.0, 0.0),
+            color: [1.0, 1.0, 1.0],
+            intensity: 100.0,
+            cone_angle: 90.0,
+            cone_feather: 50.0,
+            falloff: Falloff::None,
+            radius: 500.0,
+            falloff_distance: 500.0,
+            casts_shadows: true,
+            shadow_darkness: 100.0,
+            shadow_diffusion: 0.0,
+            scope_below: None,
+            environment: None,
+        }];
+        render(&mut r, &comp)
+    };
+    let lit = scene(ShadowMode::Off);
+    let shadowed = scene(ShadowMode::On);
+    let luma =
+        |img: &Image, x, y| -> i32 { img.px(x, y).iter().take(3).map(|&c| i32::from(c)).sum() };
+    assert!(
+        luma(&shadowed, 128, 100) + 150 < luma(&lit, 128, 100),
+        "shadow on the slab: {:?} vs {:?}",
+        shadowed.px(128, 100),
+        lit.px(128, 100)
+    );
+    assert_eq!(luma(&shadowed, 60, 100), luma(&lit, 60, 100), "lit");
+    std::fs::remove_dir_all(dir).ok();
+}
