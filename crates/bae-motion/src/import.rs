@@ -55,6 +55,9 @@ pub struct ImportParams {
     /// Timeline panel (AE), in the same undo step.
     #[serde(default)]
     pub comp: Option<PrimPath>,
+    /// Put multiple dropped footage layers into one nested composition.
+    #[serde(default)]
+    pub precompose: bool,
     /// Create a composition matching the first imported source.
     #[serde(default)]
     pub create_comp: bool,
@@ -167,7 +170,11 @@ impl Command for ImportItems {
             let path = Path::new(&f.path);
             let file = AssetFile::from_path(path, None, false)
                 .map_err(|e| fail(format!("cannot import {}: {e}", f.path)))?;
-            if let Some(bad) = f.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
+            if let Some((bad, _)) = f.attrs.iter().find(|(k, v)| {
+                !(ATTRS.contains(&k.as_str())
+                    || (crate::project_settings::is_metadata_field(k)
+                        && matches!(v, Value::String(_))))
+            }) {
                 return Err(fail(format!("{bad} is not a footage attribute")));
             }
             let folder = match f.folder.as_deref() {
@@ -211,6 +218,19 @@ impl Command for ImportItems {
                     LayerKind::Footage
                 };
                 layers.insert(0, add_imported_layer(tx, &comp, kind, &item)?);
+            }
+            if p.precompose && layers.len() > 1 {
+                let result = crate::precompose::Precompose.run(
+                    tx,
+                    crate::precompose::PrecomposeParams {
+                        layers,
+                        name: None,
+                        mode: Default::default(),
+                        adjust_duration: false,
+                        time: None,
+                    },
+                )?;
+                layers = vec![result.layer];
             }
         }
         Ok(ImportOutput { items, layers })
