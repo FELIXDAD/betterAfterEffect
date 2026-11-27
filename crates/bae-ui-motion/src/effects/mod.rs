@@ -211,9 +211,23 @@ pub(crate) fn layer_masks(stage: &Stage, effect: &PrimPath) -> Vec<PrimPath> {
         .collect()
 }
 
-/// A dragged effect (Effects & Presets → a layer in the timeline or viewer).
+/// An effect or animation preset dragged from Effects & Presets onto a layer
+/// (in the Timeline or the viewer) or into Effect Controls.
 #[derive(Clone, Debug)]
-pub(crate) struct EffectDrag(pub String);
+pub(crate) enum EffectDrag {
+    Effect(String),
+    Preset(std::sync::Arc<[bae_motion::effect::PresetEffect]>),
+}
+
+impl EffectDrag {
+    /// Apply it to `layers` (one undo step).
+    pub(crate) fn apply(&self, cx: &mut PanelContext<'_>, layers: &[PrimPath]) {
+        match self {
+            EffectDrag::Effect(m) => apply(cx, layers, m),
+            EffectDrag::Preset(effects) => crate::presets::apply_to_layers(cx, layers, effects),
+        }
+    }
+}
 
 /// The match name of the last applied effect (Effect ▸ Last Effect).
 static LAST: Mutex<Option<String>> = Mutex::new(None);

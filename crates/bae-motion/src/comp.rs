@@ -683,3 +683,123 @@ pub(crate) fn create_project_folder(
     }
     Ok(path)
 }
+
+// ---------------------------------------------------------------------------
+
+pub struct MoveItems;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct MoveItemsParams {
+    /// Project items: comps, footage, solids, folders.
+    pub items: Vec<PrimPath>,
+    /// The folder they go into; omitted: the top of the project.
+    #[serde(default)]
+    pub folder: Option<PrimPath>,
+}
+
+/// Output of `item.move`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MoveItemsOutput {
+    /// Where each item is now, in order.
+    pub paths: Vec<PrimPath>,
+}
+
+fn is_item(stage: &bae_model::Stage, p: &PrimPath) -> bool {
+    stage.prim(p).is_some_and(|v| {
+        v.is_a(&PrimType::FOLDER) || v.is_a(&PrimType::COMP) || v.is_a(&PrimType::ASSET)
+    })
+}
+
+/// Points every reference to `from` (or inside it) at `to` instead: layer
+/// sources, expressions' and effects' layer and comp links, keyframed too.
+fn retarget_everywhere(
+    tx: &mut Transaction<'_>,
+    from: &PrimPath,
+    to: &PrimPath,
+) -> Result<(), CommandError> {
+    let fix = |v: &mut Value| {
+        if let Value::PrimRef(p) | Value::AssetRef(p) = v
+            && let Some(n) = p.reparent(from, to)
+        {
+            *p = n;
+            return true;
+        }
+        false
+    };
+    let mut edits = Vec::new();
+    let stage = tx.stage();
+    for path in stage.traverse() {
+        let Some(view) = stage.prim(&path) else {
+            continue;
+        };
+        for attr in view.attr_names() {
+            let Some(spec) = view.attr(attr) else {
+                continue;
+            };
+            let mut spec = spec.clone();
+            let mut changed = spec.value.as_mut().is_some_and(fix);
+            for k in spec.keyframes.values_mut() {
+                changed |= fix(&mut k.value);
+            }
+            if changed {
+                edits.push((path.clone(), attr.to_owned(), spec));
+            }
+        }
+    }
+    for (path, attr, spec) in edits {
+        write_attr(tx, &path, &attr, spec)?;
+    }
+    Ok(())
+}
+
+impl Command for MoveItems {
+    type Params = MoveItemsParams;
+    type Output = MoveItemsOutput;
+    const ID: &'static str = "item.move";
+    const TITLE: &'static str = "Move Items";
+    const DESCRIPTION: &'static str = "Project panel: move items into a folder (or to the top of the project), in order; every layer, expression and effect that points at them keeps pointing at them.";
+
+    fn run(
+        &self,
+        tx: &mut Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<MoveItemsOutput, CommandError> {
+        let folder = p.folder.unwrap_or_else(PrimPath::root);
+        let stage = tx.stage();
+        if !folder.is_root()
+            && !stage
+                .prim(&folder)
+                .is_some_and(|v| v.is_a(&PrimType::FOLDER))
+        {
+            return Err(fail(format!("{folder} is not a folder")));
+        }
+        let mut paths = Vec::new();
+        for item in &p.items {
+            if !is_item(tx.stage(), item) {
+                return Err(fail(format!("{item} is not a project item")));
+            }
+            if folder == *item || folder.ancestors().any(|a| a == *item) {
+                return Err(fail("a folder cannot go into itself"));
+            }
+            if item.parent().as_ref() == Some(&folder) {
+                paths.push(item.clone());
+                continue;
+            }
+            let to = child(
+                &folder,
+                &query::unique_child_name(tx.stage(), &folder, item.name()),
+            )?;
+            bae_model::commands::MovePrim.run(
+                tx,
+                bae_model::commands::MovePrimParams {
+                    from: item.clone(),
+                    to: to.clone(),
+                    index: None,
+                },
+            )?;
+            retarget_everywhere(tx, item, &to)?;
+            paths.push(to);
+        }
+        Ok(MoveItemsOutput { paths })
+    }
+}

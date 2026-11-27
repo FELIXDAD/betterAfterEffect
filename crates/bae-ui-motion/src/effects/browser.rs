@@ -178,10 +178,17 @@ impl EffectsPanel {
                     } else {
                         for r in group.iter().filter(|r| matches(r.name) || r.folder.split('/').any(matches)) {
                             let selected = matches!(self.selection, Some(Selection::Builtin(n)) if n == r.name);
-                            let resp = ui.selectable_label(selected, tr(r.name));
+                            let resp = ui
+                                .selectable_label(selected, tr(r.name))
+                                .interact(egui::Sense::drag());
                             self.reveal_if(selected, &resp);
                             rows.push((Selection::Builtin(r.name), None));
                             if resp.clicked() { self.selection = Some(Selection::Builtin(r.name)); }
+                            crate::drag_feedback::source(
+                                &resp,
+                                || crate::drag_feedback::Ghost::of(&resp, 1),
+                                || EffectDrag::Preset(vec![r.build()].into()),
+                            );
                             if resp.double_clicked() { *apply = Some(vec![r.build()].into()); }
                         }
                     }
@@ -458,9 +465,14 @@ impl Panel for EffectsPanel {
                             ui.horizontal(|ui| {
                                 ui.add_space(28.0);
                                 let selected = matches!(&self.selection,Some(Selection::Preset(p)) if p == path);
-                                let resp = ui.selectable_label(selected, name);
+                                let resp = ui.selectable_label(selected, name).interact(egui::Sense::drag());
                                 self.reveal_if(selected, &resp);
                                 list.push((Selection::Preset(path.clone()), None));
+                                crate::drag_feedback::source(
+                                    &resp,
+                                    || crate::drag_feedback::Ghost::of(&resp, 1),
+                                    || EffectDrag::Preset(entry.effects.clone()),
+                                );
                                 if resp.clicked() {
                                     self.selection = Some(Selection::Preset(path.clone()));
                                 }
@@ -518,7 +530,11 @@ impl Panel for EffectsPanel {
                             if resp.clicked() {
                                 self.selection = Some(Selection::Effect(e.match_name.clone()));
                             }
-                            resp.dnd_set_drag_payload(EffectDrag(e.match_name.clone()));
+                            crate::drag_feedback::source(
+                                &resp,
+                                || crate::drag_feedback::Ghost::of(&resp, 1),
+                                || EffectDrag::Effect(e.match_name.clone()),
+                            );
                             if resp.double_clicked() {
                                 apply = Some(e.match_name.clone());
                             }
