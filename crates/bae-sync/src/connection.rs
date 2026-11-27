@@ -207,7 +207,11 @@ pub struct ConnectionConfig {
     /// [`Connection`]) whenever the connection wants a [`Connection::pump`]:
     /// something arrived, a connect attempt finished, a retry or keep-alive is
     /// due, a close finished, a pump could not take everything that arrived.
-    /// Hook it to "request a repaint". It must not block.
+    /// It must not block. Hook it to something that runs a pump even when the
+    /// window draws no frames (minimized, covered): an event-loop wake-up the
+    /// shell handles without a repaint, not only egui's `request_repaint`. A
+    /// hub drops a client it hears nothing from for 60 s, and `Hello`s and
+    /// heartbeats only go out in `pump` (`docs/spec/sync.md` 7.9).
     pub wake: Arc<dyn Fn() + Send + Sync>,
     /// Session settings; `None`: [`Target::session_config`]. `client` is
     /// replaced by the one above. [`SessionConfig::send_data`] is turned off
@@ -609,7 +613,12 @@ impl Worker {
                     self.hub_limits,
                 )?;
                 hub.set_idle_timeout(self.hub_idle_timeout);
-                let access = hub.access();
+                let mut access = hub.access();
+                if access == Access::Unknown {
+                    // A hub that does not say in the handshake (bae-hub
+                    // 0.0.1): ask its status endpoint, still on this thread.
+                    access = crate::hub::status_access(url, token.as_deref(), self.hub_timeout);
+                }
                 let tick = self.io_tick.unwrap_or(HUB_TICK);
                 Ok(Link {
                     transport: ThreadedTransport::spawn(hub, tick, wake),

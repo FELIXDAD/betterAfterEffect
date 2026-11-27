@@ -250,6 +250,86 @@ pub(crate) fn check_url(url: &str, token: Option<&str>) -> Result<(), SyncError>
     client_request(url, token).map(|_| ())
 }
 
+/// The longest `GET /v1/status` reply [`status_access`] reads.
+const STATUS_MAX: usize = 64 << 10;
+
+/// What the hub's `GET /v1/status` says `token` may do (its `"access"`): the
+/// fallback for hubs that do not send [`ACCESS_HEADER`] in the handshake
+/// (bae-hub 0.0.1), whose read-only tokens would otherwise only show by edits
+/// being dropped and sent again. Same host, port, token and `?token=` query
+/// as the sync `url`. [`Access::Unknown`] if it does not say or anything
+/// fails. Blocks for at most about `timeout` per step (connect, write, each
+/// read): call it on a connect thread.
+pub(crate) fn status_access(url: &str, token: Option<&str>, timeout: Duration) -> Access {
+    status_reply(url, token, timeout)
+        .and_then(|v| Some(Access::parse(v.get("access")?.as_str()?)))
+        .unwrap_or(Access::Unknown)
+}
+
+/// The JSON body of a `200` reply to `GET /v1/status` on the hub of `url`.
+fn status_reply(url: &str, token: Option<&str>, timeout: Duration) -> Option<serde_json::Value> {
+    let (request, host, port) = client_request(url, token).ok()?;
+    let path = match request.uri().query() {
+        Some(q) => format!("/v1/status?{q}"),
+        None => "/v1/status".to_owned(),
+    };
+    let addrs: Vec<SocketAddr> = (host.as_str(), port).to_socket_addrs().ok()?.collect();
+    let mut stream = connect_any(&addrs, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let authority = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let mut head = format!(
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nAccept: application/json\r\nConnection: close\r\n"
+    );
+    // Checked by `client_request`: no line breaks in it.
+    if let Some(auth) = request.headers().get(AUTHORIZATION) {
+        head.push_str(&format!("Authorization: {}\r\n", auth.to_str().ok()?));
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).ok()?;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let (head_len, body_len) = loop {
+        let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
+        if let Some(at) = end {
+            let len = content_length(&buf[..at]);
+            if len.is_some_and(|n| buf.len() >= at + 4 + n) {
+                break (at, len);
+            }
+        }
+        if buf.len() > STATUS_MAX {
+            return None;
+        }
+        match stream.read(&mut chunk) {
+            // Closed: the body is what came (no `Content-Length`).
+            Ok(0) => break (end?, None),
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(_) => return None,
+        }
+    };
+    let head = std::str::from_utf8(&buf[..head_len]).ok()?;
+    if head.split_whitespace().nth(1) != Some("200") {
+        return None;
+    }
+    let body = &buf[head_len + 4..];
+    let body = body_len.map_or(body, |n| &body[..n]);
+    serde_json::from_slice(body).ok()
+}
+
+/// The `Content-Length` of an HTTP response head.
+fn content_length(head: &[u8]) -> Option<usize> {
+    std::str::from_utf8(head).ok()?.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse().ok())?
+    })
+}
+
 /// A refused handshake: the status, and the hub's `{"error": ...}` text if
 /// the body came with the response head.
 fn refused(resp: &tungstenite::http::Response<Option<Vec<u8>>>) -> SyncError {

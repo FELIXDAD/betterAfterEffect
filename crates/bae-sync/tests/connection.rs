@@ -691,6 +691,93 @@ fn a_hub_connect_that_times_out_is_offline_not_unresponsive() {
     drop(listener);
 }
 
+/// A hub that does not send `x-bae-access` in the handshake (bae-hub 0.0.1)
+/// is asked `GET /v1/status` with the same token on the connect thread: a
+/// read-only token there makes the link `Read` (no edits sent), as with a
+/// hub that says so. Before, the access stayed `Unknown`, and the hub
+/// dropped every edit the client sent (again after each of its `Hello`s).
+#[cfg(feature = "hub")]
+#[test]
+fn an_old_hub_that_does_not_send_the_access_is_asked_for_its_status() {
+    use std::io::{Read, Write};
+
+    use bae_sync::{HubTransport, SessionConfig, SyncSession};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("ws://{}/projects/film", listener.local_addr().unwrap());
+    let (asked_tx, asked) = std::sync::mpsc::channel::<String>();
+    let (stop_tx, stop) = std::sync::mpsc::channel::<()>();
+    let hub = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        // As bae-hub 0.0.1: no access header.
+        let mut link = HubTransport::accept(stream, Some("viewer-token")).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut stage = client_stage(&base_snapshots());
+        let mut config = SessionConfig::new(ClientId::new("hub").unwrap());
+        config.hello_interval = None;
+        let mut session = SyncSession::new(config);
+        while stop.try_recv().is_err() {
+            if let Ok((mut status, _)) = listener.accept() {
+                status.set_nonblocking(false).unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0u8; 1];
+                while !request.ends_with(b"\r\n\r\n") {
+                    status.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                let _ = asked_tx.send(String::from_utf8(request).unwrap());
+                let body = r#"{"service":"bae-hub","token":"viewer","access":"read"}"#;
+                write!(
+                    status,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+            if session.pump(&mut stage, &mut link).is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        session.stats().bytes_received
+    });
+    let mut app = App {
+        stage: client_stage(&base_snapshots()),
+        conn: Connection::start(
+            Target::Hub {
+                url,
+                token: Some("viewer-token".into()),
+            },
+            config("viewer"),
+        ),
+        who: author("user:viewer"),
+    };
+    wait("online", LONG, || {
+        app.pump();
+        app.conn.is_online()
+    });
+    assert_eq!(app.conn.access(), Access::Read);
+    let request = asked.recv_timeout(LONG).unwrap();
+    assert!(
+        request.starts_with("GET /v1/status HTTP/1.1\r\n"),
+        "{request}"
+    );
+    assert!(
+        request.contains("\r\nAuthorization: Bearer viewer-token\r\n"),
+        "{request}"
+    );
+    app.set_opacity(5.0);
+    for _ in 0..20 {
+        app.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(app.conn.status().unsynced);
+    assert_eq!(app.conn.session().stats().bytes_sent, 0);
+    drop(app);
+    let _ = stop_tx.send(());
+    assert_eq!(hub.join().unwrap(), 0, "no edits arrived");
+}
+
 /// `n` pseudo-random letters (Loro does not get them much smaller).
 #[cfg(feature = "hub")]
 fn text(seed: u64, n: usize) -> String {

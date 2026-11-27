@@ -114,7 +114,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 
 - `HubTransport::connect(url, token, timeout)`：`url` 形如 `ws://nas.local:7341/projects/<工程>`，路径和查询参数怎么选工程由 Hub（10）决定；`token` 作为 `Authorization: Bearer <token>` 发送。Hub 用 HTTP 错误拒绝握手时返回 `SyncError::HubRefused { status, message }`（`message` 是 Hub 返回的 `{"error": …}`，没随响应头一起收到时是状态码的标准说明），`Connection` 据此区分要用户处理的失败（7.4）。暂时只支持 `ws://`（局域网），`wss://` 报错。主机名解析出的每个地址都试，IPv4 优先（Hub 默认只监听 `0.0.0.0`，而 `localhost`、`nas.local` 常常先解析出 IPv6 地址），`timeout` 在剩下的地址之间平分。
-- **读写权限**：Hub 在握手响应里带 `x-bae-access: read|write`（`ACCESS_HEADER`）。服务端用 `HubTransport::accept_granting(stream, token, limits, access)` 发出，客户端用 `HubTransport::access()` 读出；没有这个头（旧 Hub、`accept` / `accept_with`）是 `Access::Unknown`。
+- **读写权限**：Hub 在握手响应里带 `x-bae-access: read|write`（`ACCESS_HEADER`）。服务端用 `HubTransport::accept_granting(stream, token, limits, access)` 发出，客户端用 `HubTransport::access()` 读出；没有这个头（旧 Hub、`accept` / `accept_with`）是 `Access::Unknown`；`Connection` 这时再用同一个令牌 `GET /v1/status` 问一次（7.5）。
 - 一条协议消息就是一个 WebSocket **二进制帧**；文本帧、ping/pong 忽略（pong 自动回复）；解码失败或未知类型的帧跳过；收到 close 帧或连接断开返回 `SyncError::Closed`。
 - 握手后套接字是非阻塞的，`send` 写不完的部分留在缓冲区，在之后的 `recv` 里继续发。`recv` 继续发时写失败（比如对方发完最后一条就断开，我们还在给它发东西，连接被重置），先把已经收到的消息读完，再报告错误：对方认为它们已经送到了。这只是尽力而为：Windows 收到重置时会丢掉还没读的数据，所以客户端结束时要调用 `close`（等对方确认关闭，见下）。应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。
 - **上限**（`HubLimits`，每个连接一份；`connect_with` / `accept_with` / `set_limits` 可改）：
@@ -534,7 +534,7 @@ closing.wait(超时); // 退出时等关闭完成
 
 ### 7.5 读写权限
 
-- Hub：握手响应里的 `x-bae-access`（3.1）。旧 Hub 不发，`access` 是 `Unknown`，照常发送修改，由 Hub 决定收不收。
+- Hub：握手响应里的 `x-bae-access`（3.1）。不发它的旧 Hub（bae-hub 0.0.1）：连接线程接着用同一个主机、端口和令牌（`Authorization: Bearer`，URL 里的 `?token=` 也带上）发一次 `GET /v1/status`（0.0.1 的 Hub 已经在那里返回 `"access"`），按它的 `access` 定 `Read` / `Write`。只读令牌因此也在旧 Hub 上变成 `Read`、不发修改；以前一直是 `Unknown`，修改照发、被 Hub 默默丢掉，Hub 每个 `Hello`（5 秒）之后客户端再发一遍。这一步也在连接线程上，有自己的超时（`hub_timeout`，每一步）；没回答、不是 200、没有 `access` 字段时仍是 `Unknown`，照常发送修改，由 Hub 决定收不收（`an_old_hub_that_does_not_send_the_access_is_asked_for_its_status`）。
 - 共享目录：连接线程上 `DirTransport::open` 在 `updates/` 里建锁文件，成功时 `access` 为 `Write`。失败且错误是 `PermissionDenied` / `ReadOnlyFilesystem` 时还不能断定目录不能写：Windows 和它提供的 SMB 共享上，被别人的清理删掉、还处于"等待删除"状态的锁文件（4.7）打开时也是 `PermissionDenied`，等过 `open` 的 2 秒也可能还是这样。所以再在 `updates/` 里建一个自己的探测文件（`<client-id>.tmp-<随机>`，建好马上删；万一删不掉，这个客户端下一次可写打开目录、拿到锁时和其他临时文件一起删掉（4.3），那时没有自己的会话在写这种文件；4.7 的清理打开时也按临时文件删，但它默认关闭）：
   - 也建不了（或者 `updates/` 不存在、建不出来）：改用 `DirTransport::open_read_only`（4.5），`access` 为 `Read`。
   - 建得了：目录能写，是锁文件本身打不开。这次尝试按普通失败处理（`Offline`，按退避重试），不当成只读。连续 3 次都这样（`LOCK_DENIED_ATTEMPTS`；每次 `open` 自己还等 2 秒），下一次就改用只读打开，`access` 为 `Read`：等待删除的锁文件这时早已删完，还打不开的是一直打不开的（从只读的地方拷来的、别的用户建的；Windows 上在资源管理器里给工程文件夹勾了"只读"时，文件都带上只读属性，目录照样能建文件，这个情况没在 Windows 上试过）。以前这样的目录一直 `Offline`，看不到别人的修改。
@@ -542,7 +542,6 @@ closing.wait(超时); // 退出时等关闭完成
   `open` 遇到 `PermissionDenied` 会先重试 2 秒，所以连接写不了的目录要多等这 2 秒；这些都在连接线程上，不卡 `pump`。只读打开的目录不清理（4.5）。
 - 只读的共享目录链路每隔 `Backoff::failed_retry`（默认 60 秒；`None` 不检查）在后台线程上再探测一次能不能写：同样建、删一个探测文件，再看自己的锁文件（有的话）能不能以写方式打开（`DirTransport::probe_lock`，不加锁、不改文件）。后一步是为了因为锁文件改成只读的链路：只看探测文件的话每次都判断能写，重新连接，又在锁文件上失败，再扫一遍目录。能写了（权限改了，或者当初判断错了）就在后台线程丢掉只读链路，立即重新连接（可写；不算失败，退避不变），只读期间的修改随之写进日志。探测还没结果时不开新的探测；NAS 卡住时探测线程一直等，`pump` 不受影响。
 - `Read` 时会话的 `send_data` 关掉（2.4 第 5 步）：不发任何修改，`Hello` 和在线状态照发（共享目录只读时在线状态不写），照常接收；本地修改留在 `unsynced` 和 `Closing::unsynced` 里，状态栏如实显示。应用应在 `Read` 时禁用编辑。`Write` / `Unknown` 时用配置里的 `send_data`（默认 `true`）。Hub 对只读连接只收不太大的消息（`read_only_max_incoming`，3.1）：只读客户端本来就不发数据，本地改了多少都不会被断开（`a_read_only_token_reads_but_sends_no_edits`：上限 64 KiB、本地改了 256 KiB，连接一直不断）。
-- 还没做：不发 `x-bae-access` 的旧 Hub 不会再用 `GET /v1/status` 查一次。
 
 ### 7.6 在线状态
 
@@ -572,6 +571,7 @@ closing.wait(超时); // 退出时等关闭完成
 - 只读令牌：`access = Read`；收得到别人的修改；自己的修改不发出去（`bytes_sent = 0`），`unsynced` 为真；在线状态照常可见；Hub 的只读上限设成 64 KiB、本地改了 256 KiB 也不被断开（只连了一次）。配置里 `send_data = false` 的客户端在可写的共享目录上同样什么都不写，`access` 仍是 `Write`，`Closing::unsynced` 列出改过的文档（`a_viewer_sends_no_edits_where_it_could`）。共享目录 `updates/` 不可写时同样，什么文件都不写（Unix；root 不受权限限制时跳过，测试时用去掉 `CAP_DAC_OVERRIDE` 的 root 跑过）。
 - 关闭：最后一次修改被 `min_send_interval` 推迟时也能送到（共享目录 300 ms；Hub 测试里设成 1 秒，去掉 `flush` 就收不到），"离开"立即可见，`Closing` 成功；之后加入 Hub 的人也拿到。刚分享一个大工程、大部分还被流量控制挡着时关闭（8 个 5 MiB 的工程层，假 Hub 每 100 ms 读一条，上限按默认的算法缩小：`max_message` 8 MiB、`max_backlog` 1 MiB）：全部送到，`Closing` 成功，`unsynced()` 为空；一次全交给链路时超过 `max_unsent`，Hub 只收到 3–4 个工程层和一个重置（`closing_after_a_large_held_back_share_delivers_it`；单元测试用一个超过上限就拒收、慢慢放行的假链路，不依赖系统套接字缓冲的大小）。Hub 确认关闭这一点由 `tests/hub.rs` 验证（`ThreadedTransport(HubTransport)` 关闭时 20 MiB 的最后一条已经送到）；回环上直接丢弃也能送到，这里区分不出来。
 - 共享目录打开时锁文件被拒（Windows/SMB 上"等待删除"的锁文件，测试钩子模拟）而目录能写：不当成只读，先 `Offline`、重试后可写连上，探测文件不留下；锁文件一直被拒：3 次 `Offline` 后只读连上，之后的探测因为锁文件还打不开不重新连接（尝试次数不变），锁文件能打开后变成可写（单元测试）；真的只读的锁文件（Unix，0444；root 不受权限限制时跳过，用去掉 `CAP_DAC_OVERRIDE` 的 root 跑过）：只读连上，读到自己以前的修改，之后 1 秒里不重新连接（`a_lock_file_we_cannot_open_joins_read_only`）；可写打开（拿到锁）时删掉自己以前留下的 `<client-id>.tmp-*`（`updates/**`、`presence/`，含删不掉的写权限探测文件），别人的不动（`our_leftover_probe_files_are_removed_on_open`，4.3）；只读连上的目录变成可写后，下一次探测（测试里 100 ms）重新连接，`access` 变成 `Write`，只读期间的修改写进日志；还不能写时链路不动、只连了一次（单元测试）。
+- 不发 `x-bae-access` 的旧 Hub（假 Hub，握手不带这个头，`/v1/status` 对只读令牌返回 `"access": "read"`）：连接线程带着令牌问了 `/v1/status`，`access` 是 `Read`，本地修改不发出去（`bytes_sent = 0`），`unsynced` 为真，假 Hub 一个字节的修改都没收到；去掉这一步时 `access` 是 `Unknown`（`an_old_hub_that_does_not_send_the_access_is_asked_for_its_status`）。
 - 共享目录里自己的一个日志是更新的格式版本：`link_notes().not_written` 列出这个文档，`last_error` 说明原因，另一个客户端的为空；改了它之后 `unsynced` 一直为真、`generation` 增加，另一个文档照常同步；关闭时 `Closing::unsynced()` 列出它、结果是错误，日志原样不动（`a_document_the_folder_does_not_write_is_reported`）。
 - 共享目录还不存在：按退避重试，出现后加入并写进去。同一个 `ClientId` 已经在用：先照常重试 2 秒，然后 `Failed`、不再自动重试，对方退出后 `retry()` 成功。丢弃或关闭后立即重新分享同一个目录（6 轮）不报冲突；旧链路的 I/O 卡在 NAS 读里超过 2 秒宽限时，新连接等它放开再连上，不报 `ClientIdInUse`（单元测试）。
 - 连接只接受 TCP、永不握手的地址：500 ms 里每次 `pump` 不到 0.1 ms（上限 250 ms），状态一直是 `Connecting`，`close` 也立即返回。`hub_timeout` 和 `unresponsive_after` 都设成 300 ms 时，每次尝试都是 `Connecting` → `Offline`，没有 `Unresponsive`（以前每次都在 `Offline` 前闪一下，`a_hub_connect_that_times_out_is_offline_not_unresponsive`）；Hub 的界限是 2 × `hub_timeout` 加 1 秒，共享目录是 `unresponsive_after`，链路已经连上、对方还没发 `Hello` 时也一样（单元测试）。连接线程卡在 NAS 上（等旧链路放开，它的 I/O 卡在读里）：`unresponsive_after`（测试里 300 ms）后只在被唤醒时 `pump` 的应用也被闹钟唤醒，状态变成 `Unresponsive`（`generation` 只加一次），`pump` 照样很快；NAS 恢复后连上，只尝试了一次（单元测试）。连接线程已经做好链路、I/O 线程卡在读里时 `close` 或丢弃，调用线程不等（单元测试）。
@@ -584,8 +584,18 @@ closing.wait(超时); // 退出时等关闭完成
 - `retry()` 不连接不能用的 URL；URL 里的 `?token=` 不打印。
 - 离线合并汇总接在 `Connection` 上（6.4）：Hub 停掉期间 Alice 改了不透明度，Bob 在自己多改几次之后也改（按 Loro 的顺序胜出）并新建一个图层，Bob 先回来、Hub 确认收到（`remote_versions()`）之后 Alice 才重连。Alice 离开 `Online` 时 `connection_lost`，重新在线并且 `is_caught_up` 时 `caught_up`：汇总里她的修改被 Bob 覆盖（胜出者、两个值），`merged` 有 Bob 的图层和不透明度，补齐过程中没有在线提示；离线时 `is_caught_up` 按旧链路回答为真（所以要先看 `is_online()`）（`the_offline_summary_comes_once_the_new_link_caught_up`）。
 
+### 7.9 接入应用（`apps/bae`）的注意事项
+
+给 11/12 接界面时用（第 8 节），已同时记在 11 任务书的"请求"一节：
+
+- **`wake` 不能只接 egui 的 `request_repaint`。** `Hello` 和在线状态心跳只在 `pump` 里发，Hub 60 秒收不到客户端的任何字节就断开它（`peer_timeout`）。窗口最小化或被完全遮住时 egui 可能一直不出帧，只接 `request_repaint` 的话 `pump` 不会被调用，链路就断了，重连后又是一轮补发。`wake` 要接到即使不出帧也会让 `pump` 运行的地方：例如 winit 的 `EventLoopProxy` 发一个用户事件（外壳里 `UserEvent::Repaint` 那样的），在 `Shell::about_to_wait` 里处理时调用 `pump`，不依赖重绘；再加一个定时兜底（`ControlFlow::WaitUntil`，例如每秒一次），因为 `ThreadedTransport` 只在收到消息、或者积压清零时才叫醒（2.6），`Connection` 的闹钟（7.2）也要靠 `wake` 送达。`wake` 只在后台线程上调用，不能阻塞（7.1）。
+- **显示文字按 `Failure` 和状态本地化，不直接显示 `SyncError` 的文字。** `ConnectionState::Offline { error }`、`Failed { reason }`、`ConnectionOutcome::errors`、`Closing` 的结果、`link_notes().last_error` 都是英文的 `SyncError` / I/O 文字（给日志和"详细信息"用）。状态栏和对话框按 `Failure`（`BadToken` → "令牌不对"、`NoAccess`、`NoSuchProject`、`Refused(状态码)`、`ClientIdInUse` → "这个 ID 已经在别处打开"、`BadTarget`）和状态（`Offline` → "离线，N 秒后重试"、`Unresponsive` → "NAS 无响应"）显示中英文文案（走 i18n），原文放在可展开的详细信息里。
+- **`link_notes().not_written` 不为空时**提示"这些工程层的修改没有写进共享目录：用新版本的 BAE 打开"（4.3、7.3）；退出时 `Closing::unsynced()` 也会列出它们、关闭结果是错误，照常提示"还有修改没有同步"。
+- **离线合并汇总不在界面线程上算**：用 `ConflictTracker::caught_up_detached`，把 `DetachedMerge` 交给后台线程 `summarize()`（6.4）；出错时不要每帧重试。补齐一直完不成时用 `cancel_offline` 或 `catch_up_timeout`。
+- 同一个 `ClientId` 不要在两个窗口 / 两个进程里同时连接同一个共享目录（`ClientIdInUse`）。
+
 ## 8. 给其他工作流
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
 - **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。
-- **11/12 界面**：分享、加入工程用 `Connection`（第 7 节），每帧在 `Shell::about_to_wait` 里 `pump`，`wake` 接到"请求重绘"；状态栏看 `status()` / `generation`；`access() == Read` 时禁用编辑；退出前 `close` 并在 `Closing` 报告没同步的修改时提示。`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。`ConflictTracker`（6.4）：`ConcurrentEdit` 用于"你的修改被 Bob 的覆盖了" / "Alice 也改了这个"的提示，`MergeSummary` 用于重连后"合并成了什么样"的说明。本地事件在发生的那一帧里交给 `observe` 即可（不必赶在导入之前）；连续冲突已经按 `repeat_quiet` 压下，界面如果要更新已显示的提示，用 `(sublayer, node, attr, element)` 找到同一条。
+- **11/12 界面**：分享、加入工程用 `Connection`（第 7 节），每帧在 `Shell::about_to_wait` 里 `pump`，`wake` 接到窗口不出帧时也能让 `pump` 运行的地方（不只是"请求重绘"，见 7.9），显示文字按 `Failure` 本地化（7.9）；状态栏看 `status()` / `generation`；`access() == Read` 时禁用编辑；退出前 `close` 并在 `Closing` 报告没同步的修改时提示。`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。`ConflictTracker`（6.4）：`ConcurrentEdit` 用于"你的修改被 Bob 的覆盖了" / "Alice 也改了这个"的提示，`MergeSummary` 用于重连后"合并成了什么样"的说明。本地事件在发生的那一帧里交给 `observe` 即可（不必赶在导入之前）；连续冲突已经按 `repeat_quiet` 压下，界面如果要更新已显示的提示，用 `(sublayer, node, attr, element)` 找到同一条。
