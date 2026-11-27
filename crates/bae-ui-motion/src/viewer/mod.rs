@@ -1289,6 +1289,7 @@ impl Panel for CompositionViewer {
                 color::TEXT_STRONG,
             );
             self.banner.ui(ui, cx, &session, area);
+            crate::tracker::camera::banner(ui, cx, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session, None);
             return;
         }
@@ -1971,6 +1972,7 @@ impl Panel for CompositionViewer {
             reference_axes(&ui.painter_at(area), area, &camera.world);
         }
         self.banner.ui(ui, cx, &session, area);
+        crate::tracker::camera::banner(ui, cx, area);
         self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
         let camera = comp.camera.and_then(|i| comp.layers.get(i));
         let camera = camera.map(|l| l.name.clone());

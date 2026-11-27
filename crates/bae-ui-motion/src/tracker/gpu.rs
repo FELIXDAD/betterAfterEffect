@@ -5,25 +5,9 @@ use std::sync::{Arc, Mutex};
 pub(super) struct Ready {
     pub gpu: Arc<GpuContext>,
     pub matcher: Matcher,
-    /// Renders the tracked layer. Built by the first analysis on its own
-    /// thread (it shares the compositor pipelines the app's warm-up compiled),
-    /// not during the warm-up.
-    pub renderer: Mutex<Option<Renderer>>,
-}
-
-impl Ready {
-    /// The tracker's renderer (built on first use).
-    pub fn renderer<'a>(gpu: &Arc<GpuContext>, slot: &'a mut Option<Renderer>) -> &'a mut Renderer {
-        slot.get_or_insert_with(|| {
-            Renderer::with_config(
-                gpu.clone(),
-                RendererConfig {
-                    frame_cache_bytes: 0,
-                    pool_idle_bytes: 32 << 20,
-                },
-            )
-        })
-    }
+    pub features: super::features::Features,
+    /// Shared by background tracking jobs. Built during GPU warm-up.
+    pub renderer: Mutex<Renderer>,
 }
 
 #[derive(Default)]
@@ -50,7 +34,14 @@ impl WarmUp for TrackingGpu {
         let ready = Ready {
             gpu: gpu.clone(),
             matcher: Matcher::new(gpu.device()),
-            renderer: Mutex::new(None),
+            features: super::features::Features::new(gpu.device()),
+            renderer: Mutex::new(Renderer::with_config(
+                gpu.clone(),
+                RendererConfig {
+                    frame_cache_bytes: 0,
+                    pool_idle_bytes: 32 << 20,
+                },
+            )),
         };
         *self.0.lock().map_err(|e| e.to_string())? = Some(Arc::new(ready));
         Ok(())
