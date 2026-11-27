@@ -16,6 +16,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Third", "三分之一"),
     ("Quarter", "四分之一"),
     ("Title/Action Safe", "标题/动作安全"),
+    // View ▸ Import / Export Guides (AE 2026 zh_CN).
+    ("Import Guides...", "导入参考..."),
+    ("Export Guides...", "导出参考..."),
+    ("Import Guides", "导入参考"),
+    ("Export Guides", "导出参考"),
     ("Grid", "网格"),
     ("Transparency Grid", "透明网格"),
     ("Pixel Aspect Ratio Correction", "像素长宽比校正"),

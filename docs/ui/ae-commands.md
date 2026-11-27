@@ -534,8 +534,8 @@
 | Snap to Guides | 589839 | `motion.view.snap_to_guides` |  | Ctrl+Shift+; | Cmd+Shift+; | B | ☐ |
 | Lock Guides | 589840 | `motion.view.lock_guides` |  | Ctrl+Alt+Shift+; | Cmd+Opt+Shift+; | B | ☐ |
 | Clear Guides | 589841 | `motion.view.clear_guides` |  |  |  | B | ☐ |
-| Import Guides... | 589842 | `motion.view.import_guides` |  |  |  | B | ⏸ |
-| Export Guides... | 589843 | `motion.view.export_guides` |  |  |  | B | ⏸ |
+| Import Guides... | 589842 | `motion.view.import_guides` |  |  |  | B | ✅ |
+| Export Guides... | 589843 | `motion.view.export_guides` |  |  |  | B | ✅ |
 | Show Grid | 589845 | `motion.view.show_grid` |  | Ctrl+' | Cmd+' | B | ☐ |
 | Snap to Grid | 589846 | `motion.view.snap_to_grid` |  | Ctrl+Shift+' | Cmd+Shift+' | B | ☐ |
 | View Options... | 589848 | `motion.view.view_options` |  | Ctrl+Alt+U | Cmd+Opt+U | E | ⏸ |
@@ -646,8 +646,8 @@
 | Animation Presets... | 720905 | `motion.help.animation_presets` |  |  |  | B | ⏸ |
 | Keyboard Shortcuts... | 720906 | `motion.help.keyboard_shortcuts` |  |  |  | B | ☐ |
 | System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ⏸ |
-| Enable Logging | 720909 | `motion.help.enable_logging` |  |  |  | B | ☐ |
-| Reveal Logging File | 720910 | `motion.help.reveal_logging_file` |  |  |  | B | ☐ |
+| Enable Logging | 720909 | `motion.help.enable_logging` |  |  |  | B | ✅ |
+| Reveal Logging File | 720910 | `motion.help.reveal_logging_file` |  |  |  | B | ✅ |
 | Online User Forums... | 720912 | `motion.help.online_user_forums` |  |  |  | B | ⏸ |
 | Provide Feedback... | 720913 | `motion.help.provide_feedback` |  |  |  | B | ☐ |
 
