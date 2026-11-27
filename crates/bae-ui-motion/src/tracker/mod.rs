@@ -1,5 +1,7 @@
 //! Motion source selection, tracker controls and non-blocking analysis progress.
+pub(crate) mod camera;
 mod dialogs;
+mod features;
 mod gpu;
 mod menu;
 pub(crate) mod overlay;
@@ -51,6 +53,7 @@ pub(crate) fn register(app: &mut AppBuilder) {
         ("Analysis cancelled", "分析已取消"),
         ("Analyze", "分析"),
     ]);
+    camera::register(app);
     app.insert_resource(Shared::default());
     let gpu = Arc::new(gpu::TrackingGpu::default());
     app.insert_resource(gpu.clone());
@@ -195,7 +198,20 @@ impl Panel for TrackerPanel {
                 .cloned()
         });
         ui.horizontal_wrapped(|ui| {
-            ui.add_enabled(false, egui::Button::new(tr("Track Camera")));
+            if ui
+                .add_enabled(
+                    src.as_ref().is_some_and(|l| !query::is_locked(cx.stage, l)),
+                    egui::Button::new(tr("Track Camera")),
+                )
+                .clicked()
+                && let Some(l) = &src
+            {
+                crate::effects::apply(
+                    cx,
+                    std::slice::from_ref(l),
+                    bae_motion::camera_track::MATCH_NAME,
+                );
+            }
             if ui
                 .add_enabled(
                     src.as_ref().is_some_and(|l| !query::is_locked(cx.stage, l)),

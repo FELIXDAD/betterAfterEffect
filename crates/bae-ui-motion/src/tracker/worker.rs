@@ -92,7 +92,7 @@ pub(super) fn launch(
             let result = (|| {
                 let stage = snapshot().map_err(|e| e.to_string())?;
                 let mut renderer = gpu.renderer.lock().map_err(|e| e.to_string())?;
-                let renderer = Ready::renderer(&gpu.gpu, &mut renderer);
+                let renderer = &mut *renderer;
                 if let Some(src) = sources {
                     for e in src.0.snapshot().iter() {
                         renderer.providers_mut().register(e.item().clone());
@@ -101,77 +101,21 @@ pub(super) fn launch(
                 if let Some(fx) = effects {
                     renderer.sync_effects(&fx.0);
                 }
-                let mut eval = Evaluator::new();
-                let mut anim = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
                 let info = query::comp_info(&stage, &comp).ok_or("Missing composition")?;
                 let duration = info.frame_duration().0;
                 let fields =
                     tracker::setting(&stage, &tracker, "track_fields") == Some(Value::Bool(true));
-                // The frames' 8-bit targets: one no image holds any more is
-                // rendered into again instead of allocating a whole layer.
-                let mut targets: Vec<Arc<OutputTarget>> = Vec::new();
-                let mut picture = |time: Time| -> Result<Image, String> {
-                    let phase = time.0.rem_euclid(duration);
-                    let field = if fields {
-                        1 + u32::from(phase >= duration / 2)
-                    } else {
-                        0
-                    };
-                    let time = if fields { Time(time.0 - phase) } else { time };
-                    let comp = eval
-                        .evaluate_comp(&stage, &comp, time)
-                        .map_err(|e| e.to_string())?;
-                    let (one, min) = crate::layer_panel::alone(&comp, &source, 0)
-                        .ok_or("Missing motion source")?;
-                    let rc = anim.convert(&stage, &one, 0).map_err(|e| e.to_string())?;
-                    let (frame, target) = loop {
-                        if stop.load(Ordering::Relaxed) {
-                            return Err("Tracking stopped".into());
-                        }
-                        let free = targets
-                            .iter()
-                            .position(|t| Arc::strong_count(t) == 1)
-                            .and_then(|i| Arc::try_unwrap(targets.swap_remove(i)).ok());
-                        // The frame and its conversion in one submission.
-                        let (frame, target) = renderer
-                            .render_frame_output(
-                                &rc,
-                                &RenderRequest::full(),
-                                None,
-                                OutputAlpha::Straight,
-                                free,
-                            )
-                            .map_err(|e| e.to_string())?;
-                        // A warning (a missing effect or footage) still leaves a
-                        // frame to track, as in AE; only errors stop the analysis.
-                        for warning in &frame.warnings {
-                            tracing::debug!("tracking: {warning}");
-                        }
-                        let target = Arc::new(target);
-                        targets.push(target.clone());
-                        if !frame.incomplete {
-                            break (frame, target);
-                        }
-                        drop(target);
-                        std::thread::sleep(std::time::Duration::from_millis(16));
-                    };
-                    // Keep a few spare targets at most.
-                    while targets.len() > MAX_TARGETS
-                        && let Some(i) = targets.iter().position(|t| Arc::strong_count(t) == 1)
-                    {
-                        targets.swap_remove(i);
-                    }
-                    let origin = min
-                        + DVec2::new(
-                            f64::from(frame.image.rect.x0),
-                            f64::from(frame.image.rect.y0),
-                        );
-                    Ok(Image {
-                        target,
-                        origin,
-                        field,
-                    })
-                };
+                let mut picture = pictures(
+                    renderer,
+                    FrameInput {
+                        stage: &stage,
+                        comp: &comp,
+                        source: &source,
+                        duration,
+                        fields,
+                        stop: &stop,
+                    },
+                );
                 let timing = query::layer_timing(&stage, &source);
                 let lo = timing.in_point.min(timing.out_point).max(Time::ZERO);
                 let hi = timing.in_point.max(timing.out_point).min(info.duration);
@@ -213,17 +157,107 @@ pub(super) fn launch(
     Ok(job)
 }
 /// Output targets the analysis keeps beyond those its images hold.
+pub(super) struct FrameInput<'a> {
+    pub stage: &'a Stage,
+    pub comp: &'a PrimPath,
+    pub source: &'a PrimPath,
+    pub duration: i64,
+    pub fields: bool,
+    pub stop: &'a AtomicBool,
+}
+
+pub(super) fn pictures<'a>(
+    renderer: &'a mut bae_render::Renderer,
+    input: FrameInput<'a>,
+) -> impl FnMut(Time) -> Result<Image, String> + 'a {
+    let FrameInput {
+        stage,
+        comp,
+        source,
+        duration,
+        fields,
+        stop,
+    } = input;
+    let mut eval = Evaluator::new();
+    let mut anim = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+    // The frames' 8-bit targets: one no image holds any more is
+    // rendered into again instead of allocating a whole layer.
+    let mut targets: Vec<Arc<OutputTarget>> = Vec::new();
+    move |time: Time| -> Result<Image, String> {
+        let phase = time.0.rem_euclid(duration);
+        let field = if fields {
+            1 + u32::from(phase >= duration / 2)
+        } else {
+            0
+        };
+        let time = if fields { Time(time.0 - phase) } else { time };
+        let comp = eval
+            .evaluate_comp(stage, comp, time)
+            .map_err(|e| e.to_string())?;
+        let (one, min) =
+            crate::layer_panel::alone(&comp, source, 0).ok_or("Missing motion source")?;
+        let rc = anim.convert(stage, &one, 0).map_err(|e| e.to_string())?;
+        let (frame, target) = loop {
+            if stop.load(Ordering::Relaxed) {
+                return Err("Tracking stopped".into());
+            }
+            let free = targets
+                .iter()
+                .position(|t| Arc::strong_count(t) == 1)
+                .and_then(|i| Arc::try_unwrap(targets.swap_remove(i)).ok());
+            // The frame and its conversion in one submission.
+            let (frame, target) = renderer
+                .render_frame_output(
+                    &rc,
+                    &RenderRequest::full(),
+                    None,
+                    OutputAlpha::Straight,
+                    free,
+                )
+                .map_err(|e| e.to_string())?;
+            // A warning (a missing effect or footage) still leaves a
+            // frame to track, as in AE; only errors stop the analysis.
+            for warning in &frame.warnings {
+                tracing::debug!("tracking: {warning}");
+            }
+            let target = Arc::new(target);
+            targets.push(target.clone());
+            if !frame.incomplete {
+                break (frame, target);
+            }
+            drop(target);
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        };
+        // Keep a few spare targets at most.
+        while targets.len() > MAX_TARGETS
+            && let Some(i) = targets.iter().position(|t| Arc::strong_count(t) == 1)
+        {
+            targets.swap_remove(i);
+        }
+        let origin = min
+            + DVec2::new(
+                f64::from(frame.image.rect.x0),
+                f64::from(frame.image.rect.y0),
+            );
+        Ok(Image {
+            target,
+            origin,
+            field,
+        })
+    }
+}
+
 const MAX_TARGETS: usize = 4;
 
 #[derive(Clone)]
-struct Image {
+pub(super) struct Image {
     target: Arc<OutputTarget>,
     origin: DVec2,
     field: u32,
 }
 
 impl Image {
-    fn texture(&self) -> &wgpu::Texture {
+    pub(super) fn texture(&self) -> &wgpu::Texture {
         self.target.view().texture()
     }
 }

@@ -74,6 +74,9 @@ pub(crate) fn show(
             &match_name,
             now,
         );
+        if match_name == bae_motion::camera_track::MATCH_NAME {
+            crate::tracker::camera::controls(ui, cx, effect);
+        }
         if state.collapsed.contains(effect.as_str()) {
             continue;
         }
@@ -314,6 +317,19 @@ fn params(
             _ => {}
         }
         if param.flags.hidden || hidden_from.is_some_and(|d| depth >= d) {
+            continue;
+        }
+        if def.match_name == bae_motion::camera_track::MATCH_NAME && param.id == 313 {
+            let error = cx
+                .stage
+                .prim(effect)
+                .and_then(|p| query::static_value(&p, bae_motion::camera_track::ERROR))
+                .and_then(|v| v.as_f64());
+            ui.label(format!(
+                "{}: {}",
+                tr("Average Error"),
+                error.map_or_else(|| "-".into(), |v| format!("{v:.2} {}", tr("pixels")))
+            ));
             continue;
         }
         if def.match_name == bae_effects::effects::liquify::MATCH_NAME
