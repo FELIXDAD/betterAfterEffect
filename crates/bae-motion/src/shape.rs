@@ -713,3 +713,109 @@ impl Command for CreateMask {
         Ok(MaskOutput { mask })
     }
 }
+
+// ---------------------------------------------------------------------------
+
+pub struct ConvertToPath;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ConvertToPathParams {
+    /// Rectangle, Ellipse or Polystar paths of shape groups.
+    pub items: Vec<PrimPath>,
+    /// Layer time of the outline when they are animated.
+    #[serde(default)]
+    pub time: Option<bae_model::Time>,
+}
+
+/// The Bezier outline of the parametric shape path `item` at `t`.
+pub fn parametric_outline(
+    stage: &bae_model::Stage,
+    item: &PrimPath,
+    t: bae_model::Time,
+) -> Option<BezierPath> {
+    let ty = stage.prim(item)?.prim_type().cloned()?;
+    let at = |a: &str| query::sample_attr(stage, item, a, t);
+    let f = |a: &str, d: f64| at(a).and_then(|v| v.as_f64()).unwrap_or(d);
+    let v2 = |a: &str, d: [f64; 2]| match at(a) {
+        Some(Value::Vec2(v)) => v,
+        _ => d,
+    };
+    let word = |a: &str| at(a).and_then(|v| v.as_str().map(str::to_owned));
+    let direction = match word("direction").as_deref() {
+        Some("reversed") => Direction::Reversed,
+        _ => Direction::Normal,
+    };
+    Some(if ty == PrimType::RECT {
+        RectShape {
+            size: v2("size", [100.0, 100.0]),
+            position: v2("position", [0.0, 0.0]),
+            roundness: f("roundness", 0.0).max(0.0),
+        }
+        .to_path(direction)
+    } else if ty == PrimType::ELLIPSE {
+        EllipseShape {
+            size: v2("size", [100.0, 100.0]),
+            position: v2("position", [0.0, 0.0]),
+        }
+        .to_path(direction)
+    } else if ty == PrimType::STAR {
+        StarShape {
+            star_type: if word("star_type").as_deref() == Some("polygon") {
+                StarType::Polygon
+            } else {
+                StarType::Star
+            },
+            points: f("points", 5.0),
+            position: v2("position", [0.0, 0.0]),
+            rotation: f("rotation", 0.0),
+            inner_radius: f("inner_radius", 50.0),
+            outer_radius: f("outer_radius", 100.0),
+            inner_roundness: f("inner_roundness", 0.0),
+            outer_roundness: f("outer_roundness", 0.0),
+        }
+        .to_path(direction)
+    } else {
+        return None;
+    })
+}
+
+impl Command for ConvertToPath {
+    type Params = ConvertToPathParams;
+    type Output = crate::content::ContentOutput;
+    const ID: &'static str = "shape.convert_to_path";
+    const TITLE: &'static str = "Convert To Bezier Path";
+    const DESCRIPTION: &'static str = "Layer > Mask and Shape Path > Convert To Bezier Path: replace parametric Rectangle, Ellipse or Polystar paths with Bezier Paths (\"Path 1\") of the same outline (at `time` when animated), in the same place.";
+
+    fn run(
+        &self,
+        tx: &mut bae_model::Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<crate::content::ContentOutput, CommandError> {
+        ensure_unlocked(tx.stage(), &p.items)?;
+        let t = p.time.unwrap_or(bae_model::Time::ZERO);
+        let mut prims = Vec::new();
+        for item in &p.items {
+            let outline = parametric_outline(tx.stage(), item, t).ok_or_else(|| {
+                fail(format!(
+                    "{item} is not a Rectangle, Ellipse or Polystar path"
+                ))
+            })?;
+            let parent = item
+                .parent()
+                .ok_or_else(|| fail("a shape needs a parent"))?;
+            let index = tx.stage().children(&parent).iter().position(|c| c == item);
+            crate::layer::delete_prims(tx, std::slice::from_ref(item), bae_model::Time::ZERO)?;
+            let name =
+                query::next_numbered_name(tx.stage(), &parent, crate::names::localized("Path"));
+            let path = child(
+                &parent,
+                &query::unique_child_name(tx.stage(), &parent, &name),
+            )?;
+            create(tx, &path, PrimType::PATH, index)?;
+            set(tx, &path, "name", Value::String(name))?;
+            set(tx, &path, "path", Value::Bezier(outline))?;
+            prims.push(path);
+        }
+        Ok(crate::content::ContentOutput { prims })
+    }
+}

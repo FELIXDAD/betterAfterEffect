@@ -328,6 +328,11 @@ pub struct Session {
     /// The mask or shape path whose vertices the Composition viewer has
     /// selected (Ctrl+T then runs Free Transform Points, AE).
     pub(crate) vertex_path: Option<PrimPath>,
+    /// Their indices.
+    pub(crate) vertex_indices: Vec<usize>,
+    /// Vertices of `vertex_path` the viewer selects next (after Set First
+    /// Vertex renumbers them).
+    pub(crate) vertex_request: Option<Vec<usize>>,
     /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
     /// mask, effect or text animator; [`group_prim`] gives the prim).
     pub selected_groups: Vec<String>,
