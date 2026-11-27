@@ -58,6 +58,7 @@ pub mod ids {
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
+    pub const TEXT_ORIENTATION: &str = "motion.layer.text_orientation";
     /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid, Camera or Light
     /// Settings of the selected layer, or Solid Settings of the solid item
     /// selected in the focused Project panel.
@@ -387,6 +388,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::COMP_FLOWCHART, "Composition Flowchart"),
     (ids::REVEAL_COMP_IN_PROJECT, "Reveal Composition in Project"),
     (ids::NEW_LAYER, "New"),
+    (ids::TEXT_ORIENTATION, "Text Orientation"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
@@ -1831,6 +1833,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 .cloned()
                 .collect();
             crate::dialogs::precompose(cx, layers);
+            return true;
+        }
+        ids::TEXT_ORIENTATION => {
+            let layers: Vec<_> = session
+                .lock()
+                .selected_layers
+                .iter()
+                .filter(|l| {
+                    query::layer_kind(stage, l).as_deref() == Some("text")
+                        && !query::is_locked(stage, l)
+                })
+                .cloned()
+                .collect();
+            if !layers.is_empty() {
+                cx.invoke_with(
+                    "text.convert_orientation",
+                    json!({"layers":layers,"orientation":inv.params["orientation"]}),
+                );
+            }
             return true;
         }
         ids::LAYER_SETTINGS => {

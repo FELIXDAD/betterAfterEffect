@@ -184,25 +184,66 @@ pub enum NodeKind {
     ShadowMap(ShadowMapNode),
 }
 
-/// A 3D model layer (AE's Advanced 3D models, [`crate::model`]) drawn
-/// through the camera with a depth buffer and lit by the comp's lights,
-/// premultiplied, in the composite's space (`exec/mesh.rs`).
+/// The 3D model layers of a 3D group (AE's Advanced 3D models,
+/// [`crate::model`]) drawn through the camera into one depth buffer (they
+/// intersect each other) and lit by the comp's lights, premultiplied, in the
+/// composite's space (`exec/mesh.rs`). The pass also keeps each pixel's
+/// camera depth for the planes drawn over the models ([`Occlusion`]).
 #[derive(Debug)]
 pub struct MeshNode {
+    pub models: Vec<MeshModel>,
+    /// The 3D planes of the group that cast shadows on the models (drawn
+    /// into the light maps).
+    pub planes: Vec<PlaneCaster>,
+    pub camera: crate::camera::Camera,
+    /// The comp's size in pixels.
+    pub comp_size: [u32; 2],
+    /// A linear working space (the shading is not display-encoded).
+    pub linear: bool,
+}
+
+/// A 3D plane casting shadows on models: opaque where its pixels are.
+#[derive(Clone, Debug)]
+pub struct PlaneCaster {
+    /// Layer pixels → comp space.
+    pub matrix: DMat4,
+    /// The drawn rectangle in layer pixels.
+    pub rect: Rect,
+    /// Its pixels (alpha decides); `None`: a solid, opaque everywhere.
+    pub image: Option<NodeId>,
+}
+
+/// One model layer of a [`MeshNode`].
+#[derive(Debug)]
+pub struct MeshModel {
     /// The layer (diagnostics).
     pub layer: PrimPath,
     pub model: Arc<crate::model::Model>,
     /// Model space → comp space.
     pub matrix: DMat4,
-    pub camera: crate::camera::Camera,
     /// The lights that reach the layer.
     pub lights: Arc<[crate::light::Light]>,
-    /// The comp's size in pixels.
-    pub comp_size: [u32; 2],
-    /// A linear working space (the shading is not display-encoded).
-    pub linear: bool,
+    /// The layer's opacity.
+    pub opacity: f32,
     /// An environment light with a picture (diffuse light and reflections).
     pub environment: Option<EnvironmentInput>,
+    /// Material Options: it casts shadows on the models (and itself).
+    pub casts_shadows: bool,
+    /// Material Options: the models' shadows fall on it.
+    pub accepts_shadows: bool,
+}
+
+/// Where a 3D plane passes behind the 3D models drawn under it
+/// ([`MeshNode`], earlier in the same composite): the composite drops the
+/// plane's pixels farther than the models' (by their alpha), so the models
+/// show through it there and it covers them where it is nearer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Occlusion {
+    /// The models' pass (it keeps each pixel's camera depth).
+    pub mesh: NodeId,
+    /// The plane's camera depth on screen ([`plane_depth`]).
+    pub depth: [f64; 3],
+    pub orthographic: bool,
 }
 
 /// An environment light's picture as a node input (`exec/env.rs`).
@@ -306,6 +347,9 @@ impl NodeKind {
                     if let Some(m) = &op.mask {
                         f(m.node);
                     }
+                    if let Some(o) = &op.occlusion {
+                        f(o.mesh);
+                    }
                 }
             }
             NodeKind::Effect(e) => {
@@ -324,8 +368,11 @@ impl NodeKind {
             }
             NodeKind::DepthBlur(d) => f(d.input),
             NodeKind::Mesh(m) => {
-                if let Some(e) = &m.environment {
+                for e in m.models.iter().filter_map(|m| m.environment.as_ref()) {
                     f(e.input);
+                }
+                for id in m.planes.iter().filter_map(|p| p.image) {
+                    f(id);
                 }
             }
             NodeKind::Sky(s) => f(s.environment.input),
@@ -410,6 +457,8 @@ pub struct LayerOp {
     pub clips: Vec<[f64; 4]>,
     /// 3D layers lit by the comp's lights (AE-CMP-436).
     pub lighting: Option<Arc<Lighting>>,
+    /// 3D planes over 3D models: cut where they pass behind them.
+    pub occlusion: Option<Occlusion>,
 }
 
 /// The pixels of a layer op.
@@ -743,6 +792,7 @@ pub fn build_layer_image(
                 motion: None,
                 clips: Vec::new(),
                 lighting: None,
+                occlusion: None,
             }],
             clamp: builder.clamp,
         }),
@@ -752,28 +802,6 @@ pub fn build_layer_image(
         cacheable: false,
     });
     Ok(Some(builder.finish(request, output)))
-}
-
-/// Converts a rectangle in space pixels to texel units at `pixel_scale`.
-/// The plate a 3D model sorts by among the layers of its 3D group: square,
-/// facing the camera through the model's centre, as wide as the model.
-fn model_plate(comp: &RenderComp, layer: &RenderLayer, camera: &crate::camera::Camera) -> Plate {
-    let matrix = model_matrix(comp, layer);
-    let centre = matrix.w_axis.truncate();
-    let r = 0.87 * matrix.x_axis.truncate().length();
-    let right = camera.world.x_axis.truncate().normalize_or_zero();
-    let down = camera.world.y_axis.truncate().normalize_or_zero();
-    let forward = camera.world.z_axis.truncate().normalize_or_zero();
-    let origin = centre - right * r - down * r;
-    Plate {
-        matrix: DMat4::from_cols(
-            right.extend(0.0),
-            down.extend(0.0),
-            forward.extend(0.0),
-            origin.extend(1.0),
-        ),
-        rect: Rect::new(0.0, 0.0, 2.0 * r, 2.0 * r),
-    }
 }
 
 /// A 3D model layer's model space (centred, a largest side of 1) → comp
@@ -796,6 +824,52 @@ fn model_matrix(comp: &RenderComp, layer: &RenderLayer) -> DMat4 {
 /// Largest depth-of-field blur radius (space pixels).
 const MAX_DOF_RADIUS: f64 = 500.0;
 
+/// Camera depth over a plane (layer pixels → comp space `matrix`) on
+/// screen: `1 / z = a·x + b·y + c` at comp pixel (x, y) through a
+/// perspective camera, `z = a·x + b·y + c` through an orthographic one
+/// (`true`). `None` when the camera sees the plane edge-on.
+pub(crate) fn plane_depth(
+    camera: &crate::camera::Camera,
+    matrix: &DMat4,
+    size: DVec2,
+) -> Option<([f64; 3], bool)> {
+    let to_camera = camera.view() * *matrix;
+    let n = to_camera
+        .x_axis
+        .truncate()
+        .cross(to_camera.y_axis.truncate());
+    let d = n.dot(to_camera.w_axis.truncate());
+    let (cx, cy) = (size.x / 2.0, size.y / 2.0);
+    match camera.projection {
+        crate::camera::Projection::Perspective => {
+            let f = camera.zoom;
+            (d.abs() > 1e-9 && f > 0.0).then(|| {
+                (
+                    [
+                        n.x / (f * d),
+                        n.y / (f * d),
+                        (n.z - n.x * cx / f - n.y * cy / f) / d,
+                    ],
+                    false,
+                )
+            })
+        }
+        crate::camera::Projection::Orthographic { scale: s } => {
+            (n.z.abs() > 1e-9 && s > 0.0).then(|| {
+                (
+                    [
+                        -n.x / (s * n.z),
+                        -n.y / (s * n.z),
+                        (d + n.x * cx / s + n.y * cy / s) / n.z,
+                    ],
+                    true,
+                )
+            })
+        }
+    }
+}
+
+/// Converts a rectangle in space pixels to texel units at `pixel_scale`.
 pub fn units(rect: &Rect, pixel_scale: f64) -> IRect {
     Rect::new(
         rect.x0 / pixel_scale,
@@ -1066,6 +1140,27 @@ impl Builder<'_, '_> {
             }
         }
         attach_shadows(comp, &mut planned);
+        self.attach_model_shadows(comp, &mut planned);
+        // The planes casting shadows on models (Only casters too).
+        let plane_casters: Vec<PlaneCaster> = planned
+            .iter()
+            .filter(|(index, op)| {
+                let layer = &comp.layers[*index];
+                !matches!(layer.content, LayerContent::Model(_))
+                    && layer.material.casts_shadows != crate::light::ShadowMode::Off
+                    && op.opacity > 0.0
+            })
+            .filter_map(|(index, op)| {
+                Some(PlaneCaster {
+                    matrix: comp.layers[*index].matrix_3d?,
+                    rect: op.content,
+                    image: match op.input {
+                        OpInput::Image(id) => Some(id),
+                        OpInput::Solid { .. } => None,
+                    },
+                })
+            })
+            .collect();
         // Casts Shadows: Only: a caster that is not drawn itself.
         planned.retain(|(index, _)| {
             comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
@@ -1073,12 +1168,224 @@ impl Builder<'_, '_> {
         for (index, op) in &mut planned {
             self.shadow_map(comp, *index, op, depth);
         }
+        // 3D models: one depth-buffered pass under the planes; each plane
+        // over them is cut where it passes behind them.
+        let mut models = self.merge_models(comp, &mut planned);
+        if let Some((op, _)) = &mut models
+            && let OpInput::Image(id) = op.input
+            && !plane_casters.is_empty()
+        {
+            // The models read the planes' pixels: their pass moves after
+            // them (the emptied node is not run).
+            let keys: Vec<u64> = plane_casters
+                .iter()
+                .map(|p| p.image.map_or(0, |i| self.nodes[i.index()].key))
+                .collect();
+            let old = &mut self.nodes[id.index()];
+            let (rect, pixel_scale, key) = (old.rect, old.pixel_scale, hash_of(&(old.key, keys)));
+            if let NodeKind::Mesh(mesh) = &mut old.kind {
+                let moved = MeshNode {
+                    models: std::mem::take(&mut mesh.models),
+                    planes: plane_casters,
+                    camera: mesh.camera,
+                    comp_size: mesh.comp_size,
+                    linear: mesh.linear,
+                };
+                let node = self.push(Node {
+                    kind: NodeKind::Mesh(Box::new(moved)),
+                    rect,
+                    pixel_scale,
+                    key,
+                    cacheable: false,
+                });
+                op.input = OpInput::Image(node);
+            }
+        }
         let drawn = Self::depth_order_3d(comp, planned);
+        if let Some((op, _)) = &models {
+            ops.push(op.clone());
+        }
         for (index, op) in drawn {
-            let op = self.depth_of_field(comp, index, op, canvas, scale, depth);
+            let mut op = self.depth_of_field(comp, index, op, canvas, scale, depth);
+            if let Some((models, nearest)) = &models {
+                self.occlude(comp, index, &mut op, models, *nearest, scale);
+            }
             ops.push(op);
         }
         Ok(())
+    }
+
+    /// 3D models with Casts Shadows on throw shadows on the lit layers of
+    /// their 3D group that accept shadows (drawn into the layers' shadow
+    /// maps, `exec/mesh.rs`).
+    fn attach_model_shadows(&self, comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
+        use crate::light::{ModelCaster, ShadowMode};
+        let models: Arc<[ModelCaster]> = planned
+            .iter()
+            .filter(|(index, _)| {
+                let layer = &comp.layers[*index];
+                matches!(layer.content, LayerContent::Model(_))
+                    && layer.material.casts_shadows != ShadowMode::Off
+            })
+            .filter_map(|(_, op)| match op.input {
+                OpInput::Image(id) => match &self.nodes[id.index()].kind {
+                    NodeKind::Mesh(m) => {
+                        m.models
+                            .first()
+                            .filter(|m| m.opacity > 0.0)
+                            .map(|m| ModelCaster {
+                                model: m.model.clone(),
+                                matrix: m.matrix,
+                            })
+                    }
+                    _ => None,
+                },
+                OpInput::Solid { .. } => None,
+            })
+            .collect();
+        if models.is_empty() {
+            return;
+        }
+        for (index, op) in planned.iter_mut() {
+            let layer = &comp.layers[*index];
+            let Some(lighting) = &op.lighting else {
+                continue;
+            };
+            if matches!(layer.content, LayerContent::Model(_))
+                || layer.material.accepts_shadows == ShadowMode::Off
+                || !lighting.lights.iter().any(|l| l.casts_shadows)
+            {
+                continue;
+            }
+            op.lighting = Some(Arc::new(crate::light::Lighting {
+                models: models.clone(),
+                ..(**lighting).clone()
+            }));
+        }
+    }
+
+    /// Takes the model layers out of `planned` and joins them into one
+    /// [`MeshNode`] (one depth buffer). Returns its op and the camera depth
+    /// of the models' nearest corner.
+    fn merge_models(
+        &mut self,
+        comp: &RenderComp,
+        planned: &mut Vec<(usize, LayerOp)>,
+    ) -> Option<(LayerOp, f64)> {
+        let is_model = |i: &usize| matches!(comp.layers[*i].content, LayerContent::Model(_));
+        let mut found: Vec<LayerOp> = Vec::new();
+        planned.retain(|(index, op)| {
+            let model = is_model(index);
+            if model {
+                found.push(op.clone());
+            }
+            !model
+        });
+        let mut ids = found.iter().filter_map(|op| match op.input {
+            OpInput::Image(id) => Some(id),
+            OpInput::Solid { .. } => None,
+        });
+        let first = ids.next()?;
+        let mut op = found[0].clone();
+        let mut rect = self.nodes[first.index()].rect;
+        let mut keys = vec![self.nodes[first.index()].key];
+        let mut more = Vec::new();
+        for id in ids {
+            let node = &mut self.nodes[id.index()];
+            rect = rect.union(&node.rect);
+            keys.push(node.key);
+            if let NodeKind::Mesh(m) = &mut node.kind {
+                more.append(&mut m.models);
+            }
+        }
+        let camera = comp.view_camera();
+        let view = camera.view();
+        let node = &mut self.nodes[first.index()];
+        node.rect = rect;
+        node.key = hash_of(&("3d models", keys));
+        let NodeKind::Mesh(mesh) = &mut node.kind else {
+            return None;
+        };
+        mesh.models.append(&mut more);
+        let nearest = mesh
+            .models
+            .iter()
+            .flat_map(|m| {
+                (0..8).map(move |k| {
+                    let corner = glam::DVec3::new(
+                        if k & 1 == 0 { -0.5 } else { 0.5 },
+                        if k & 2 == 0 { -0.5 } else { 0.5 },
+                        if k & 4 == 0 { -0.5 } else { 0.5 },
+                    );
+                    view.transform_point3(m.matrix.transform_point3(corner)).z
+                })
+            })
+            .fold(f64::MAX, f64::min);
+        if found.len() > 1 {
+            // Joined models draw with Normal (each keeps its opacity).
+            op.blend = BlendMode::Normal;
+            op.preserve_transparency = false;
+        }
+        let scale = node.pixel_scale;
+        op.bounds = rect;
+        op.content = Rect::new(
+            f64::from(rect.x0) * scale,
+            f64::from(rect.y0) * scale,
+            f64::from(rect.x1) * scale,
+            f64::from(rect.y1) * scale,
+        );
+        Some((op, nearest))
+    }
+
+    /// Cuts the 3D plane `op` (layer `index`) where it passes behind the
+    /// models drawn by `models` ([`Occlusion`]). Planes in front of every
+    /// model, or with a track matte, are left alone.
+    fn occlude(
+        &self,
+        comp: &RenderComp,
+        index: usize,
+        op: &mut LayerOp,
+        models: &LayerOp,
+        nearest: f64,
+        scale: f64,
+    ) {
+        let overlap = op.bounds.intersect(&models.bounds);
+        let (OpInput::Image(mesh), None, false) = (&models.input, &op.matte, overlap.is_empty())
+        else {
+            return;
+        };
+        let Some(matrix) = comp.layers[index].matrix_3d else {
+            return;
+        };
+        let camera = comp.view_camera();
+        let size = DVec2::new(f64::from(comp.width), f64::from(comp.height));
+        let Some((plane, orthographic)) = plane_depth(&camera, &matrix, size) else {
+            return;
+        };
+        let farthest = [
+            (overlap.x0, overlap.y0),
+            (overlap.x1, overlap.y0),
+            (overlap.x0, overlap.y1),
+            (overlap.x1, overlap.y1),
+        ]
+        .into_iter()
+        .map(|(x, y)| {
+            let v = plane[0] * f64::from(x) * scale + plane[1] * f64::from(y) * scale + plane[2];
+            match (orthographic, v > 0.0) {
+                (true, _) => v,
+                (false, true) => 1.0 / v,
+                (false, false) => f64::MAX,
+            }
+        })
+        .fold(f64::MIN, f64::max);
+        if farthest < nearest {
+            return;
+        }
+        op.occlusion = Some(Occlusion {
+            mesh: *mesh,
+            depth: plane,
+            orthographic,
+        });
     }
 
     /// The ops of a 3D group back to front, cut where layers intersect.
@@ -1124,36 +1431,17 @@ impl Builder<'_, '_> {
                 drawn.push(planned[first].clone());
                 continue;
             }
-            let camera = comp.view_camera();
             let plates: Vec<Plate> = members
                 .iter()
-                .map(|&i| {
-                    let layer = &comp.layers[planned[i].0];
-                    if matches!(layer.content, LayerContent::Model(_)) {
-                        model_plate(comp, layer, &camera)
-                    } else {
-                        Plate {
-                            matrix: layer.matrix_3d.unwrap_or_default(),
-                            rect: planned[i].1.content,
-                        }
-                    }
+                .map(|&i| Plate {
+                    matrix: comp.layers[planned[i].0].matrix_3d.unwrap_or_default(),
+                    rect: planned[i].1.content,
                 })
                 .collect();
-            let mut models_drawn = Vec::new();
             for fragment in depth_order(&plates, eye) {
                 let (index, op) = &planned[members[fragment.item]];
                 let mut op = op.clone();
-                if matches!(comp.layers[*index].content, LayerContent::Model(_)) {
-                    // A model sorts by a plate facing the camera at its centre;
-                    // it is drawn once, whole (its own depth buffer handles
-                    // itself).
-                    if models_drawn.contains(index) {
-                        continue;
-                    }
-                    models_drawn.push(*index);
-                } else {
-                    op.clips = fragment.clips;
-                }
+                op.clips = fragment.clips;
                 drawn.push((*index, op));
             }
         }
@@ -1168,7 +1456,7 @@ impl Builder<'_, '_> {
         let Some(lighting) = &op.lighting else {
             return;
         };
-        if lighting.casters.is_empty()
+        if (lighting.casters.is_empty() && lighting.models.is_empty())
             || !lighting.samples.is_empty()
             || lighting.shadow_slots().is_empty()
         {
@@ -1194,6 +1482,10 @@ impl Builder<'_, '_> {
                 crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
                 crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
             }
+        }
+        for m in lighting.models.iter() {
+            (Arc::as_ptr(&m.model) as usize).hash(&mut h);
+            m.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
         }
         let base = h.finish();
         let slot_keys: Vec<u64> = lighting
@@ -1365,6 +1657,7 @@ impl Builder<'_, '_> {
             motion: None,
             clips: Vec::new(),
             lighting: None,
+            occlusion: None,
         }
     }
 
@@ -1493,14 +1786,21 @@ impl Builder<'_, '_> {
         let linear = self.linear;
         let node = self.push(Node {
             kind: NodeKind::Mesh(Box::new(MeshNode {
-                layer: layer.path.clone(),
-                model: mesh,
-                matrix,
+                models: vec![MeshModel {
+                    layer: layer.path.clone(),
+                    model: mesh,
+                    matrix,
+                    lights,
+                    opacity: layer.opacity.clamp(0.0, 1.0),
+                    environment,
+                    casts_shadows: layer.material.casts_shadows != crate::light::ShadowMode::Off,
+                    accepts_shadows: layer.material.accepts_shadows
+                        != crate::light::ShadowMode::Off,
+                }],
+                planes: Vec::new(),
                 camera,
-                lights,
                 comp_size: [comp.width, comp.height],
                 linear,
-                environment,
             })),
             rect,
             pixel_scale: scale,
@@ -1511,7 +1811,7 @@ impl Builder<'_, '_> {
             layer: layer.path.clone(),
             input: OpInput::Image(node),
             transform: DAffine2::IDENTITY,
-            opacity: layer.opacity.clamp(0.0, 1.0),
+            opacity: 1.0,
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
             // Best in final renders; previews follow the layer's switch.
@@ -1530,6 +1830,7 @@ impl Builder<'_, '_> {
             motion: None,
             clips: Vec::new(),
             lighting: None,
+            occlusion: None,
         }))
     }
 
@@ -1644,6 +1945,7 @@ impl Builder<'_, '_> {
             motion: None,
             clips: Vec::new(),
             lighting: None,
+            occlusion: None,
         }))
     }
 
@@ -1958,6 +2260,7 @@ impl Builder<'_, '_> {
                         samples,
                         rect: content_rect,
                         shadow_map: None,
+                        models: Arc::new([]),
                     })
                 })
             });
@@ -1990,6 +2293,7 @@ impl Builder<'_, '_> {
             motion,
             clips: Vec::new(),
             lighting,
+            occlusion: None,
         }))
     }
 
@@ -2171,6 +2475,7 @@ impl Builder<'_, '_> {
                 motion: None,
                 clips: Vec::new(),
                 lighting: None,
+                occlusion: None,
             });
         }
         roi.hash(&mut h);
@@ -2230,6 +2535,7 @@ impl Builder<'_, '_> {
             motion: None,
             clips: Vec::new(),
             lighting: None,
+            occlusion: None,
         };
         OpInput::Image(self.push(Node {
             kind: NodeKind::Composite(CompositeNode {
@@ -2499,6 +2805,7 @@ impl Builder<'_, '_> {
             motion: None,
             clips: Vec::new(),
             lighting: None,
+            occlusion: None,
         }])
     }
 

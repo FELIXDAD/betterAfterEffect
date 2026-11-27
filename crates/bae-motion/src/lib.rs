@@ -90,6 +90,7 @@ pub mod path;
 pub mod photoshop;
 pub mod precompose;
 pub mod project_settings;
+pub mod puppet;
 pub mod query;
 pub mod shape;
 pub mod solid;
@@ -113,7 +114,10 @@ pub use comp::{
 pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
-pub use import::{ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind, ReplaceFile};
+pub use import::{
+    ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind, ReloadFiles, ReloadItem,
+    ReplaceFile,
+};
 pub use interpret::InterpretFootage;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
@@ -134,7 +138,7 @@ pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
 pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
-pub use text::{CreateText, SetText, SetTextStyle, TextStyleChange};
+pub use text::{ConvertTextOrientation, CreateText, SetText, SetTextStyle, TextStyleChange};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
 pub use text_path::SetTextPath;
 pub use time::{
@@ -147,6 +151,9 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
+        r.register(puppet::AddPin),
+        r.register(puppet::DeletePins),
+        r.register(puppet::SetMesh),
         r.register(paint::ExtendStroke),
         r.register(tracker::CreateTracker),
         r.register(tracker::AddPoint),
@@ -165,6 +172,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(NewItem),
         r.register(photoshop::ImportPhotoshop),
         r.register(ReplaceFile),
+        r.register(ReloadFiles),
         r.register(CreateLayer),
         r.register(Precompose),
         r.register(precompose::ReplaceWithPrecomp),
@@ -208,6 +216,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(ConvertTextOrientation),
         r.register(InterpretFootage),
         r.register(AutoOrient),
         r.register(SetProjectSettings),

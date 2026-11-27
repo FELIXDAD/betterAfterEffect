@@ -53,6 +53,8 @@ pub struct LayerPanel {
     pub(crate) render: bool,
     /// The stroke being painted: layer pixels, when it started.
     stroke: Option<(Vec<DVec2>, std::time::Instant)>,
+    /// Puppet tools: pins added, selected and dragged here too (AE).
+    puppet: crate::viewer::puppet_tool::PuppetState,
     /// Clone Stamp: the source point (Alt/Option-click), layer pixels.
     clone_point: Option<DVec2>,
     /// The stroke being painted continues the previous one (Shift-drag).
@@ -307,10 +309,11 @@ impl Panel for LayerPanel {
             let (mut view, _) = self.view(area, size, ui.ctx().pixels_per_point());
             view.aspect = aspect;
             self.picture(ui, cx, area, &one, min, evaluated, &view);
-            // Space pans whatever the tool (AE); a paint tool paints,
-            // otherwise a shown Liquify effect brushes.
+            // Space pans whatever the tool (AE); a paint tool paints, a
+            // Puppet tool places pins, otherwise a shown Liquify effect brushes.
             if !panning
                 && !self.paint(ui, cx, area, &view, min, evaluated)
+                && !self.puppet(ui, cx, &session, area, &view, &comp, &layer, time)
                 && let Show::Effect(index) = self.show
                 && let Some(fx) = evaluated.effects.get(index)
                 && fx.match_name == bae_effects::effects::liquify::MATCH_NAME
@@ -559,6 +562,48 @@ impl LayerPanel {
                 ));
             }
         }
+    }
+
+    /// The Puppet tools on the shown layer: its pins in layer space (the
+    /// picture's), added, selected and dragged as in the Composition viewer;
+    /// `false` when no Puppet tool is active.
+    #[allow(clippy::too_many_arguments)]
+    fn puppet(
+        &mut self,
+        ui: &Ui,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        area: Rect,
+        view: &View,
+        comp: &EvaluatedComp,
+        layer: &PrimPath,
+        time: Time,
+    ) -> bool {
+        let tool = crate::tools::shared(cx.resources).lock().current();
+        if crate::viewer::puppet_tool::pin_type(tool).is_none() {
+            return false;
+        }
+        // The layer alone with all its effects (the pins), placed as in the
+        // picture.
+        let Some((with_pins, _)) = alone(comp, layer, usize::MAX) else {
+            return true;
+        };
+        let resp = ui.interact(area, ui.id().with("puppet"), Sense::click_and_drag());
+        let painter = ui.painter_at(area);
+        crate::viewer::puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            session,
+            &with_pins,
+            view,
+            tool,
+            &painter,
+            time,
+            std::slice::from_ref(layer),
+        );
+        true
     }
 
     /// The paint tools: drag to paint a stroke; Alt/Option-click with the

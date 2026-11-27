@@ -432,6 +432,11 @@ impl AnimEvaluator {
                         params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
                         params.extend(crate::paint::source_params(&strokes));
                     }
+                    // The Puppet effect's pins at this frame.
+                    if e.match_name == crate::puppet::PUPPET_EFFECT {
+                        let pins = crate::puppet::pins(&e.children);
+                        params.push((crate::puppet::PINS_PARAM, crate::puppet::pack(&pins)));
+                    }
                     RenderEffect {
                         path: e.path.clone(),
                         effect: e.match_name.clone(),

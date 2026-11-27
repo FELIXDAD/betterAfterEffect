@@ -656,12 +656,17 @@ function TextStyle(fields, changes, edits, index) {
   this.__index = index;
 }
 TextStyle.prototype = {
+  setLineOrientation(orientation) {
+    var c = Object.assign({}, this.__c, {lineOrientation: orientation});
+    return new TextStyle(this.__f, c, this.__edits.concat([{lineOrientation: orientation}]), this.__index);
+  },
   get horizontalScale() { return "horizontalScale" in this.__c ? this.__c.horizontalScale : 100; },
   get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
 };
 [
   ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
   ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
+  ["lineOrientation", "lineOrientation"], ["baselineDirection", "baselineDirection"],
   ["baselineOption", "baselineOption"], ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
   ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
 ].forEach(function (p) {
@@ -672,6 +677,7 @@ TextStyle.prototype = {
 [
   ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
   ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
+  ["setBaselineDirection", "baselineDirection"],
   ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineOption", "baselineOption"], ["setBaselineShift", "baselineShift"],
   ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
   ["setSmallCaps", "smallCaps"], ["setApplyFill", "applyFill"], ["setApplyStroke", "applyStroke"],
