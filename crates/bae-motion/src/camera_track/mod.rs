@@ -1,11 +1,12 @@
 //! Sparse reconstruction in AE coordinates (+X right, +Y down, +Z forward).
+pub mod attach;
 mod geometry;
 mod math;
 use crate::{
     query,
     util::{ensure_unlocked, fail, set},
 };
-use bae_anim::glam::{DQuat, DVec2, DVec3};
+use bae_anim::glam::{DAffine2, DQuat, DVec2, DVec3};
 use bae_model::{Command, CommandError, PrimPath, Stage, Time, Transaction, Value};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -83,6 +84,8 @@ pub struct Landmark {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Frame {
     pub time: Time,
+    /// Maps composition pixels back to the analyzed layer for overlays and export.
+    pub layer_from_comp: [f64; 6],
     pub camera: Pose,
     pub samples: Vec<Sample>,
 }
@@ -96,9 +99,15 @@ pub struct Solution {
 }
 
 const INSUFFICIENT: &str = "Insufficient matching track points";
+pub struct Measurements {
+    pub time: Time,
+    pub samples: Vec<Sample>,
+    pub layer_from_comp: [f64; 6],
+}
+
 pub fn solve(
     size: [u32; 2],
-    frames: Vec<(Time, Vec<Sample>)>,
+    frames: Vec<Measurements>,
     settings: Settings,
     cancelled: impl Fn() -> bool,
 ) -> Result<Solution, String> {
@@ -122,11 +131,12 @@ pub fn solve(
     } else {
         None
     };
-    let first: BTreeMap<_, _> = frames[0].1.iter().map(|s| (s.id, s.xy())).collect();
+    let first: BTreeMap<_, _> = frames[0].samples.iter().map(|s| (s.id, s.xy())).collect();
     let mut baseline = 0.;
     let mut pairs = Vec::new();
     let mut seed = 1;
-    for (i, (_, samples)) in frames.iter().enumerate().skip(1).take(45) {
+    for (i, frame) in frames.iter().enumerate().skip(1).take(45) {
+        let samples = &frame.samples;
         check()?;
         let candidate: Vec<_> = samples
             .iter()
@@ -177,7 +187,13 @@ pub fn solve(
             .map(|(&id, &xy)| (id, xy.extend(zoom)))
             .collect();
         if settings.method == 1 {
-            let guess = geometry::refine(Pose::new(zoom), &frames[seed].1, &scene, true, variable);
+            let guess = geometry::refine(
+                Pose::new(zoom),
+                &frames[seed].samples,
+                &scene,
+                true,
+                variable,
+            );
             let inliers = guess.map_or(0, |c| {
                 pairs
                     .iter()
@@ -190,13 +206,15 @@ pub fn solve(
     }
     let mut cameras = vec![Pose::new(zoom); frames.len()];
     let mut by_point: BTreeMap<u32, Vec<(usize, DVec2)>> = BTreeMap::new();
-    for (i, (_, samples)) in frames.iter().enumerate() {
+    for (i, frame) in frames.iter().enumerate() {
+        let samples = &frame.samples;
         for &s in samples {
             by_point.entry(s.id).or_default().push((i, s.xy()));
         }
     }
     // Incremental resection; triangulate new tracks once an observed baseline exists.
-    for (i, (_, samples)) in frames.iter().enumerate().skip(1) {
+    for (i, frame) in frames.iter().enumerate().skip(1) {
+        let samples = &frame.samples;
         check()?;
         cameras[i] =
             geometry::refine(cameras[i - 1], samples, &scene, pan, variable).ok_or(INSUFFICIENT)?;
@@ -241,14 +259,16 @@ pub fn solve(
                 geometry::flatten(&mut scene);
             }
         }
-        for (i, (_, samples)) in frames.iter().enumerate().skip(1) {
+        for (i, frame) in frames.iter().enumerate().skip(1) {
+            let samples = &frame.samples;
             check()?;
             cameras[i] =
                 geometry::refine(cameras[i], samples, &scene, pan, variable).ok_or(INSUFFICIENT)?;
         }
         if specified.is_none() && !variable && !pan {
             let (mut num, mut den) = (0., 0.);
-            for (i, (_, samples)) in frames.iter().enumerate() {
+            for (i, frame) in frames.iter().enumerate() {
+                let samples = &frame.samples;
                 for s in samples {
                     if let Some(x) = scene.get(&s.id).and_then(|&p| cameras[i].pixel(p)) {
                         let u = x / zoom;
@@ -290,9 +310,13 @@ pub fn solve(
         }
     }
     if points.len() < 6
-        || frames
-            .iter()
-            .any(|(_, s)| s.iter().filter(|p| points.contains_key(&p.id)).count() < 6)
+        || frames.iter().any(|f| {
+            f.samples
+                .iter()
+                .filter(|p| points.contains_key(&p.id))
+                .count()
+                < 6
+        })
     {
         return Err(INSUFFICIENT.into());
     }
@@ -304,19 +328,70 @@ pub fn solve(
         frames: frames
             .into_iter()
             .zip(cameras)
-            .map(|((time, samples), camera)| Frame {
-                time,
-                samples,
+            .map(|(f, camera)| Frame {
+                time: f.time,
+                layer_from_comp: f.layer_from_comp,
+                samples: f.samples,
                 camera,
             })
             .collect(),
     })
 }
+pub const RECORDED_SETTINGS: &str = "tracker:settings";
 pub struct Record;
-#[derive(Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct Recording {
     pub effect: PrimPath,
-    pub solution: Solution,
+    pub settings: Settings,
+    pub error: f64,
+    pub data: Value,
+    pub samples: bae_model::AttrSpec,
+}
+impl Recording {
+    /// Build the command payload on the analysis thread. Applying it replaces two attributes.
+    pub fn prepare(
+        stage: &Stage,
+        effect: &PrimPath,
+        solution: &Solution,
+    ) -> Result<Self, CommandError> {
+        use bae_model::{AttrSpec, Keyframe, effect::camera_tracks::TrackPoint};
+        let half = DVec2::new(solution.size[0] as f64, solution.size[1] as f64) * 0.5;
+        let timing = query::key_timing(stage, effect);
+        let mut samples = AttrSpec::default();
+        for f in &solution.frames {
+            let mut rows = Vec::with_capacity(f.samples.len() * TrackPoint::BYTES);
+            let layer = DAffine2::from_cols_array(&f.layer_from_comp);
+            for s in &f.samples {
+                let xy = s.xy() + half;
+                let (projected, error) = solution
+                    .points
+                    .get(&s.id)
+                    .and_then(|p| {
+                        Some((f.camera.pixel(DVec3::from_array(p.world))? + half, p.error))
+                    })
+                    .unwrap_or((xy, -1.));
+                TrackPoint {
+                    id: s.id,
+                    source: layer.transform_point2(xy).as_vec2().to_array(),
+                    projected: layer.transform_point2(projected).as_vec2().to_array(),
+                    error: error as f32,
+                }
+                .append(&mut rows);
+            }
+            samples.keyframes.insert(
+                timing.layer_time(f.time),
+                Keyframe::hold(Value::Bytes(rows)),
+            );
+        }
+        let data = Value::Bytes(serde_json::to_vec(solution).map_err(|e| fail(e.to_string()))?);
+        Ok(Self {
+            effect: effect.clone(),
+            settings: solution.settings,
+            error: solution.error,
+            data,
+            samples,
+        })
+    }
 }
 impl Command for Record {
     type Params = Recording;
@@ -328,17 +403,46 @@ impl Command for Record {
     fn run(&self, tx: &mut Transaction<'_>, p: Recording) -> Result<(), CommandError> {
         let layer = crate::effect::layer_of_effect(&p.effect)
             .ok_or_else(|| fail("Missing camera tracker"))?;
-        ensure_unlocked(tx.stage(), &[layer])?;
+        ensure_unlocked(tx.stage(), [&layer])?;
         if attr(tx.stage(), &p.effect, "match_name")
             .as_ref()
             .and_then(Value::as_str)
             != Some(MATCH_NAME)
-            || Settings::read(tx.stage(), &p.effect) != p.solution.settings
+            || Settings::read(tx.stage(), &p.effect) != p.settings
         {
             return Err(fail("Camera tracker changed"));
         }
-        let data = serde_json::to_vec(&p.solution).map_err(|e| fail(e.to_string()))?;
-        set(tx, &p.effect, ERROR, Value::Float(p.solution.error))?;
-        set(tx, &p.effect, SOLUTION, Value::Bytes(data))
+        if !matches!(&p.data, Value::Bytes(data) if !data.is_empty())
+            || p.samples.keyframes.is_empty()
+            || !p.error.is_finite()
+        {
+            return Err(fail("Invalid camera reconstruction"));
+        }
+        if query::attr_spec(tx.stage(), &p.effect, attach::CAMERA).is_some() {
+            set(
+                tx,
+                &p.effect,
+                attach::CAMERA,
+                Value::PrimRef(PrimPath::root()),
+            )?;
+        }
+        if query::attr_spec(tx.stage(), &p.effect, attach::GROUND).is_some() {
+            set(tx, &p.effect, attach::GROUND, Value::FloatList(vec![]))?;
+        }
+        crate::util::write_attr(
+            tx,
+            &p.effect,
+            &bae_model::effect::param_attr(bae_model::effect::camera_tracks::DISPLAY_POINTS),
+            p.samples,
+        )?;
+        set(tx, &p.effect, ERROR, Value::Float(p.error))?;
+        set(
+            tx,
+            &p.effect,
+            RECORDED_SETTINGS,
+            Value::String(serde_json::to_string(&p.settings).map_err(|e| fail(e.to_string()))?),
+        )?;
+        set(tx, &p.effect, SOLUTION, p.data)?;
+        set(tx, &p.effect, "tracker:needs_solve", Value::Bool(false))
     }
 }
