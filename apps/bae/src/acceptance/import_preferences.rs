@@ -1,6 +1,29 @@
 use super::*;
 use bae_ui::files::{FilePicker, ImportSelection, OpenRequest, SharedFilePicker};
 
+/// Import ▸ Enable Hardware Accelerated Decoding (Requires Restart): OK
+/// keeps the switch; the next launch reads it (`startup::run`).
+#[cfg(windows)]
+#[test]
+fn import_dialog_saves_the_hardware_decoding_switch() {
+    use egui_kittest::kittest::Queryable as _;
+
+    let mut h = gui();
+    let id = "import.enable_hardware_accelerated_decoding";
+    assert!(h.state().prefs.current().bool(id));
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page": "import"}),
+    ));
+    settle(&mut h);
+    h.get_by_label("Enable Hardware Accelerated Decoding (Requires Restart)")
+        .click();
+    settle(&mut h);
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    assert!(!h.state().prefs.current().bool(id));
+}
+
 struct ImportPicker {
     first: PathBuf,
     alphabetical: bool,
