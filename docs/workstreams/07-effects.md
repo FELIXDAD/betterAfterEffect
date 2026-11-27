@@ -161,3 +161,7 @@ Particle World 和 Particle Systems II 共用 GPU 粒子引擎。出生率的时
 液化使用 AE 实测的 ADBE LIQUIFY 和参数 ID。效果控件中的十个工具可打开图层查看器，画笔在 GPU 上编辑网格，松开后合为一次撤销。视图网格仅在图层查看器中显示。
 
 图层查看器在后台准备画笔。拖动时，图层与合成查看器实时采样同一份 GPU 位移。叠加的网格线只显示在图层查看器。松开鼠标时读取一次位移，图层属性命令记录当前笔迹。
+
+### 3D 摄像机跟踪器
+
+[#767](https://github.com/FELIXDAD/betterAfterEffects/pull/767) 在后台跟踪素材特征，解算逐帧摄像机和焦距。[#772](https://github.com/FELIXDAD/betterAfterEffects/pull/772) 在查看器中显示跟踪点，支持框选、设置地平面和原点，以及从选点创建图层和摄像机。一次撤销可移除该次创建的图层和关键帧。两项功能排在 0.1.0 发布后评审。
