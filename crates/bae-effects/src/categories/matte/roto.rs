@@ -19,7 +19,8 @@ use crate::{
 };
 
 const LABEL: &str = "bae.vision.roto";
-const BYTES: u32 = 144 + 32 * 32;
+const SEGMENTS: usize = 208;
+const BYTES: u32 = SEGMENTS as u32 + 32 * 32;
 
 pub(super) fn builtin() -> Builtin {
     let (def, names) = super::definition::definition().build();
@@ -80,6 +81,9 @@ impl Effect for Roto {
     fn def(&self) -> &EffectDef {
         &self.0
     }
+    fn full_surface(&self) -> bool {
+        true
+    }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         roi.union(&image_grid::layer_rect(p))
     }
@@ -92,6 +96,7 @@ impl Effect for Roto {
         }
         let mut times: Vec<_> = segments(p.value(STROKES))
             .iter()
+            .chain(segments(p.value(bae_vision::EDGE_STROKES)))
             .map(|s| s[0] as i64)
             .collect();
         times.sort_unstable();
@@ -146,6 +151,36 @@ fn dispatch(
     Ok(out)
 }
 
+/// A baked matte where nothing is masked out: full confidence, no refine
+/// region (the layer shows as it is, as without strokes).
+fn unmatted(target: &mut dyn EffectTarget, roi: IRect, grid: f64) -> Result<GpuImage, RenderError> {
+    let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
+    target
+        .encoder()
+        .begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(LABEL),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &out.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 1.,
+                        g: 0.,
+                        b: 1.,
+                        a: 1.,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+    Ok(out)
+}
+
 impl TargetEffect for Roto {
     fn encode(
         &self,
@@ -155,8 +190,16 @@ impl TargetEffect for Roto {
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
         let strokes = segments(p.value(STROKES));
+        let bake = p
+            .value(bae_vision::BAKE)
+            .and_then(bae_model::Value::as_bool)
+            == Some(true);
         if strokes.is_empty() || !active(p) {
-            return Ok(input.clone());
+            return if bake {
+                unmatted(target, roi, image_grid::grid_scale(p, input))
+            } else {
+                Ok(input.clone())
+            };
         }
         let v = Params::new(&self.0, p);
         let grid = image_grid::grid_scale(p, input);
@@ -168,10 +211,62 @@ impl TargetEffect for Roto {
         // A frozen matte that does not render (its layer was deleted, the
         // footage is missing) is computed from the strokes instead.
         let frozen = frozen_input(p).and_then(|dep| target.effect_layer(&dep).cloned());
+        let edge_tuning = v.b(22);
+        let chatter = if edge_tuning && v.popup(28) >= 3 {
+            let intensity = if v.popup(28) == 4 { 0.025 } else { 0.012 };
+            1.0 - (-intensity * v.f(29)).exp()
+        } else {
+            0.
+        };
+        let matte_chatter = if v.b(13) { v.f(18) / 100. } else { 0. };
+        u.f32s(
+            144,
+            &[
+                (v.f(21) / grid) as f32,
+                f32::from(u8::from(v.b(20))),
+                matte_chatter as f32,
+                chatter as f32,
+            ],
+        )
+        .f32s(
+            160,
+            &if edge_tuning {
+                [
+                    (v.f(24) / grid) as f32,
+                    (v.f(25) / grid) as f32,
+                    v.f(26) as f32 * 0.01,
+                    v.f(27) as f32 * 0.01,
+                ]
+            } else {
+                [0.; 4]
+            },
+        )
+        .f32s(
+            176,
+            &[
+                if v.b(37) { v.f(39) as f32 * 0.01 } else { 0. },
+                (v.f(41) / grid) as f32,
+                f32::from(u8::from(v.b(40))),
+                f32::from(u8::from(v.b(42))),
+            ],
+        );
         let mut scores = frozen.clone();
         let mut ordinal = 0usize;
-        let live_strokes = if frozen.is_some() { &[][..] } else { strokes };
-        for group in live_strokes.chunk_by(|a, b| a[0] == b[0]) {
+        let edge_strokes = segments(p.value(bae_vision::EDGE_STROKES));
+        let (live_strokes, edge_strokes) = if frozen.is_some() {
+            (&[][..], &[][..])
+        } else {
+            (strokes, edge_strokes)
+        };
+        let groups = live_strokes
+            .chunk_by(|a, b| a[0] == b[0])
+            .map(|g| (g, false))
+            .chain(
+                edge_strokes
+                    .chunk_by(|a, b| a[0] == b[0])
+                    .map(|g| (g, true)),
+            );
+        for (group, edge) in groups {
             let dep = source(p, group[0][0]);
             let base = match &dep {
                 Some(d) => match target.effect_layer(d) {
@@ -207,10 +302,11 @@ impl TargetEffect for Roto {
                     .u32(116, u32::from(field.is_some()))
                     .u32(120, u32::from(scores.is_some()));
                 for (i, s) in chunk.iter().enumerate() {
-                    let at = 144 + 32 * i;
+                    let at = SEGMENTS + 32 * i;
                     u.f32s(at, &[s[2], s[3], s[4], s[5]].map(|v| (v / grid) as f32))
                         .f32(at + 16, (s[1] / grid) as f32)
-                        .f32(at + 20, (ordinal + 1) as f32 / strokes.len() as f32);
+                        .f32(at + 20, (ordinal + 1) as f32 / strokes.len() as f32)
+                        .f32(at + 24, f32::from(u8::from(edge)));
                     ordinal += 1;
                 }
                 scores = Some(dispatch(
@@ -225,7 +321,11 @@ impl TargetEffect for Roto {
         }
         // Nothing could be propagated: the layer as it is.
         if scores.is_none() {
-            return Ok(input.clone());
+            return if bake {
+                unmatted(target, roi, grid)
+            } else {
+                Ok(input.clone())
+            };
         }
         let width = if v.b(13) {
             (0.02 + v.f(15) * 0.003) * (1.5 - v.f(16) * 0.01)
@@ -242,14 +342,12 @@ impl TargetEffect for Roto {
             );
             image_grid::image_coords(&mut u, 32, &aligned, grid);
         }
-        u.u32(116, u32::from(frozen.is_some())).u32(
-            120,
-            u32::from(
-                p.value(bae_vision::BAKE)
-                    .and_then(bae_model::Value::as_bool)
-                    == Some(true),
-            ),
-        );
+        let format = match p.value(bae_vision::FROZEN_FORMAT) {
+            Some(bae_model::Value::Int(bae_vision::FROZEN_RGB)) => 1,
+            _ => 2,
+        };
+        u.u32(116, if frozen.is_some() { format } else { 0 })
+            .u32(120, u32::from(bake));
         u.f32(136, width as f32)
             .f32(140, if v.b(13) { v.f(17) as f32 * 0.003 } else { 0. })
             .u32(124, u32::from(v.b(12)));
