@@ -740,7 +740,7 @@ impl Panel for ProjectPanel {
                     .find(|(r, _)| r.contains(p))
                     .map(|(_, f)| f.clone())
             });
-            crate::import::import_paths(cx, &dropped, folder);
+            crate::import::drop_paths(cx, &dropped, folder, None);
         }
         // Enter renames the selected item (AE) — unless a focused widget, e.g. a
         // button in another panel, took the Enter.

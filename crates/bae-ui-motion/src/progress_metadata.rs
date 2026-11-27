@@ -10,6 +10,7 @@ use bae_model::{FrameRate, PrimPath, Stage, Time, Value};
 use bae_ui::theme::{self, color};
 use bae_ui::{Panel, PanelContext, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
+use std::collections::BTreeSet;
 
 use crate::common;
 use crate::render_queue::{ItemStatus, SharedRenderQueue};
@@ -25,7 +26,15 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "metadata",
-        bae_ui::PanelKind::new("Metadata", |_| Box::new(MetadataPanel::default())),
+        bae_ui::PanelKind::new("Metadata", |spawn| {
+            Box::new(MetadataPanel {
+                hidden: spawn
+                    .state
+                    .and_then(|s| serde_json::from_value(s.clone()).ok())
+                    .unwrap_or_default(),
+                ..Default::default()
+            })
+        }),
     );
 }
 
@@ -101,6 +110,62 @@ impl Panel for ProgressPanel {
 #[derive(Default)]
 pub struct MetadataPanel {
     search: String,
+    hidden: [BTreeSet<String>; 2],
+    display: Option<(usize, BTreeSet<String>)>,
+}
+
+const DC: &str = "http://purl.org/dc/elements/1.1/";
+const DM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
+const FIELDS: &[(&str, &str, &str)] = &[
+    (DC, "dc:title", "Document Title"),
+    (DC, "dc:creator", "Author"),
+    (DC, "dc:description", "Description"),
+    (DC, "dc:subject", "Keywords"),
+    (DC, "dc:rights", "Copyright Notice"),
+    (DM, "xmpDM:scene", "Scene"),
+    (DM, "xmpDM:shotName", "Shot Name"),
+    (DM, "xmpDM:logComment", "Log Comment"),
+];
+
+/// Read descriptive fields at import, alongside the decoder's technical properties.
+pub(crate) fn import_xmp(
+    path: &std::path::Path,
+    attrs: &mut std::collections::BTreeMap<String, Value>,
+) {
+    use std::io::Read as _;
+    let Ok(file) = std::fs::File::open(path.with_extension("xmp")) else {
+        return;
+    };
+    let mut xml = String::new();
+    if file.take(2 << 20).read_to_string(&mut xml).is_err() {
+        return;
+    }
+    let Ok(doc) = roxmltree::Document::parse(&xml) else {
+        return;
+    };
+    for &(ns, field, _) in FIELDS {
+        let name = field.split_once(':').unwrap().1;
+        let key = (ns, name);
+        let value = doc.descendants().find_map(|n| {
+            if let Some(s) = n.attribute(key) {
+                return Some(s.to_owned());
+            }
+            if !n.has_tag_name(key) {
+                return None;
+            }
+            let strings: Vec<_> = n
+                .descendants()
+                .filter(|v| v.is_text())
+                .filter_map(|v| v.text())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+            Some(strings.join("; "))
+        });
+        if let Some(s) = value {
+            attrs.insert(field.to_owned(), Value::String(s));
+        }
+    }
 }
 
 impl Panel for MetadataPanel {
@@ -110,49 +175,181 @@ impl Panel for MetadataPanel {
             ui.add_space(6.0);
             bae_ui::widgets::search_field(ui, &mut self.search, ui.available_width() - 12.0);
         });
-        let item = common::session(cx.resources)
-            .lock()
-            .selected_items
-            .first()
-            .cloned();
-        let Some(item) = item else {
+        let items = common::session(cx.resources).lock().selected_items.clone();
+        let query = self.search.to_lowercase();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::CollapsingHeader::new(tr("Project"))
+                .default_open(items.is_empty())
+                .show(ui, |ui| self.fields(ui, cx, &[], &query));
+            egui::CollapsingHeader::new(tr("Files"))
+                .default_open(true)
+                .show(ui, |ui| {
+                    if items.is_empty() {
+                        return;
+                    }
+                    self.fields(ui, cx, &items, &query);
+                    if let [item] = items.as_slice() {
+                        let rows = properties(cx.stage, item)
+                            .into_iter()
+                            .filter(|(label, value)| {
+                                tr(label).to_lowercase().contains(&query)
+                                    || value.to_lowercase().contains(&query)
+                            })
+                            .collect::<Vec<_>>();
+                        if !rows.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new(tr("File Properties"))
+                                        .color(color::TEXT_STRONG),
+                                );
+                            });
+                            let font = theme::body();
+                            for (label, value) in rows {
+                                let (r, resp) = ui.allocate_exact_size(
+                                    vec2(ui.available_width(), 20.0),
+                                    Sense::hover(),
+                                );
+                                let p = ui.painter_at(r);
+                                let split = r.left() + (r.width() * 0.4).clamp(90.0, 160.0);
+                                p.text(
+                                    pos2(r.left() + 16.0, r.center().y),
+                                    Align2::LEFT_CENTER,
+                                    tr(label),
+                                    font.clone(),
+                                    color::TEXT_DIM,
+                                );
+                                p.text(
+                                    pos2(split, r.center().y),
+                                    Align2::LEFT_CENTER,
+                                    &value,
+                                    font.clone(),
+                                    color::TEXT,
+                                );
+                                resp.on_hover_text(value);
+                            }
+                        }
+                    }
+                });
+        });
+        self.display_dialog(ui.ctx());
+    }
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        for (side, title) in DISPLAY.iter().enumerate() {
+            if ui.button(tr(title)).clicked() {
+                self.display = Some((side, self.hidden[side].clone()));
+                ui.close();
+            }
+        }
+    }
+    fn save_state(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(&self.hidden).ok()
+    }
+}
+
+const DISPLAY: [&str; 2] = ["Project Metadata Display...", "Files Metadata Display..."];
+impl MetadataPanel {
+    fn fields(&self, ui: &mut Ui, cx: &mut PanelContext<'_>, items: &[PrimPath], query: &str) {
+        let side = usize::from(!items.is_empty());
+        let project = PrimPath::new(bae_motion::project_settings::PROJECT).unwrap();
+        let paths = if items.is_empty() {
+            std::slice::from_ref(&project)
+        } else {
+            items
+        };
+        for (ns, group) in [(DC, "Basic"), (DM, "Dynamic Media")] {
+            egui::CollapsingHeader::new(tr(group))
+                .id_salt((side, group))
+                .default_open(true)
+                .show(ui, |ui| {
+                    for &(_, field, label) in
+                        FIELDS.iter().filter(|(namespace, _, _)| *namespace == ns)
+                    {
+                        if self.hidden[side].contains(field) {
+                            continue;
+                        }
+                        let mut values = paths.iter().map(|p| {
+                            cx.stage
+                                .prim(p)
+                                .and_then(|v| bae_motion::query::static_value(&v, field))
+                                .and_then(|v| {
+                                    if let Value::String(s) = v {
+                                        Some(s)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_default()
+                        });
+                        let mut value = values.next().unwrap_or_default();
+                        let mixed = values.any(|s| s != value);
+                        if mixed {
+                            value.clear();
+                        }
+                        if !tr(label).to_lowercase().contains(query)
+                            && !value.to_lowercase().contains(query)
+                        {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            let caption = ui.label(tr(label));
+                            // Typing edits a local copy; Enter or clicking away
+                            // commits it as one step (one undo), Esc drops it.
+                            let key = egui::Id::new(("metadata-edit", items, field));
+                            let mut text = ui
+                                .data(|d| d.get_temp::<String>(key))
+                                .unwrap_or_else(|| value.clone());
+                            let edit = egui::TextEdit::singleline(&mut text)
+                                .id_salt((items, field))
+                                .hint_text(if mixed { tr("<Multiple Values>") } else { "" })
+                                .desired_width(ui.available_width());
+                            let resp = ui.add(edit).labelled_by(caption.id);
+                            if resp.changed() {
+                                ui.data_mut(|d| d.insert_temp(key, text.clone()));
+                            }
+                            if resp.lost_focus() {
+                                ui.data_mut(|d| d.remove::<String>(key));
+                                let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                if !cancelled && text != value {
+                                    cx.invoke_with(
+                                        "item.set_metadata",
+                                        serde_json::json!({"items":items,"field":field,"text":text}),
+                                    );
+                                }
+                            }
+                        });
+                    }
+                });
+        }
+    }
+    fn display_dialog(&mut self, ctx: &egui::Context) {
+        let Some((side, hidden)) = self.display.as_mut() else {
             return;
         };
-        let query = self.search.to_lowercase();
-        let rows: Vec<(&str, String)> = properties(cx.stage, &item)
-            .into_iter()
-            .filter(|(label, value)| {
-                query.is_empty()
-                    || tr(label).to_lowercase().contains(&query)
-                    || value.to_lowercase().contains(&query)
-            })
-            .collect();
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(tr("File Properties")).color(color::TEXT_STRONG));
+        let mut save = false;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::new("metadata-display")).show(ctx, |ui| {
+            ui.heading(tr(DISPLAY[*side]).trim_end_matches("..."));
+            for &(_, field, label) in FIELDS {
+                let mut show = !hidden.contains(field);
+                if ui.checkbox(&mut show, tr(label)).changed() {
+                    if show {
+                        hidden.remove(field);
+                    } else {
+                        hidden.insert(field.into());
+                    }
+                }
+            }
+            ui.horizontal(|ui| {
+                cancel = ui.button(tr("Cancel")).clicked();
+                save = ui.button(tr("OK")).clicked();
+            });
         });
-        let font = theme::body();
-        for (label, value) in rows {
-            let (r, resp) =
-                ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
-            let p = ui.painter_at(r);
-            let split = r.left() + (r.width() * 0.4).clamp(90.0, 160.0);
-            p.text(
-                pos2(r.left() + 16.0, r.center().y),
-                Align2::LEFT_CENTER,
-                tr(label),
-                font.clone(),
-                color::TEXT_DIM,
-            );
-            p.text(
-                pos2(split, r.center().y),
-                Align2::LEFT_CENTER,
-                &value,
-                font.clone(),
-                color::TEXT,
-            );
-            resp.on_hover_text(value);
+        if save {
+            self.hidden[*side] = std::mem::take(hidden);
+        }
+        if save || cancel || modal.should_close() {
+            self.display = None;
         }
     }
 }
@@ -267,6 +464,21 @@ fn date(t: std::time::SystemTime) -> String {
 
 /// Chinese for the panels (AE 26).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Files", "文件"),
+    ("Project Metadata Display...", "项目元数据显示..."),
+    ("Files Metadata Display...", "文件元数据显示..."),
+    ("<Multiple Values>", "<多个值>"),
+    ("Edit Metadata", "编辑元数据"),
+    ("Basic", "基本"),
+    ("Dynamic Media", "动态媒体"),
+    ("Document Title", "文档标题"),
+    ("Author", "作者"),
+    ("Description", "描述"),
+    ("Keywords", "关键字"),
+    ("Copyright Notice", "版权公告"),
+    ("Scene", "场景"),
+    ("Shot Name", "拍摄名称"),
+    ("Log Comment", "日志注释"),
     ("Rendering", "渲染"),
     ("Done", "完成"),
     ("Failed", "失败"),
