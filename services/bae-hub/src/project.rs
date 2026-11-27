@@ -352,30 +352,38 @@ fn too_large_hint(max: usize, hub_max: usize) -> String {
         format!(
             "the client takes at most {} per message, which is its own setting; \
              raising max_message_mib does not help",
-            mib(max)
+            size(max)
         )
     } else if hub_max < clients_take {
         format!(
             "max_message_mib in [limits] is {}; raising it, up to {}, may let it sync",
-            mib(hub_max),
-            mib(clients_take)
+            size(hub_max),
+            size(clients_take)
         )
     } else {
         format!(
             "{} is the most clients take in one message, so the layer cannot sync through \
              the hub; deleting content from it does not help (what does not fit is its edit \
              history, not its current size): move the content into new, smaller layers",
-            mib(clients_take)
+            size(clients_take)
         )
     }
 }
 
-/// `n` bytes in MiB, for logs.
-fn mib(n: usize) -> String {
-    if n.is_multiple_of(1 << 20) {
-        format!("{} MiB", n >> 20)
+/// `n` bytes for logs, in the largest unit (MiB, KiB) it has a whole one
+/// of, so a small limit does not read as "0.00 MiB".
+fn size(n: usize) -> String {
+    let (unit, name) = if n < 1 << 10 {
+        return format!("{n} bytes");
+    } else if n < 1 << 20 {
+        (1 << 10, "KiB")
     } else {
-        format!("{:.2} MiB", n as f64 / f64::from(1 << 20))
+        (1 << 20, "MiB")
+    };
+    if n.is_multiple_of(unit) {
+        format!("{} {name}", n / unit)
+    } else {
+        format!("{:.2} {name}", n as f64 / unit as f64)
     }
 }
 
@@ -897,9 +905,34 @@ mod tests {
         for hub_max in [default, 64 << 20] {
             let hint = too_large_hint(256 << 10, hub_max);
             assert!(
-                hint.contains("0.25 MiB") && hint.contains("does not help"),
+                hint.contains("takes at most 256 KiB per message")
+                    && hint.contains("does not help"),
                 "{hint}"
             );
+        }
+    }
+
+    /// Sizes in the warning are in the largest unit they have a whole one
+    /// of. A client may say it takes a few bytes (`x-bae-max-incoming`
+    /// takes any positive number): in MiB that read "0.00 MiB".
+    #[test]
+    fn small_limits_in_the_too_large_warning_are_not_zero() {
+        let hub_max = HubLimits::default().max_incoming;
+        for (max, want) in [
+            (100, "100 bytes"),
+            (1023, "1023 bytes"),
+            (1024, "1 KiB"),
+            (5242, "5.12 KiB"),
+            (300 << 10, "300 KiB"),
+            (3 << 19, "1.50 MiB"),
+            (64 << 20, "64 MiB"),
+        ] {
+            let hint = too_large_hint(max, hub_max);
+            assert!(
+                hint.contains(&format!("takes at most {want} per message")),
+                "{max}: {hint}"
+            );
+            assert!(!hint.contains("0.00"), "{max}: {hint}");
         }
     }
 
