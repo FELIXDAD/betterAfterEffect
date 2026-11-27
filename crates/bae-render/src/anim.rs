@@ -357,6 +357,11 @@ impl AnimEvaluator {
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         // The render queue renders at Best Settings (every layer, nested
         // ones too, at Best); the Quality switches only change previews.
+        // Advanced 3D extrudes 3D text and shape layers.
+        out.extrusion = match (&l.geometry, ec.advanced_3d, l.switches.three_d) {
+            (Some(g), true, true) => g.extrusion_depth,
+            _ => 0.0,
+        };
         out.quality = match self.purpose {
             RenderPurpose::Final => bae_anim::LayerQuality::Best,
             _ => inherited.quality.min(l.switches.quality),
