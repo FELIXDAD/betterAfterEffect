@@ -185,6 +185,8 @@ pub enum SequenceMode {
     /// Open the image sequence the file belongs to (AE: "PNG Sequence" on).
     /// Falls back to a single still if the name has no frame number.
     Sequence,
+    /// All stills with this extension in the same directory, in filename order.
+    Alphabetical,
 }
 
 /// Options for opening a file.
@@ -195,6 +197,7 @@ pub struct OpenOptions {
     /// Frame rate assigned to image sequences (AE preference "Sequence Footage
     /// frames per second", default 30).
     pub sequence_frame_rate: FrameRate,
+    pub psd_layer: Option<bae_model::psd::LayerImage>,
 }
 
 impl Default for OpenOptions {
@@ -202,6 +205,7 @@ impl Default for OpenOptions {
         OpenOptions {
             sequence: SequenceMode::Single,
             sequence_frame_rate: DEFAULT_SEQUENCE_RATE,
+            psd_layer: None,
         }
     }
 }
@@ -212,6 +216,7 @@ impl OpenOptions {
         OpenOptions {
             sequence: SequenceMode::Sequence,
             sequence_frame_rate: rate,
+            ..Default::default()
         }
     }
 }
@@ -315,7 +320,18 @@ impl MediaFormats {
         path: &Path,
         options: &OpenOptions,
     ) -> Result<Box<dyn MediaSource>, MediaError> {
+        if let Some(layer) = options.psd_layer {
+            return crate::psd::open(path, Some(layer));
+        }
         let format = self.find(path)?;
+        if options.sequence == SequenceMode::Alphabetical && format.is_image() {
+            let seq = sequence::alphabetical_sequence(path)?;
+            return Ok(Box::new(ImageSequenceSource::open(
+                format,
+                seq,
+                options.sequence_frame_rate,
+            )?));
+        }
         if options.sequence == SequenceMode::Sequence
             && format.is_image()
             && let Some(seq) = sequence::detect_sequence(path)?

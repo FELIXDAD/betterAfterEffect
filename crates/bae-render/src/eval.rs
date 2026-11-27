@@ -331,6 +331,8 @@ impl<'a> MockPass<'a> {
                 }),
                 None => BlendMode::Normal,
             };
+            out.quality =
+                bae_anim::LayerQuality::from_token(string(layer, "quality", local).as_deref());
             out.preserve_transparency =
                 boolean(layer, "preserve_transparency", local).unwrap_or(false);
             out.track_matte = string(layer, "track_matte", local)
@@ -351,6 +353,8 @@ impl<'a> MockPass<'a> {
                     bae_model::layer_styles::effective_styles(self.stage, layer.path())
                         .and_then(|p| self.effect(p, local));
                 out.masks = self.masks(layer, local);
+                out.resolve_photoshop_mask(self.stage);
+                out.resolve_photoshop_group(self.stage, self.assets);
             }
             if layer_has_expressions(layer) {
                 self.warn(format!(
@@ -360,6 +364,7 @@ impl<'a> MockPass<'a> {
             }
             comp.layers.push(out);
         }
+        comp.photoshop_clipping_visibility(self.stage);
         Ok(comp)
     }
 
@@ -470,10 +475,19 @@ impl<'a> MockPass<'a> {
                 };
                 Ok(LayerContent::Footage(FootageRef {
                     asset: source,
+                    file_revision: bae_model::asset::file_revision(&src),
+                    psd_layer: bae_model::psd::LayerImage::from_asset(&src),
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: local,
-                    sequence: None,
+                    sequence: (asset_kind == "sequence").then(|| match src.value("frame_rate") {
+                        Some(Value::FrameRate(rate)) => *rate,
+                        _ => FrameRate::FPS_30,
+                    }),
+                    alphabetical: src
+                        .value("sequence:pattern")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s.starts_with("*.")),
                     blend: None,
                 }))
             }

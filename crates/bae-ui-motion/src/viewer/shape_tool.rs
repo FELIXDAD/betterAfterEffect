@@ -372,7 +372,13 @@ pub(crate) fn run(
         Target::Shape(layer) => {
             obj.insert("layer".into(), json!(layer));
             add_paint(obj, bezier, options);
+            let before = crate::session::shape_groups(stage, layer);
             cx.invoke_with("shape.add", params);
+            // AE selects the new group: its box scales it around its anchor.
+            session.lock().expect(Pending::NewGroup {
+                layer: layer.clone(),
+                before,
+            });
             Some(layer.clone())
         }
         Target::NewLayer => {
@@ -398,9 +404,20 @@ pub(crate) fn run(
             let center = super::prefs::ViewerPrefs::current(cx.resources).center_shape_anchor;
             obj.insert("center_anchor".into(), json!(center));
             add_paint(obj, bezier, options);
+            crate::prefs::apply_layer_defaults(
+                cx.resources,
+                session,
+                info,
+                bae_model::LayerKind::Shape,
+                &mut params,
+            );
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
             s.expect(Pending::Layer(path.clone()));
+            s.expect(Pending::NewGroup {
+                layer: path.clone(),
+                before: Vec::new(),
+            });
             s.reserve_name(path.clone(), name);
             Some(path)
         }

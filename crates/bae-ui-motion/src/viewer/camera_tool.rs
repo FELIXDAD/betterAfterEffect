@@ -54,7 +54,21 @@ pub(super) struct CameraDrag {
     pivot: DVec3,
     origin: Pos2,
     pub now: ViewCamera,
+    /// A wheel dolly on a camera layer: notches add up into one gesture.
+    wheel: Option<Wheel>,
 }
+
+/// Where a wheel dolly started, how far it has gone and its last notch.
+#[derive(Clone, Copy, Debug)]
+struct Wheel {
+    at: Pos2,
+    distance: f32,
+    last: std::time::Instant,
+}
+
+/// A wheel dolly on a camera layer commits (one undo step) once the wheel
+/// has rested this long; high-resolution wheels split a notch into events.
+const WHEEL_REST: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// Position, point of interest and zoom of a perspective camera.
 fn rig(c: ViewCamera) -> Option<(DVec3, DVec3, f64)> {
@@ -154,13 +168,15 @@ impl CameraDrag {
             pivot,
             origin: pos,
             now: start,
+            wheel: None,
         })
     }
 
     /// Follow the pointer at `pos`.
-    fn update(&mut self, pos: Pos2, view: &View, size: DVec2) {
+    fn update(&mut self, pos: Pos2, view: &View, size: DVec2, reverse_dolly: bool) {
         let d: Vec2 = pos - self.origin;
         let (dx, dy) = (f64::from(d.x), f64::from(d.y));
+        let dolly = if reverse_dolly { -(dx + dy) } else { dx + dy };
         let view_of = |t: &Target| match t {
             Target::View(v) => *v,
             Target::Layer { .. } => View3d::Active,
@@ -207,7 +223,7 @@ impl CameraDrag {
                 }
             }
             (Mode::Dolly | Mode::DollyPoi, ViewCamera::Ortho { centre, scale }) => {
-                let s = scale * (DOLLY_SPEED * (dx + dy)).exp();
+                let s = scale * (DOLLY_SPEED * dolly).exp();
                 ViewCamera::Ortho {
                     centre: pivot - (pivot - centre) * scale / s,
                     scale: s,
@@ -223,7 +239,7 @@ impl CameraDrag {
             ) => {
                 let to = pivot - position;
                 let distance = to.length();
-                let mut step = distance * (1.0 - (-DOLLY_SPEED * (dx + dy)).exp());
+                let mut step = distance * (1.0 - (-DOLLY_SPEED * dolly).exp());
                 if mode == Mode::DollyPoi {
                     // Not past the point of interest.
                     step = step.min(distance - 1.0);
@@ -245,6 +261,33 @@ impl CameraDrag {
     /// The camera layer's camera while it is dragged (the viewer shows it).
     pub fn layer_camera(&self) -> Option<Camera> {
         matches!(self.target, Target::Layer { .. }).then(|| self.now.camera(View3d::Active))
+    }
+
+    pub(super) fn paint_point(
+        &self,
+        painter: &egui::Painter,
+        view: &View,
+        mode: super::prefs::CameraPoint,
+        pointer: Option<Pos2>,
+    ) {
+        use super::prefs::CameraPoint;
+        if mode == CameraPoint::Hidden {
+            return;
+        }
+        let Some(pivot) = view.project(self.pivot, true) else {
+            return;
+        };
+        let ink = egui::Stroke::new(1.5, bae_ui::theme::color::ACCENT);
+        painter.circle_stroke(pivot, 5.0, egui::Stroke::new(3.0, egui::Color32::BLACK));
+        painter.circle_stroke(pivot, 5.0, ink);
+        if mode == CameraPoint::Directional
+            && let Some(pos) = pointer
+        {
+            let direction = pos - self.origin;
+            if direction.length_sq() > 1.0 {
+                painter.arrow(pivot, direction.normalized() * 17.0, ink);
+            }
+        }
     }
 
     /// The camera layer's `attr.set_many` edits.
@@ -307,8 +350,56 @@ pub(super) fn frame(
     view: &View,
     tool: Tool,
     time: Time,
+    wheel_notches: f32,
+    reverse_drag: bool,
 ) {
-    if drag.is_none() {
+    if wheel_notches != 0.0
+        && let Some(pos) = resp.hover_pos()
+    {
+        // One eighth-octave step, also continuous on high-resolution wheels.
+        let step = (std::f64::consts::LN_2 / (8.0 * DOLLY_SPEED)) as f32 * wheel_notches;
+        let now = std::time::Instant::now();
+        match drag {
+            // The wheel keeps turning: the same gesture goes on.
+            Some(d) if d.wheel.is_some() => {
+                let mut w = d.wheel.expect("wheel gesture");
+                w.distance += step;
+                w.last = now;
+                d.wheel = Some(w);
+                d.update(w.at + egui::vec2(0.0, w.distance), view, size, false);
+            }
+            Some(_) => {}
+            None => {
+                let mut s = session.lock();
+                let views = s.views3d.entry(comp_path.clone()).or_default();
+                if let Some(mut wheel) = CameraDrag::new(
+                    Tool::DollyCursor,
+                    PointerButton::Secondary,
+                    views,
+                    comp,
+                    size,
+                    view,
+                    pos,
+                ) {
+                    wheel.update(pos + egui::vec2(0.0, step), view, size, false);
+                    match wheel.target {
+                        Target::View(v) => views.set_camera(v, wheel.now),
+                        // A camera layer previews through the gesture and
+                        // commits once the wheel rests.
+                        Target::Layer { .. } => {
+                            wheel.wheel = Some(Wheel {
+                                at: pos,
+                                distance: step,
+                                last: now,
+                            });
+                            *drag = Some(wheel);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if drag.is_none() && tool.is_camera() {
         for button in [
             PointerButton::Primary,
             PointerButton::Middle,
@@ -326,8 +417,20 @@ pub(super) fn frame(
     let Some(d) = drag.as_mut() else {
         return;
     };
+    if let Some(w) = d.wheel {
+        if w.last.elapsed() >= WHEEL_REST {
+            let edits = d.commit(cx.stage, time);
+            if !edits.is_empty() {
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
+            *drag = None;
+        } else {
+            ui.ctx().request_repaint_after(WHEEL_REST);
+        }
+        return;
+    }
     if let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) {
-        d.update(pos, view, size);
+        d.update(pos, view, size, reverse_drag);
     }
     if let Target::View(v) = d.target {
         session

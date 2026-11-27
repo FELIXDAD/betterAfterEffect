@@ -13,7 +13,7 @@ use bae_motion::query;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
-use egui::{Sense, Ui, pos2, vec2};
+use egui::{Key, Modifiers, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::common::{self, Edit, EvalCache};
@@ -22,6 +22,7 @@ use crate::session::SharedSession;
 /// Panel-local view state (twirled effects and parameters).
 #[derive(Default)]
 pub(crate) struct ControlsState {
+    rename: Option<(PrimPath, String)>,
     /// Collapsed effects (AE shows new effects expanded).
     collapsed: HashSet<String>,
     pub(crate) show_presets: bool,
@@ -49,6 +50,12 @@ pub(crate) fn show(
         return false;
     }
     let registries = super::registries(cx.resources);
+    if cx.focused && state.rename.is_none() && bae_ui::panel_key_pressed(ui, egui::Key::Enter) {
+        let s = session.lock();
+        if let Some(effect) = effects.iter().find(|p| s.selected_effects.contains(p)) {
+            state.rename = Some((effect.clone(), super::instance_name(cx.stage, effect)));
+        }
+    }
     for (index, effect) in effects.iter().enumerate() {
         let match_name = cx
             .stage
@@ -162,36 +169,52 @@ fn header(
                 json!({"effects": [effect], "enabled": !enabled}),
             );
         }
-        let title = ui.add(
-            egui::Label::new(
-                egui::RichText::new(&name)
-                    .strong()
-                    .color(color::TEXT_STRONG),
-            )
-            .sense(Sense::click_and_drag()),
-        );
-        if title.clicked() {
-            let toggle = ui.input(|i| i.modifiers.shift || i.modifiers.command);
-            let mut s = session.lock();
-            if !toggle {
-                s.selected_effects = vec![effect.clone()];
-            } else if let Some(i) = s.selected_effects.iter().position(|e| e == effect) {
-                s.selected_effects.remove(i);
-            } else {
-                s.selected_effects.push(effect.clone());
+        if let Some((_, buffer)) = state.rename.as_mut().filter(|(path, _)| path == effect) {
+            let (rect, _) =
+                ui.allocate_exact_size(vec2(ui.available_width().min(140.0), 18.0), Sense::hover());
+            if let Some(result) =
+                common::rename_field(ui, rect, buffer, ui.id().with(("effect-name", effect)))
+            {
+                if let Some(new_name) = result.filter(|s| !s.trim().is_empty() && s != &name) {
+                    cx.invoke_with(
+                        "attr.set",
+                        json!({"path":effect,"attr":"name","value":Value::String(new_name)}),
+                    );
+                }
+                state.rename = None;
             }
-        }
-        // Drag an effect header onto another one to reorder (AE).
-        title.dnd_set_drag_payload(EffectMove(effect.clone()));
-        if let Some(moved) = title.dnd_release_payload::<EffectMove>()
-            && moved.0 != *effect
-        {
-            cx.invoke_with(
-                "effect.reorder",
-                json!({"effects": [moved.0], "index": index}),
+        } else {
+            let title = ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&name)
+                        .strong()
+                        .color(color::TEXT_STRONG),
+                )
+                .sense(Sense::click_and_drag()),
             );
+            if title.clicked() {
+                let toggle = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+                let mut s = session.lock();
+                if !toggle {
+                    s.selected_effects = vec![effect.clone()];
+                } else if let Some(i) = s.selected_effects.iter().position(|e| e == effect) {
+                    s.selected_effects.remove(i);
+                } else {
+                    s.selected_effects.push(effect.clone());
+                }
+            }
+            // Drag an effect header onto another one to reorder (AE).
+            title.dnd_set_drag_payload(EffectMove(effect.clone()));
+            if let Some(moved) = title.dnd_release_payload::<EffectMove>()
+                && moved.0 != *effect
+            {
+                cx.invoke_with(
+                    "effect.reorder",
+                    json!({"effects": [moved.0], "index": index}),
+                );
+            }
+            title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         }
-        title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let about = widgets::link(ui, tr("About..."));
             egui::Popup::menu(&about).show(|ui| {
@@ -288,6 +311,44 @@ fn params(
             _ => {}
         }
         if param.flags.hidden || hidden_from.is_some_and(|d| depth >= d) {
+            continue;
+        }
+        if def.match_name == bae_effects::effects::liquify::MATCH_NAME
+            && param.id == bae_effects::effects::liquify::TOOL
+        {
+            let selected = session.lock().liquify_tool;
+            let labels = if super::chinese() {
+                &[
+                    "变形",
+                    "湍流",
+                    "顺时针旋转",
+                    "逆时针旋转",
+                    "褶皱",
+                    "膨胀",
+                    "移动像素",
+                    "反射",
+                    "仿制",
+                    "重建",
+                ]
+            } else {
+                bae_effects::effects::liquify::TOOLS
+            };
+            ui.horizontal_wrapped(|ui| {
+                for (index, name) in labels.iter().enumerate() {
+                    if ui.selectable_label(index == selected, *name).clicked()
+                        && let Some(layer) = super::layer_of(effect)
+                    {
+                        let mut s = session.lock();
+                        crate::tools::shared(cx.resources)
+                            .lock()
+                            .set(crate::tools::Tool::Selection);
+                        s.liquify_tool = index;
+                        s.layer_panel = Some(layer);
+                        s.open_liquify = Some(effect.clone());
+                        cx.open_panel("layer");
+                    }
+                }
+            });
             continue;
         }
         if def.match_name == "ADBE Param EQ" && param.kind == ParamKind::Display {
@@ -470,29 +531,40 @@ fn param_row(
         });
     }
     if def.match_name == "ADBE Lumetri"
-        && (70..=72).contains(&param.id)
         && let Edit::Commit(Value::Color(sample)) = &edit
     {
-        let edits = bae_effects::lumetri_key_edits(param.id, *sample, |id| {
-            common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
-        });
-        let time = query::to_key_time(stage, effect, now);
-        let edits: Vec<_> = edits.into_iter().map(|(id, value)|
-            json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
-        session.lock().scrub = None;
-        if !edits.is_empty() {
-            cx.invoke_with("attr.set_many", json!({"edits": edits}));
+        let changes = match param.id {
+            70..=72 => Some(bae_effects::lumetri_key_edits(param.id, *sample, |id| {
+                common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
+            })),
+            94 => bae_effects::lumetri_white_balance_settings(*sample).map(|[temp, tint]| {
+                vec![
+                    (94, Value::Color(*sample)),
+                    (7, Value::Float(temp)),
+                    (8, Value::Float(tint)),
+                ]
+            }),
+            _ => None,
+        };
+        if let Some(changes) = changes {
+            session.lock().scrub = None;
+            if !changes.is_empty() {
+                let time = query::to_key_time(stage, effect, now);
+                let edits: Vec<_> = changes.into_iter().map(|(id, value)|
+                    json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
+                cx.invoke_with("attr.set_many", json!({"edits": edits}));
+            }
+            return;
         }
-    } else {
-        common::apply_edit(cx, session, effect, &attr, now, edit);
     }
+    common::apply_edit(cx, session, effect, &attr, now, edit);
 }
 
 /// The value column of one parameter (red when an expression drives it).
 #[allow(clippy::too_many_arguments)]
 fn value_control(
     ui: &mut Ui,
-    cx: &PanelContext<'_>,
+    cx: &mut PanelContext<'_>,
     effect: &PrimPath,
     def: &EffectDef,
     param: &EffectParamDef,
@@ -564,7 +636,18 @@ fn value_control(
         }
         ParamKind::Popup { .. } => {
             let options = super::option_labels(&def.match_name, param);
-            let raw = popup_index(value);
+            let lut = (def.match_name == "ADBE Lumetri")
+                .then(|| bae_effects::LumetriLut::from_menu(param.id))
+                .flatten();
+            let (mut raw, mut filename) = (popup_index(value), None);
+            if let Some(slot) = lut
+                && let Some(prim) = cx.stage.prim(effect)
+            {
+                let [first, second, file] = slot.parameters().map(param_attr);
+                let asset = prim.value(&file);
+                raw = slot.choice(prim.value(&first), prim.value(&second), asset);
+                filename = bae_effects::LumetriLut::filename(asset).map(str::to_owned);
+            }
             let current = if def.match_name.starts_with("ADBE OCIO ") && raw > options.len() as i64
             {
                 1
@@ -577,7 +660,11 @@ fn value_control(
                 .unwrap_or_default();
             let mut chosen = None;
             egui::ComboBox::from_id_salt(id)
-                .selected_text(shown)
+                .selected_text(if current == 2 {
+                    filename.as_deref().unwrap_or(&shown)
+                } else {
+                    &shown
+                })
                 .show_ui(ui, |ui| {
                     for (i, o) in options.iter().enumerate() {
                         let n = i as i64 + 1;
@@ -591,6 +678,20 @@ fn value_control(
                         }
                     }
                 });
+            if let Some(slot) = lut {
+                let needs_file = current > 4 || current == 2 && filename.is_none();
+                if needs_file {
+                    ui.label(tr("Load your own LUT"));
+                }
+                if chosen == Some(3) || needs_file && ui.button(tr("Browse...")).clicked() {
+                    cx.invoke_with(super::lut::BROWSE, json!({"path": effect, "menu":param.id}));
+                } else if let Some(n) = chosen
+                    && n != current
+                {
+                    super::lut::commit(cx, effect, slot, n, None);
+                }
+                return Edit::None;
+            }
             match chosen {
                 Some(n) if n != current => Edit::Commit(Value::Int(n)),
                 _ => Edit::None,
@@ -621,12 +722,50 @@ fn value_control(
             ui.add_enabled(false, egui::Button::new(caption));
             Edit::None
         }
+        ParamKind::Text => text_field(
+            ui,
+            id,
+            match value {
+                Some(Value::String(s)) => s,
+                _ => "",
+            },
+        ),
         ParamKind::ArbitraryData | ParamKind::CurvePoints => {
             ui.colored_label(color::TEXT_DISABLED, "—");
             Edit::None
         }
         ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Display => Edit::None,
     }
+}
+
+/// An effect's text parameter: previewed while typing, one command on Enter
+/// or when focus leaves (one undo step, no relayout per key); Shift+Enter
+/// breaks the line.
+fn text_field(ui: &mut Ui, id: egui::Id, model: &str) -> Edit {
+    let key = id.with("typing");
+    let mut text = ui
+        .data(|d| d.get_temp::<String>(key))
+        .unwrap_or_else(|| model.to_owned());
+    let resp = ui.add(
+        egui::TextEdit::multiline(&mut text)
+            .id(id)
+            .desired_rows(1)
+            .return_key(egui::KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter)),
+    );
+    let enter = |e: &egui::Event| matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. } if modifiers.is_none());
+    if resp.has_focus() && ui.input(|i| i.events.iter().any(enter)) {
+        ui.memory_mut(|m| m.surrender_focus(id));
+    }
+    if resp.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(key));
+        if text != model {
+            return Edit::Commit(Value::String(text));
+        }
+    } else if resp.changed() {
+        ui.data_mut(|d| d.insert_temp(key, text.clone()));
+        return Edit::Live(Value::String(text));
+    }
+    Edit::None
 }
 
 /// The twirled-open row: a slider over AE's slider range, or an angle dial.
@@ -839,5 +978,48 @@ pub(crate) fn effect_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, effect: &PrimP
     if ui.button(tr("Remove Effect")).clicked() {
         cx.invoke_with("effect.remove", json!({"effects": [effect]}));
         ui.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Event, RawInput, Rect};
+
+    #[test]
+    fn effect_text_previews_while_typing_and_commits_once_on_enter() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("fx text test");
+        let frame = |events: Vec<Event>| {
+            let raw = RawInput {
+                events,
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400., 200.))),
+                ..Default::default()
+            };
+            let mut edit = Edit::None;
+            let mut output = ctx.run_ui(raw, |ui| edit = text_field(ui, id, "Text"));
+            output.textures_delta.clear();
+            edit
+        };
+        let enter = |modifiers| Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frame(vec![]);
+        ctx.memory_mut(|m| m.request_focus(id));
+        frame(vec![]);
+        // Typing (Shift+Enter breaks the line) only previews...
+        let typed = vec![Event::Text("ab".into()), enter(Modifiers::SHIFT)];
+        assert!(matches!(frame(typed), Edit::Live(_)), "preview, no command");
+        assert!(matches!(frame(vec![]), Edit::None));
+        // ...Enter commits it all at once.
+        let Edit::Commit(Value::String(text)) = frame(vec![enter(Modifiers::NONE)]) else {
+            panic!("no commit on Enter");
+        };
+        assert_eq!(text, "ab\nText");
+        assert!(matches!(frame(vec![]), Edit::None), "committed once");
     }
 }

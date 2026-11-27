@@ -33,6 +33,16 @@ pub(crate) struct ViewOptions {
     pub snap_grid: bool,
     pub proportional: bool,
     pub safe: bool,
+    /// View ▸ Show Layer Controls (Cmd/Ctrl+Shift+H): off hides every layer
+    /// control View Options shows (handles, masks, motion paths …).
+    pub layer_controls: bool,
+    /// The bar's Toggle Mask and Shape Path Visibility: mask and shape paths
+    /// are drawn (and their vertices can be picked).
+    pub paths: bool,
+    /// Choose grid and guide options ▸ 3D Reference Axes: the world axes'
+    /// directions in the viewer's lower-left corner when the comp has 3D
+    /// layers.
+    pub axes: bool,
 }
 
 impl Default for ViewOptions {
@@ -46,6 +56,9 @@ impl Default for ViewOptions {
             snap_grid: false,
             proportional: false,
             safe: false,
+            layer_controls: true,
+            paths: true,
+            axes: true,
         }
     }
 }
@@ -61,6 +74,7 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     ("motion.view.snap_to_grid", "Snap to Grid"),
     ("motion.view.proportional_grid", "Proportional Grid"),
     ("motion.view.title_action_safe", "Title/Action Safe"),
+    ("motion.view.show_layer_controls", "Show Layer Controls"),
 ];
 
 /// Toggles the option of `id`; `None` for an action that is not a toggle.
@@ -74,6 +88,7 @@ fn option<'a>(o: &'a mut ViewOptions, id: &str) -> Option<&'a mut bool> {
         "motion.view.snap_to_grid" => &mut o.snap_grid,
         "motion.view.proportional_grid" => &mut o.proportional,
         "motion.view.title_action_safe" => &mut o.safe,
+        "motion.view.show_layer_controls" => &mut o.layer_controls,
         _ => return None,
     })
 }

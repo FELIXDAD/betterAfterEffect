@@ -91,7 +91,7 @@ fn app_builder() -> AppBuilder {
     ) {
         tracing::warn!("shape layer source not registered: {error}");
     }
-    let text = std::sync::Arc::new(bae_text::render::TextProvider::new());
+    let text = bae_text::render::TextProvider::shared();
     // Expressions' `sourceRectAtTime` measures text and shapes with it.
     text.measure_expressions();
     if let Err(error) = builder
@@ -105,6 +105,10 @@ fn app_builder() -> AppBuilder {
             "bae.vector.renderer",
             std::sync::Arc::new(bae_vector::render::VectorWarmUp)
                 as std::sync::Arc<dyn bae_gpu::WarmUp>,
+        ),
+        (
+            "bae.text.vertical",
+            std::sync::Arc::new(bae_text::render::VerticalGlyphWarmUp(text.clone())),
         ),
         ("bae.text.fonts", text),
         (
