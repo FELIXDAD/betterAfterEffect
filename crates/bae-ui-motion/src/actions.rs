@@ -598,6 +598,11 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         "Play/Stop (Numpad 0)",
     ),
     (
+        ids::PLAY,
+        r#"{"preview":"shift_numpad0"}"#,
+        "Play/Stop (Shift + Numpad 0)",
+    ),
+    (
         ids::BLENDING_MODE_STEP,
         r#"{"step":1}"#,
         "Next Blending Mode",
@@ -2088,7 +2093,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if s.is_playing() {
                 s.stop_preview(&info);
             } else {
+                use crate::session::PreviewShortcut;
+                let editing = s.preview.selected;
+                s.preview.selected = match inv.params["preview"].as_str() {
+                    Some("numpad0") => PreviewShortcut::Numpad,
+                    Some("shift_numpad0") => PreviewShortcut::ShiftNumpad,
+                    Some("panel") => editing,
+                    _ => PreviewShortcut::Space,
+                };
                 s.preview(cx, &info);
+                s.preview.selected = editing;
+                // AE: playback neither moves the keyboard focus nor switches
+                // tabs (the timeline's [ ] Delete and marker keys keep working).
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
