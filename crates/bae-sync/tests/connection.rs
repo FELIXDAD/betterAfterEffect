@@ -676,3 +676,34 @@ fn edits_a_lost_link_did_not_confirm_stay_unsynced() {
         }
     }
 }
+
+/// A silent hub is reported once: the link's I/O thread gives up instead of
+/// reporting it again and waking the app on every tick until the next pump
+/// (an agent busy with a long job, an app that only pumps when woken).
+#[cfg(feature = "hub")]
+#[test]
+fn a_silent_hub_wakes_the_app_once() {
+    let hub = FakeHub::start();
+    let woken = Arc::new(AtomicUsize::new(0));
+    let w = woken.clone();
+    let mut cfg = config("alice");
+    cfg.hub_idle_timeout = Some(Duration::from_millis(300));
+    cfg.wake = Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut a = hub.join("alice", cfg);
+    wait("online", LONG, || {
+        a.pump();
+        a.conn.is_online()
+    });
+    hub.wait_ready();
+    a.pump();
+    let before = woken.load(Ordering::SeqCst);
+    // No pump until well past the idle timeout (the next keep-alive is 5 s
+    // away).
+    std::thread::sleep(Duration::from_millis(1300));
+    let wakes = woken.load(Ordering::SeqCst) - before;
+    assert!((1..=4).contains(&wakes), "{wakes} wakes");
+    let error = wait_offline(&mut a);
+    assert!(error.contains("nothing received"), "{error}");
+}

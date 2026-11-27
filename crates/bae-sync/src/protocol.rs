@@ -84,6 +84,17 @@ pub enum Message {
         protocol: u32,
         client: ClientId,
         versions: Vec<(DocKey, VersionVector)>,
+        /// Numbers the sender's `Hello`s (from 1, growing); 0 from senders
+        /// that do not count them (older peers, the shared folder).
+        seq: u64,
+        /// The highest `seq` of the receiver's `Hello`s the sender had taken in
+        /// when it wrote this one (0: none yet), with everything the receiver
+        /// sent before that `Hello` imported. What the receiver sent after it
+        /// may still be on its way, so `versions` cannot show it yet. `None`:
+        /// not said (older peers, the shared folder), or the sender could not
+        /// import some of it (a document it does not have); `versions` is
+        /// then the whole truth.
+        ack: Option<u64>,
     },
     /// Loro updates for one document. `version`: the sender's version after them.
     Updates {
@@ -119,11 +130,15 @@ impl fmt::Debug for Message {
                 protocol,
                 client,
                 versions,
+                seq,
+                ack,
             } => f
                 .debug_struct("Hello")
                 .field("protocol", protocol)
                 .field("client", client)
                 .field("docs", &versions.len())
+                .field("seq", seq)
+                .field("ack", ack)
                 .finish(),
             Message::Updates { doc, data, .. } => f
                 .debug_struct("Updates")
@@ -157,11 +172,15 @@ const TAG_SNAPSHOT: u8 = 4;
 const TAG_PRESENCE: u8 = 5;
 
 impl Message {
+    /// A `Hello` that does not number itself or acknowledge anything (`seq`
+    /// 0, `ack` `None`): its versions are the whole truth.
     pub fn hello(client: ClientId, versions: Vec<(DocKey, VersionVector)>) -> Self {
         Message::Hello {
             protocol: PROTOCOL_VERSION,
             client,
             versions,
+            seq: 0,
+            ack: None,
         }
     }
 
@@ -187,6 +206,8 @@ impl Message {
                 protocol,
                 client,
                 versions,
+                seq,
+                ack,
             } => {
                 w.push(TAG_HELLO);
                 put_varint(&mut w, u64::from(*protocol));
@@ -196,6 +217,9 @@ impl Message {
                     put_bytes(&mut w, doc.as_str().as_bytes());
                     put_bytes(&mut w, &vv.encode());
                 }
+                // Appended fields; `ack` is 0 for `None`, else `ack + 1`.
+                put_varint(&mut w, *seq);
+                put_varint(&mut w, ack.map_or(0, |a| a.saturating_add(1)));
             }
             Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
                 w.push(if matches!(self, Message::Updates { .. }) {
@@ -250,10 +274,18 @@ impl Message {
                     let doc = DocKey::parse(r.str()?)?;
                     versions.push((doc, r.vv()?));
                 }
+                // Not sent by older peers.
+                let (seq, ack) = if r.at_end() {
+                    (0, None)
+                } else {
+                    (r.varint()?, r.varint()?.checked_sub(1))
+                };
                 Message::Hello {
                     protocol,
                     client,
                     versions,
+                    seq,
+                    ack,
                 }
             }
             TAG_UPDATES | TAG_SNAPSHOT => {
@@ -314,6 +346,10 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    fn at_end(&self) -> bool {
+        self.pos >= self.bytes.len()
+    }
+
     fn u8(&mut self) -> Result<u8, SyncError> {
         let b = *self
             .bytes
@@ -391,6 +427,20 @@ mod tests {
                     (DocKey::History, VersionVector::new()),
                 ],
             ),
+            Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                client: ClientId::new("hub").unwrap(),
+                versions: vec![(DocKey::parse("root").unwrap(), vv.clone())],
+                seq: 7,
+                ack: Some(0),
+            },
+            Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                client: ClientId::new("hub").unwrap(),
+                versions: vec![],
+                seq: 300,
+                ack: Some(299),
+            },
             Message::Updates {
                 doc: DocKey::parse("anim/shot010").unwrap(),
                 version: vv.clone(),
@@ -424,9 +474,36 @@ mod tests {
             let mut longer = bytes.clone();
             longer.extend_from_slice(&[9, 9, 9]);
             assert_eq!(Message::decode(&longer).unwrap(), m);
-            // Every truncation is an error, never a panic.
+            // Every truncation is an error, never a panic; a `Hello` cut
+            // before `seq` and `ack` is one from an older peer.
             for cut in 0..bytes.len() {
-                assert!(Message::decode(&bytes[..cut]).is_err(), "cut at {cut}");
+                match Message::decode(&bytes[..cut]) {
+                    Err(_) => {}
+                    Ok(Message::Hello {
+                        protocol,
+                        client,
+                        versions,
+                        seq: 0,
+                        ack: None,
+                    }) => {
+                        let Message::Hello { seq, ack, .. } = &m else {
+                            unreachable!()
+                        };
+                        let mut tail = Vec::new();
+                        put_varint(&mut tail, *seq);
+                        put_varint(&mut tail, ack.map_or(0, |a| a + 1));
+                        assert_eq!(cut, bytes.len() - tail.len());
+                        let old = Message::Hello {
+                            protocol,
+                            client,
+                            versions,
+                            seq: *seq,
+                            ack: *ack,
+                        };
+                        assert_eq!(old, m);
+                    }
+                    Ok(other) => panic!("cut at {cut}: {other:?}"),
+                }
             }
         }
         assert!(matches!(

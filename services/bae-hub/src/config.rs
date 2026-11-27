@@ -125,6 +125,7 @@ pub struct HubConfig {
     pub idle_unload: Option<Duration>,
     /// Drop connections that sent nothing for this long (clients say `Hello`
     /// every few seconds, so silence means a dead link, e.g. a sleeping laptop).
+    /// Counted in bytes: a large message that takes longer to upload is fine.
     pub peer_timeout: Duration,
     /// How often a project relay polls its connections right after traffic...
     pub active_tick: Duration,

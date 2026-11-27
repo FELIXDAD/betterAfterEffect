@@ -120,6 +120,8 @@ pub struct HubTransport {
     /// `Counted::read` when we last looked, and when it last changed.
     read: u64,
     heard: Instant,
+    /// The idle timeout was reported: the link is dead, `recv` says `Closed`.
+    silent: bool,
 }
 
 impl std::fmt::Debug for HubTransport {
@@ -337,6 +339,7 @@ impl HubTransport {
             idle_timeout: None,
             read,
             heard: Instant::now(),
+            silent: false,
         };
         transport.set_limits(limits);
         Ok(transport)
@@ -365,7 +368,9 @@ impl HubTransport {
     /// the connection (power loss, a dropped VPN or Wi-Fi) sends no reset, and
     /// TCP may take many minutes to notice; the hub says `Hello` every 5
     /// seconds, so a client can tell much sooner. A large message counts as
-    /// news while its bytes keep arriving.
+    /// news while its bytes keep arriving. Reported once; later calls of
+    /// `recv` return [`SyncError::Closed`] (a [`crate::ThreadedTransport`]
+    /// stops there instead of reporting it again on every tick).
     pub fn set_idle_timeout(&mut self, timeout: Option<Duration>) {
         self.idle_timeout = timeout;
         self.heard = Instant::now();
@@ -381,9 +386,13 @@ impl HubTransport {
             return Ok(());
         }
         match self.idle_timeout {
-            Some(t) if now.saturating_duration_since(self.heard) >= t => Err(SyncError::Hub(
-                format!("nothing received for {:.1} s", t.as_secs_f32()),
-            )),
+            Some(t) if now.saturating_duration_since(self.heard) >= t => {
+                self.silent = true;
+                Err(SyncError::Hub(format!(
+                    "nothing received for {:.1} s",
+                    t.as_secs_f32()
+                )))
+            }
             _ => Ok(()),
         }
     }
@@ -478,6 +487,9 @@ impl Transport for HubTransport {
     /// some systems (Windows) drop unread data when a reset arrives, which is
     /// why peers should end with [`Transport::close`].
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+        if self.silent {
+            return Err(SyncError::Closed);
+        }
         if self.failed.is_none() {
             let flushed = match self.ws.flush() {
                 Ok(()) => self.track(true),

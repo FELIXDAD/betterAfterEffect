@@ -31,7 +31,7 @@
 
 | 消息 | 字段 | 含义 |
 |---|---|---|
-| `Hello` | `protocol`、`client`、`versions: [(DocKey, 版本向量)]` | "我有这些。" 连接时发，之后定期发。没列出的文档视为空。 |
+| `Hello` | `protocol`、`client`、`versions: [(DocKey, 版本向量)]`、`seq`、`ack` | "我有这些。" 连接时发，之后定期发。没列出的文档视为空。`seq`：发送方 `Hello` 的编号（从 1 起递增，不编号时为 0）；`ack`：发送方收到的接收方最大的 `seq`（0：还没收到），接收方在那个 `Hello` 之前发的它都已导入；没有 `ack` 时 `versions` 就是全部实情（见 2.4）。 |
 | `Updates` | `doc`、`version`、`data` | 一段 Loro 增量；`version` 是发送方在导出这段增量时的版本。 |
 | `SnapshotRequest` | `doc` | 请对方发一份完整快照（共享目录模式用它压缩自己的日志）。 |
 | `Snapshot` | `doc`、`version`、`data` | 完整 Loro 快照（含历史）。导入方式与 `Updates` 相同。 |
@@ -42,13 +42,14 @@
 一条消息 = 1 字节类型 + 字段。字符串和字节串前面是 LEB128 长度；版本向量用 Loro 的 `VersionVector::encode()`，作为字节串写入。
 
 ```text
-Hello            0x01  protocol:varint  client:str  n:varint  n × (doc:str  vv:bytes)
+Hello            0x01  protocol:varint  client:str  n:varint  n × (doc:str  vv:bytes)  seq:varint  ack:varint
 Updates          0x02  doc:str  vv:bytes  data:bytes
 SnapshotRequest  0x03  doc:str
 Snapshot         0x04  doc:str  vv:bytes  data:bytes
 Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state:bytes)
 ```
 
+- `Hello` 的 `ack` 没有时写 0，否则写 `ack + 1`。旧版本不写 `seq`、`ack`，解码为 `seq = 0`、没有 `ack`。
 - 当前协议版本 `PROTOCOL_VERSION = 1`。以后只以兼容的方式扩展：新字段追加在已有字段之后（旧版本解码时忽略多出来的字节），新消息用新的类型字节（旧版本收到未知类型时跳过，`SyncError::UnknownMessage`）。
 - Hub 模式一条消息就是一个 WebSocket 二进制帧；共享目录模式见第 4 节的记录格式。
 
@@ -58,7 +59,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 1. 第一次，或距离上次超过 `hello_interval`，或本地出现了新文档：发 `Hello`（列出本地所有文档的版本）。
 2. 处理收到的消息（每次最多 `max_messages_per_pump` 条，避免卡住持有 Stage 的线程）：
-   - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方丢了数据时（比如 Hub 重启）能重新补发；代价最多是重复发送，CRDT 导入是幂等的。
+   - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方丢了数据时能重新补发；CRDT 导入是幂等的。只有一个例外：我们在对方 `ack` 的那个 `Hello` 之后发出的数据，对方写这个 `Hello` 时可能还在路上，不退回（会话按文档记下最后一次发送和它之前我们的 `Hello` 编号）。否则慢链路上一次比 `Hello` 间隔还长的大传输（新客户端加入大工程、上传大工程层）每隔 5 秒就被整个重新排一遍队，副本越积越多（`tests/convergence.rs` 的 `a_large_transfer_over_a_slow_link_is_sent_once`：50 kB/s 上传、下载 1 MB 各只发一份，以前上传发了 5 份）。对方收到了却导入不了的数据（本地没有的文档、导入失败）不算在路上：之后的第一个 `Hello` 不带 `ack`，于是整个替换、重新发送。不带 `ack` 的 `Hello`（旧版本、共享目录）照旧整个替换。
    - `Updates` / `Snapshot`：`remote[doc]` 并入 `version`；本地已经包含 `version` 就跳过，否则导入。本地没有这个文档时不导入，在 `PumpOutcome::unknown_docs` 里报告（见 2.5）。
    - `SnapshotRequest`：导出快照发回去。
 3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。被推迟的部分只有之后的 `pump` 才会发出，所以关闭连接前（最后一次 `pump` 之后）要调用 `SyncSession::flush`：不管 `min_send_interval`，立即把对方缺的发出去（不收消息，也不发 `Hello` 和在线状态）。
@@ -67,7 +68,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 **只读**（`SessionConfig::read_only`）：对方不接受我们的修改（只读令牌、写不了的共享目录，见 7.5）时打开。会话不发任何文档数据（`Updates`、`Snapshot`，也不回答 `SnapshotRequest`，`flush` 什么都不发），`Hello` 和在线状态照发，照常接收。本地修改一直留在 `unsynced` 里。
 
-**丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发。断线重连时调用 `SyncSession::reset()`。
+**丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发（发出之后对方又确认了我们的一个 `Hello` 时，所以两边都要定期发 `Hello`）。断线重连时调用 `SyncSession::reset()`。
 
 **交给链路的和对方确认的**：`remote` 包含已经交给传输、可能还在路上的部分（决定发什么）。会话另外记一份对方确认过的版本：对方最近一次 `Hello`，加上之后它发来的数据。链路断了，交给它的消息可能没送到：`SyncSession::forget_unconfirmed()` 把 `remote` 退回确认过的那份，`unsynced` 于是包括交出去、但对方没确认的修改（`Connection` 断线时调用，7.4）。
 
@@ -109,7 +110,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - **上限**（`HubLimits`，两端一致；`connect_with` / `accept_with` / `set_limits` 可改）：
   - `max_message`：单条协议消息的上限，默认 256 MiB。消息不分片，所以它同时是单帧上限（tungstenite 默认单帧 16 MiB，超过 16 MiB 的工程层快照会被对方拒收、断线、重连后再发同一条，一直卡住）。发送超过上限的消息时 `send` 直接报错，不发出去（会话先把其他文档发完，见 2.4）。
   - `max_backlog` 和 `stall_timeout`：对方不再读时断开它。积压超过 `max_backlog`（默认 16 MiB）、并且 `stall_timeout`（默认 30 秒）内一个字节都没发出去，`send` / `recv` 报错（"peer is not reading"），`Relay` 随即断开这个连接，内存不会一直涨。不能只看积压了多少：会话把对方缺的一次全发出去（新客户端第一次同步时是整个工程），对方读得再慢，只要还在读就得等它读完；按积压量断开的话，重连后又是同一批，永远同步不完。
-- **静默**：`set_idle_timeout(Some(时长))` 之后，这么久一个字节都没收到，`recv` 就报错（"nothing received"）。对方断电、VPN 或 Wi-Fi 断开时不会有重置，TCP 可能要很多分钟才发现，我们发的东西一直堆在内核缓冲区里。大消息只要字节还在到就不算静默。默认不开；`Connection` 默认 20 秒（Hub 每 5 秒给每个客户端发 `Hello`）。Hub 一侧另有 60 秒的超时（`PeerLink`）。
+- **静默**：`set_idle_timeout(Some(时长))` 之后，这么久一个字节都没收到，`recv` 就报错（"nothing received"）。对方断电、VPN 或 Wi-Fi 断开时不会有重置，TCP 可能要很多分钟才发现，我们发的东西一直堆在内核缓冲区里。大消息只要字节还在到就不算静默。默认不开；`Connection` 默认 20 秒（Hub 每 5 秒给每个客户端发 `Hello`）。Hub 一侧给每个客户端设 60 秒（`PeerLink`，`HubConfig::peer_timeout`），同样按字节算：上传一条很大的消息超过 60 秒也不会被断开。只报告一次，之后 `recv` 返回 `SyncError::Closed`（`ThreadedTransport` 的后台线程就此结束，不会每个 tick 都报一次、唤醒一次）。
 - `close()`：把缓冲区里剩下的消息和 close 帧发完，然后一直读（读到的丢掉），直到对方回应 close：这时对方已经读完我们发的一切，本端也没有没读的数据，关掉套接字不会重置连接（重置可能丢掉对方还没读的数据）。`stall_timeout` 内一个字节都没发出去就放弃，返回错误。丢弃 `HubTransport` 时只做一次不阻塞的关闭，不保证送到。
 - 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去）。
 - `HubTransport::accept(tcp_stream, token)` 是服务端一侧，给测试和简单工具用：`tests/hub.rs` 里用 `Relay` + `accept` 写了一个几十行的阻塞式参考 Hub。
@@ -310,7 +311,7 @@ closing.wait(超时); // 退出时等关闭完成
 ```
 
 - `Target::Folder(工程目录)`：`DirTransport` 放在 `ThreadedTransport` 里；会话用 4.5 的推荐设置（`hello_interval = None`、`min_send_interval = 300 ms`）。
-- `Target::Hub { url, token }`（feature `hub`）：`HubTransport` 放在 `ThreadedTransport` 里；会话用默认设置（每 5 秒 `Hello`；Hub 60 秒收不到消息会断开）。
+- `Target::Hub { url, token }`（feature `hub`）：`HubTransport` 放在 `ThreadedTransport` 里；会话用默认设置（每 5 秒 `Hello`；Hub 60 秒一个字节都收不到会断开）。
 - `ConnectionConfig`：`client`；初始 `presence`；`wake`（只在后台线程调用，从不在 `Connection` 的方法里直接调用；接到"请求重绘"上，不能阻塞）；可选的 `session`（不给就用 `Target::session_config`，`client` 和 `read_only` 由连接管理决定）；`backoff`；`folder`（`DirConfig`）；`io_tick`（后台 I/O 线程查看新消息的间隔，默认 Hub 2 ms、共享目录 10 ms）；`io_stall`（链路 I/O 卡住多久算没同步，默认 5 秒，7.4）；`hub_timeout`（连接、握手每一步的超时，默认 10 秒）；`hub_limits`；`hub_idle_timeout`（Hub 静默多久算断开，默认 20 秒，`None` 不检查，7.4）。
 - `Target` 的 `Debug` 不打印令牌，URL 里的 `?token=` 也换成 `…`。
 
@@ -341,7 +342,7 @@ closing.wait(超时); // 退出时等关闭完成
 
 ### 7.4 断线重连
 
-- 任何传输错误或连接失败：进入 `Offline`，带错误文字。本地文档不受影响，离线时照常编辑。交给链路的消息可能没送到，所以会话退回对方确认过的版本（`SyncSession::forget_unconfirmed`，2.4）：交出去、对方还没确认的修改离线时算 `unsynced`，`close` 也报告它们，退出时会提示。
+- 任何传输错误或连接失败：进入 `Offline`，带错误文字。本地文档不受影响，离线时照常编辑。交给链路的消息可能没送到，所以会话退回对方确认过的版本（`SyncSession::forget_unconfirmed`，2.4）：交出去、对方还没确认的修改离线时算 `unsynced`，`close` 也报告它们，退出时会提示。共享目录的确认只有它的 `Hello`（第一次扫描完、回答我们因新文档发的 `Hello` 时）和它读到的别人的记录，自己写进去的不算确认：共享目录链路断开后，这个链路上改过的文档都算 `unsynced`，包括已经写进去的。偏保守，不会漏报。
 - Hub 静默：`hub_idle_timeout`（默认 20 秒）里一个字节都没收到，就当链路断了（3.1）。Hub 每 5 秒发一次 `Hello`，所以正常的空闲链路不会断；对方断电、VPN 断开时不会有重置，不检查的话 TCP 要很多分钟才发现，这期间状态一直是在线、已同步。
 - 共享目录的 I/O 线程卡在一次读写里（NAS 不响应）超过 `io_stall`（默认 5 秒），而有交出去的消息在等（`ThreadedTransport::stalled`，2.6）：`unsynced` 为真，状态仍是 `Online`。不断开：大工程第一次扫描在慢 NAS 上本来就可能很久，断开重连只会从头再扫。
 - 重试间隔（`Backoff`）：从 0.5 秒起，每失败一次翻倍，最长 30 秒；每次随机减去最多 25%（`jitter`），免得同一个 Hub 的客户端同时涌回来。连接保持 10 秒（`stable_after`）以上再断开时，从 0.5 秒重新算。
@@ -398,6 +399,8 @@ closing.wait(超时); // 退出时等关闭完成
 - 收到第一条消息、连接尝试结束时调用 `wake`；只在被唤醒时 `pump` 也能连上。只在被唤醒时 `pump` 的应用：共享目录还不存在时照样按退避重试，出现后连上；拖动的最后一步被 `min_send_interval` 推迟，也由闹钟唤醒发出（去掉闹钟就超时）。收满 `max_messages_per_pump` 的 `pump` 不在调用线程上调用 `wake`。
 - 假 Hub（`tests/connection.rs`，收下 `Hello` 后不再读写）：静默 `hub_idle_timeout`（测试里 500 ms）后 `Offline`，之前发出去的修改算 `unsynced`；挂断时刚交给链路的修改，离线时、以及还没 `pump` 就 `close` 时都在 `unsynced` 里。真实 Hub 上空闲 11 秒（`hub_idle_timeout` 设成 9 秒）链路不断。
 - 共享目录链路的 I/O 卡住时，交出去的修改超过 `io_stall` 后算 `unsynced`，卡住结束后恢复（单元测试）。
+- 假 Hub 静默后只报告一次：之后 1.3 秒不 `pump`，`wake` 最多被调用几次（以前 I/O 线程每个 tick 报告一次、唤醒一次，约 470 次）。Hub 一侧按字节算 `peer_timeout`：0.5 秒的超时下，以 40 KB/s 上传一条 1 MiB 消息 2 秒不被断开，停下后被断开（`services/bae-hub/tests/hub.rs`）。
+- 闹钟：时钟过时的 `pump` 恰好在闹钟线程超时、还没拿到锁时要求立即唤醒，下一次 `pump` 又定了更晚的时间：更晚的那个照样触发，之后的 `set` 不会被当成已经定好而丢掉（单元测试，强制这个交错）。
 - Hub 停掉再起来的测试里，Hub 不在时退出的第三个人重连后不再显示（`reset` 清掉旧的在线表），新加入的人马上看到重连的两个人（重连时重新发布）。连接稳定超过 `stable_after` 后断开，重试间隔从 `first` 重新算（之前失败过 3 次）。
 - `retry()` 不连接不能用的 URL；URL 里的 `?token=` 不打印。
 

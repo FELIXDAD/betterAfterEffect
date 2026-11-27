@@ -670,3 +670,190 @@ fn closing_a_threaded_peer_reports_its_last_writes() {
     assert!(relay.peers().is_empty());
     assert!(relay.close_peer(store).is_none());
 }
+
+/// One direction of a [`Slow`] link: messages in order, each arriving once
+/// its last byte went through.
+#[derive(Default)]
+struct Pipe {
+    queue: std::collections::VecDeque<(Instant, bae_sync::Message)>,
+    free_at: Option<Instant>,
+    /// `Updates` and `Snapshot`s sent, per document.
+    data_messages: std::collections::BTreeMap<DocKey, usize>,
+}
+
+/// An in-order link that carries `rate` bytes per (simulated) second, like a
+/// slow Wi-Fi or VPN: a large message is in transit for a while.
+struct Slow {
+    clock: std::sync::Arc<std::sync::Mutex<Instant>>,
+    tx: std::sync::Arc<std::sync::Mutex<Pipe>>,
+    rx: std::sync::Arc<std::sync::Mutex<Pipe>>,
+    rate: f64,
+}
+
+impl bae_sync::Transport for Slow {
+    fn send(&mut self, msg: bae_sync::Message) -> Result<(), bae_sync::SyncError> {
+        let now = *self.clock.lock().unwrap();
+        let mut pipe = self.tx.lock().unwrap();
+        let start = pipe.free_at.map_or(now, |t| t.max(now));
+        let arrive = start + Duration::from_secs_f64(msg.encode().len() as f64 / self.rate);
+        pipe.free_at = Some(arrive);
+        if let bae_sync::Message::Updates { doc, .. } | bae_sync::Message::Snapshot { doc, .. } =
+            &msg
+        {
+            *pipe.data_messages.entry(doc.clone()).or_default() += 1;
+        }
+        pipe.queue.push_back((arrive, msg));
+        Ok(())
+    }
+
+    fn recv(&mut self) -> Result<Option<bae_sync::Message>, bae_sync::SyncError> {
+        let now = *self.clock.lock().unwrap();
+        let mut pipe = self.rx.lock().unwrap();
+        Ok(match pipe.queue.front() {
+            Some((at, _)) if *at <= now => pipe.queue.pop_front().map(|(_, m)| m),
+            _ => None,
+        })
+    }
+}
+
+/// [`bae_sync::MemDocs`] without one document (a sublayer a collaborator
+/// created that the app did not add yet): what arrives for it is dropped.
+struct Without {
+    docs: bae_sync::MemDocs,
+    missing: DocKey,
+}
+
+impl DocSet for Without {
+    fn doc_keys(&self) -> Vec<DocKey> {
+        self.docs.doc_keys()
+    }
+    fn version(&self, doc: &DocKey) -> Option<bae_model::loro::VersionVector> {
+        self.docs.version(doc)
+    }
+    fn export_updates(
+        &self,
+        doc: &DocKey,
+        since: &bae_model::loro::VersionVector,
+    ) -> Result<Vec<u8>, bae_sync::SyncError> {
+        self.docs.export_updates(doc, since)
+    }
+    fn export_snapshot(&self, doc: &DocKey) -> Result<Vec<u8>, bae_sync::SyncError> {
+        self.docs.export_snapshot(doc)
+    }
+    fn import(
+        &mut self,
+        doc: &DocKey,
+        data: &[u8],
+    ) -> Result<bae_sync::Imported, bae_sync::SyncError> {
+        if *doc == self.missing {
+            return Ok(bae_sync::Imported::UnknownDoc);
+        }
+        self.docs.import(doc, data)
+    }
+}
+
+/// A large transfer over a slow link (a new client joining a big project
+/// over a VPN, or uploading one) goes out once, although both sides say
+/// `Hello` every 5 s while it is in transit: such a `Hello` was written
+/// before the transfer arrived, and must not make the sender queue it again.
+/// Also while the client drops another document it does not have yet.
+#[test]
+fn a_large_transfer_over_a_slow_link_is_sent_once() {
+    use bae_model::loro::{ExportMode, LoroDoc};
+    use bae_sync::MemDocs;
+    use std::sync::{Arc, Mutex};
+
+    let doc = DocKey::sublayer(&SublayerId::root());
+    let fx = DocKey::sublayer(&sl("fx"));
+    let small = LoroDoc::new();
+    small.get_map("m").insert("k", 1).unwrap();
+    small.commit();
+    let small = small.export(ExportMode::Snapshot).unwrap();
+    // 1 MB that does not compress.
+    let mut rng = Rng::new(5);
+    let text: String = (0..1_000_000)
+        .map(|_| char::from(b'a' + rng.below(26) as u8))
+        .collect();
+    let big = LoroDoc::new();
+    big.get_text("t").insert(0, &text).unwrap();
+    big.commit();
+    let snapshot = big.export(ExportMode::Snapshot).unwrap();
+    let full = || {
+        let mut docs = MemDocs::new();
+        docs.load(doc.clone(), &snapshot).unwrap();
+        docs
+    };
+
+    for upload in [true, false] {
+        let t0 = Instant::now();
+        let clock = Arc::new(Mutex::new(t0));
+        let (up, down) = (Arc::default(), Arc::default());
+        // 50 kB/s: the transfer takes about 20 s.
+        let rate = 50_000.0;
+        let client_end = Slow {
+            clock: clock.clone(),
+            tx: Arc::clone(&up),
+            rx: Arc::clone(&down),
+            rate,
+        };
+        let hub_end = Slow {
+            clock: clock.clone(),
+            tx: Arc::clone(&down),
+            rx: Arc::clone(&up),
+            rate,
+        };
+        let mut relay = if upload {
+            Relay::new(ClientId::new("hub").unwrap())
+        } else {
+            let mut docs = full();
+            docs.load(fx.clone(), &small).unwrap();
+            Relay::with_docs(ClientId::new("hub").unwrap(), docs)
+        };
+        assert_eq!(
+            relay.peer_config().hello_interval,
+            Some(Duration::from_secs(5))
+        );
+        relay.connect(Box::new(hub_end));
+        let mut docs = Without {
+            docs: if upload { full() } else { MemDocs::new() },
+            missing: fx.clone(),
+        };
+        let mut link = client_end;
+        let config = SessionConfig::new(ClientId::new("a").unwrap());
+        assert_eq!(config.hello_interval, Some(Duration::from_secs(5)));
+        let mut session = SyncSession::new(config);
+
+        let want = big.oplog_vv();
+        let mut arrived = None;
+        // 50 ms ticks for 60 s of simulated time.
+        for tick in 0..1200u32 {
+            let now = t0 + Duration::from_millis(50) * tick;
+            *clock.lock().unwrap() = now;
+            session.pump_at(&mut docs, &mut link, now).unwrap();
+            let out = relay.pump_at(now);
+            assert!(out.disconnected.is_empty() && out.errors.is_empty());
+            let have = if upload {
+                relay.docs().version(&doc)
+            } else {
+                docs.version(&doc)
+            };
+            if arrived.is_none() && have.is_some_and(|v| v.includes_vv(&want)) {
+                arrived = Some(now - t0);
+            }
+        }
+        let arrived = arrived.expect("the transfer arrived");
+        assert!(arrived > Duration::from_secs(15), "{arrived:?}");
+        let pipe = if upload { &up } else { &down };
+        let copies = pipe.lock().unwrap().data_messages.get(&doc).copied();
+        assert_eq!(
+            copies,
+            Some(1),
+            "upload={upload}: arrived after {arrived:?}"
+        );
+        assert!(session.unsynced(&docs).is_empty());
+        if !upload {
+            // The client did not take `fx`: the hub keeps offering it.
+            assert!(down.lock().unwrap().data_messages[&fx] > 1);
+        }
+    }
+}

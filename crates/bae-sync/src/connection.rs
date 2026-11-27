@@ -538,11 +538,17 @@ impl Alarm {
                         Ok(t) => next = Some(next.map_or(t, |n| n.min(t))),
                         Err(RecvTimeoutError::Timeout) => {
                             if let Some(t) = next.take() {
-                                // From now on `set` arms again, whatever it
-                                // skipped because this deadline was earlier.
                                 let mut armed = lock_armed(&fired);
-                                if armed.is_some_and(|a| a <= t) {
-                                    *armed = None;
+                                match *armed {
+                                    // From now on `set` arms again, whatever
+                                    // it skipped because this deadline was
+                                    // earlier.
+                                    Some(a) if a <= t => *armed = None,
+                                    // Armed later after all (a `set` came
+                                    // between, merged into this deadline):
+                                    // still due, or it stays armed for good.
+                                    Some(a) => next = Some(a),
+                                    None => {}
                                 }
                             }
                             wake();
@@ -1193,8 +1199,12 @@ pub struct Closing {
 impl Closing {
     /// Documents with local edits that were not handed to the link: closed
     /// while offline or connecting, read-only access, or the remote had not
-    /// said what it has yet. Known at once. Warn before quitting when this is
-    /// not empty or the link reports an error.
+    /// said what it has yet. Also those handed to a link that failed without
+    /// the remote confirming them; a shared folder confirms only with its
+    /// `Hello`s and what it reads of others, not our writes, so after a lost
+    /// folder link this is every document edited on it (spec 7.4). Known at
+    /// once. Warn before quitting when this is not empty or the link reports
+    /// an error.
     pub fn unsynced(&self) -> &[DocKey] {
         &self.unsynced
     }
@@ -1590,6 +1600,50 @@ mod tests {
                 woken.load(Ordering::SeqCst) >= 2 * round
             });
         }
+    }
+
+    /// A pump with a stale clock asks for a wake at once just as the thread
+    /// times out on the armed deadline (after the timeout, before the thread
+    /// takes the lock), and the next pump arms a later deadline, which the
+    /// thread merges into the one at once. The later one must still fire,
+    /// not stay armed with nothing to fire it: every later `set` would be
+    /// dropped as armed already.
+    #[test]
+    fn the_alarm_keeps_a_later_deadline_merged_into_an_earlier_one() {
+        let woken = Arc::new(AtomicUsize::new(0));
+        let (entered_tx, entered) = mpsc::channel::<()>();
+        let (release, gate) = mpsc::channel::<()>();
+        let gate = Mutex::new(gate);
+        let w = woken.clone();
+        let alarm = Alarm::spawn(Arc::new(move || {
+            if w.fetch_add(1, Ordering::SeqCst) == 0 {
+                let _ = entered_tx.send(());
+                let _ = gate.lock().unwrap().recv();
+            }
+        }));
+        let start = Instant::now();
+        alarm.set(start + Duration::from_millis(20));
+        {
+            // The thread times out and waits for the lock; meanwhile a
+            // `set(start)` (exactly what it does).
+            let mut armed = lock_armed(&alarm.armed);
+            std::thread::sleep(Duration::from_millis(100));
+            alarm.tx.send(start).unwrap();
+            *armed = Some(start);
+        }
+        // The thread let go of `armed` and wakes; the next pump arms later.
+        entered.recv_timeout(Duration::from_secs(20)).unwrap();
+        let later = Instant::now() + Duration::from_millis(50);
+        alarm.set(later);
+        release.send(()).unwrap();
+        wait_for("the wake at once", || woken.load(Ordering::SeqCst) >= 2);
+        std::thread::sleep(
+            (later + Duration::from_millis(20)).saturating_duration_since(Instant::now()),
+        );
+        // Nothing stays armed: a new deadline (past the later one) fires.
+        let before = woken.load(Ordering::SeqCst);
+        alarm.set(Instant::now() + Duration::from_millis(1));
+        wait_for("a new deadline", || woken.load(Ordering::SeqCst) > before);
     }
 
     #[test]

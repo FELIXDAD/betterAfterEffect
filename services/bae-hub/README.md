@@ -98,7 +98,7 @@ Authorization: Bearer <令牌>
 - **在线状态**（`Presence`）由 `Relay` 转发：新连接马上收到所有人的状态；连接断开时，Hub 替它向其他人发"离开"。
 - **权限**：握手成功的响应（101）带 `x-bae-access: read` 或 `x-bae-access: write`，是这个连接按令牌和工程得到的权限。客户端用 `HubTransport::access()` 读出，应用据此在只读时禁用编辑、不发修改。没有这个头的旧 Hub，客户端当作"未知"，照常发送。
 - **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。
-- **超时**：Hub 60 秒没有收到某个客户端的任何消息，就断开这个连接。正常客户端每 5 秒发一次 `Hello`，所以只有死掉的链路（比如合上盖子的笔记本）才会被断开。反过来，Hub 每 5 秒给每个客户端发一次 `Hello`，`bae_sync::Connection` 20 秒一个字节都没收到就当 Hub 不在了（`hub_idle_timeout`；Hub 断电、VPN 断开时不会有重置，TCP 要很多分钟才发现），所以 Hub 不能关掉这个定期 `Hello`。
+- **超时**：Hub 60 秒一个字节都没有收到某个客户端发来的东西，就断开这个连接（按字节算：一条很大的消息上传超过 60 秒，只要字节还在到就不断开）。正常客户端每 5 秒发一次 `Hello`，所以只有死掉的链路（比如合上盖子的笔记本）才会被断开。反过来，Hub 每 5 秒给每个客户端发一次 `Hello`，`bae_sync::Connection` 20 秒一个字节都没收到就当 Hub 不在了（`hub_idle_timeout`；Hub 断电、VPN 断开时不会有重置，TCP 要很多分钟才发现），所以 Hub 不能关掉这个定期 `Hello`。
 - **重连**：断线后重新 `connect`，再调用 `SyncSession::reset()`。双方交换 `Hello` 后各自补发对方缺的部分，什么都不会丢。
 - **延迟**：
   - 有消息往来时，Hub 每 1 毫秒查看一次各个连接；安静下来后逐步放慢到每 10 毫秒一次。
@@ -125,7 +125,7 @@ Authorization: Bearer <令牌>
 |---|---|
 | `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept_granting(stream, None, 默认上限, 权限)` 完成握手（响应里带 `x-bae-access`），然后挂到工程的 Relay 上。 |
 | `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。目录这个对端单独设置（`Relay::connect_with`）：最多每 300 ms 写一次（`HubConfig::store_send_interval`），拖动时不会每秒追加几十次。最后一个客户端断开时立即 `Relay::flush()` 把还没写的写出去；关闭工程（卸载、退出）前再 `flush` 一次，然后 `Relay::close_peer` 等存盘线程写完，写盘失败记进日志。 |
-| `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开。 |
+| `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒一个字节都没收到就断开。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
 | `src/auth.rs` | 令牌只保存 BLAKE3 哈希，比较用常数时间。 |
 | `src/config.rs` | `hub.toml`、环境变量。 |

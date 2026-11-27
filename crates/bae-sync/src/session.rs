@@ -10,7 +10,7 @@ use crate::client::ClientId;
 use crate::docs::{DocSet, Imported};
 use crate::error::SyncError;
 use crate::presence::{PeerPresence, PresenceState, PresenceTable, initial_seq};
-use crate::protocol::{DocKey, Message};
+use crate::protocol::{DocKey, Message, PROTOCOL_VERSION};
 use crate::transport::Transport;
 
 /// Payloads received in one pump, per document: `(version, data)`.
@@ -97,7 +97,8 @@ pub struct SyncStats {
 /// have. Every [`pump`](Self::pump) imports what arrived and sends the ops the
 /// remote is missing. CRDT imports are idempotent and order-independent, so the
 /// only repair needed for lost messages is the periodic `Hello`, which resets that
-/// knowledge to what the remote really has.
+/// knowledge to what the remote really has (keeping what may still be on its
+/// way, see [`Message::Hello`]'s `ack`).
 #[derive(Debug)]
 pub struct SyncSession {
     config: SessionConfig,
@@ -108,6 +109,20 @@ pub struct SyncSession {
     /// What the remote showed it has: its last `Hello`, plus what it sent us
     /// since. [`forget_unconfirmed`](Self::forget_unconfirmed) goes back to it.
     confirmed: Option<BTreeMap<DocKey, VersionVector>>,
+    /// Per document, our last data message: the `seq` of our `Hello` before
+    /// it, and its version. Until the remote acknowledges a later `Hello` of
+    /// ours, it may still be on its way: the remote's `Hello`s do not undo it.
+    in_flight: BTreeMap<DocKey, (u64, VersionVector)>,
+    /// The `seq` of our last `Hello` (never reset, so it keeps growing).
+    hello_seq: u64,
+    /// The highest `seq` of the remote's `Hello`s on this link (our `ack`).
+    remote_hello_seq: u64,
+    /// Documents whose data from the remote we could not import (one we do
+    /// not have, a failed import). The first `Hello` once the document is
+    /// there acknowledges nothing, so the remote sends it again; while it is
+    /// missing, our `Hello`s acknowledge as usual (sending it again would be
+    /// dropped too, and the remote's transfers in flight would start over).
+    dropped: BTreeSet<DocKey>,
     remote_client: Option<ClientId>,
     remote_protocol: Option<u32>,
     last_hello: Option<Instant>,
@@ -130,6 +145,10 @@ impl SyncSession {
             config,
             remote: None,
             confirmed: None,
+            in_flight: BTreeMap::new(),
+            hello_seq: 0,
+            remote_hello_seq: 0,
+            dropped: BTreeSet::new(),
             remote_client: None,
             remote_protocol: None,
             last_hello: None,
@@ -225,6 +244,9 @@ impl SyncSession {
     pub fn reset(&mut self) {
         self.remote = None;
         self.confirmed = None;
+        self.in_flight.clear();
+        self.remote_hello_seq = 0;
+        self.dropped.clear();
         self.remote_client = None;
         self.remote_protocol = None;
         self.last_hello = None;
@@ -241,6 +263,7 @@ impl SyncSession {
     /// [`reset`](Self::reset) as usual.
     pub fn forget_unconfirmed(&mut self) {
         self.remote = self.confirmed.clone();
+        self.in_flight.clear();
     }
 
     /// Documents with local ops the remote is not known to have yet ("unsynced
@@ -390,11 +413,19 @@ impl SyncSession {
             .collect();
         self.announced = keys.into_iter().collect();
         self.last_hello = Some(now);
-        self.send(
-            transport,
-            Message::hello(self.config.client.clone(), versions),
-            out,
-        )
+        self.hello_seq += 1;
+        let resend = self.dropped.iter().any(|k| docs.version(k).is_some());
+        self.dropped.retain(|k| docs.version(k).is_none());
+        let hello = Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            client: self.config.client.clone(),
+            versions,
+            seq: self.hello_seq,
+            // Everything the remote sent before that `Hello` was imported: a
+            // pump imports what it received before it says hello again.
+            ack: (!resend).then_some(self.remote_hello_seq),
+        };
+        self.send(transport, hello, out)
     }
 
     fn handle(
@@ -411,19 +442,35 @@ impl SyncSession {
                 protocol,
                 client,
                 versions,
+                seq,
+                ack,
             } => {
                 self.remote_protocol = Some(protocol);
                 self.remote_client = Some(client);
+                self.remote_hello_seq = self.remote_hello_seq.max(seq);
                 for (key, _) in &versions {
                     if docs.version(key).is_none() && !out.unknown_docs.contains(key) {
                         out.unknown_docs.push(key.clone());
                     }
                 }
-                // Replace, not merge: after a hub restart it may have less than we
-                // sent, and then we must send it again.
+                // Replace, not merge: if the remote lost something (a message
+                // dropped on the way) we must send it again. Except what we sent
+                // after the `Hello` of ours it acknowledges: that may still be on
+                // its way (a large transfer over a slow link outlasts the hello
+                // interval), and sending it again would only pile up copies.
                 let versions: BTreeMap<DocKey, VersionVector> = versions.into_iter().collect();
                 self.confirmed = Some(versions.clone());
-                self.remote = Some(versions);
+                let mut remote = versions;
+                match ack {
+                    Some(ack) => {
+                        self.in_flight.retain(|_, (after, _)| *after >= ack);
+                        for (doc, (_, version)) in &self.in_flight {
+                            remote.entry(doc.clone()).or_default().merge(version);
+                        }
+                    }
+                    None => self.in_flight.clear(),
+                }
+                self.remote = Some(remote);
             }
             Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
                 self.stats.bytes_received += data.len() as u64;
@@ -453,6 +500,8 @@ impl SyncSession {
                     Ok(data) => {
                         if let Some(remote) = &mut self.remote {
                             remote.entry(doc.clone()).or_default().merge(&version);
+                            self.in_flight
+                                .insert(doc.clone(), (self.hello_seq, version.clone()));
                         }
                         self.send(transport, Message::Snapshot { doc, version, data }, out)?;
                     }
@@ -522,11 +571,15 @@ impl SyncSession {
                     }
                 }
                 Ok(Imported::UnknownDoc) => {
+                    self.dropped.insert(doc.clone());
                     if !out.unknown_docs.contains(&doc) {
                         out.unknown_docs.push(doc);
                     }
                 }
-                Err(e) => out.errors.push(e),
+                Err(e) => {
+                    self.dropped.insert(doc);
+                    out.errors.push(e);
+                }
             }
         }
     }
@@ -560,6 +613,9 @@ impl SyncSession {
             match docs.export_updates(&key, known) {
                 Ok(data) => {
                     known.merge(&local);
+                    // Versions only grow: this one covers the earlier sends.
+                    self.in_flight
+                        .insert(key.clone(), (self.hello_seq, local.clone()));
                     batch.push(Message::Updates {
                         doc: key,
                         version: local,
