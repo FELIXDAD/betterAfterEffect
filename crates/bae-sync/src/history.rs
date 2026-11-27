@@ -5,7 +5,9 @@
 //! Every sublayer's Loro document keeps its full history, so a version of the
 //! project is just one version vector per sublayer ([`ProjectVersion`]). Named
 //! versions live in their own small Loro document ([`History`],
-//! [`DocKey::History`]) that syncs like a sublayer.
+//! [`DocKey::History`]) that syncs like a sublayer. Automatic snapshots
+//! ([`AutoSnapshots`]) are checkpoints of kind [`CheckpointKind::Auto`] in the
+//! same document, thinned out by a [`Retention`] policy.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,6 +30,10 @@ use crate::error::SyncError;
 use crate::identity::{Matching, NodeIndex, suffixed};
 use crate::protocol::DocKey;
 
+mod auto;
+
+pub use auto::{AutoSnapshotStats, AutoSnapshots, Retention, RetentionTier, auto_snapshot_name};
+
 /// File name of the history document inside a `.bae` directory.
 pub const HISTORY_FILE: &str = "history.loro";
 
@@ -38,6 +44,16 @@ const K_AUTHOR: &str = "author";
 const K_CREATED: &str = "created";
 const K_STACK: &str = "stack";
 const K_VERSIONS: &str = "versions";
+/// Absent on named versions (and on everything older clients wrote).
+const K_KIND: &str = "kind";
+/// Automatic snapshots: the name they were created with. A different `name`
+/// (or a note) means someone renamed it, possibly on a client that predates
+/// kinds, so it counts as named from then on.
+const K_AUTO_NAME: &str = "auto_name";
+/// Automatic snapshots: ID of the automatic snapshot its creator had seen last
+/// (`""`: none). Snapshots with the same `prev` were made concurrently.
+const K_PREV: &str = "prev";
+const KIND_AUTO: &str = "auto";
 
 /// A version of the whole project: one version vector per sublayer. Sublayers
 /// that are not listed are empty at this version.
@@ -77,6 +93,18 @@ impl ProjectVersion {
             .collect()
     }
 
+    /// Whether every op of `other` is in this version too (sublayers `other`
+    /// does not list are empty there, so they are always included).
+    pub fn includes(&self, other: &ProjectVersion) -> bool {
+        other
+            .sublayers
+            .iter()
+            .all(|(id, vv)| match self.sublayers.get(id) {
+                Some(mine) => mine.includes_vv(vv),
+                None => vv.is_empty(),
+            })
+    }
+
     pub fn from_json(json: &VersionJson) -> Result<Self, SyncError> {
         let mut sublayers = BTreeMap::new();
         for (id, peers) in json {
@@ -101,16 +129,39 @@ pub type VersionJson = BTreeMap<String, BTreeMap<String, i32>>;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CheckpointId(pub String);
 
+impl CheckpointId {
+    /// A new time-ordered ID.
+    fn new() -> Self {
+        CheckpointId(uuid::Uuid::now_v7().simple().to_string())
+    }
+}
+
 impl std::fmt::Display for CheckpointId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-/// A named version ("给客户的第 1 版").
+/// What made a checkpoint.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CheckpointKind {
+    /// Named by someone. Also an automatic snapshot someone renamed, and every
+    /// checkpoint written by a client that predates kinds.
+    Named,
+    /// Made by [`AutoSnapshots`]; pruned by its [`Retention`]. Its `name` is
+    /// only a fallback for older clients: show it as a localized label with
+    /// `created_ms` in local time.
+    Auto,
+    /// A kind written by a newer client; treated like a named version (never
+    /// pruned).
+    Other(String),
+}
+
+/// A named version ("给客户的第 1 版") or an automatic snapshot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Checkpoint {
     pub id: CheckpointId,
+    pub kind: CheckpointKind,
     pub name: String,
     pub note: String,
     pub author: AuthorId,
@@ -119,6 +170,13 @@ pub struct Checkpoint {
     /// Layer stack (strongest first) when the checkpoint was made.
     pub layer_stack: Vec<SublayerId>,
     pub version: ProjectVersion,
+}
+
+impl Checkpoint {
+    /// Made by [`AutoSnapshots`] (and not renamed since).
+    pub fn is_auto(&self) -> bool {
+        self.kind == CheckpointKind::Auto
+    }
 }
 
 /// Project history: named versions, stored in one Loro document that syncs like
@@ -208,7 +266,7 @@ impl History {
         self.doc.get_map(CHECKPOINTS)
     }
 
-    fn commit(&self, author: &AuthorId, label: &str) {
+    pub(crate) fn commit(&self, author: &AuthorId, label: &str) {
         let msg = serde_json::json!({ "author": author, "label": label }).to_string();
         self.doc.set_next_commit_message(&msg);
         self.doc.commit();
@@ -223,7 +281,8 @@ impl History {
         note: &str,
     ) -> Result<Checkpoint, SyncError> {
         let cp = Checkpoint {
-            id: CheckpointId(uuid::Uuid::now_v7().simple().to_string()),
+            id: CheckpointId::new(),
+            kind: CheckpointKind::Named,
             name: name.to_owned(),
             note: note.to_owned(),
             author: author.clone(),
@@ -231,6 +290,40 @@ impl History {
             layer_stack: stage.layer_stack().to_vec(),
             version: ProjectVersion::current(stage),
         };
+        self.write_checkpoint(&cp)?;
+        self.commit(author, "checkpoint.create");
+        Ok(cp)
+    }
+
+    /// Write an automatic snapshot of `version` (not committed: see
+    /// [`AutoSnapshots`], whose public methods take `&mut History`).
+    pub(crate) fn write_auto_snapshot(
+        &self,
+        stage: &Stage,
+        author: &AuthorId,
+        created_ms: i64,
+        name: String,
+        version: ProjectVersion,
+        prev: Option<&CheckpointId>,
+    ) -> Result<Checkpoint, SyncError> {
+        let cp = Checkpoint {
+            id: CheckpointId::new(),
+            kind: CheckpointKind::Auto,
+            name,
+            note: String::new(),
+            author: author.clone(),
+            created_ms,
+            layer_stack: stage.layer_stack().to_vec(),
+            version,
+        };
+        let map = self.write_checkpoint(&cp)?;
+        map.insert(K_KIND, KIND_AUTO)?;
+        map.insert(K_AUTO_NAME, cp.name.as_str())?;
+        map.insert(K_PREV, prev.map_or("", |p| p.0.as_str()))?;
+        Ok(cp)
+    }
+
+    fn write_checkpoint(&self, cp: &Checkpoint) -> Result<LoroMap, SyncError> {
         let map = self
             .checkpoints_map()
             .insert_container(&cp.id.0, LoroMap::new())?;
@@ -248,20 +341,55 @@ impl History {
         for (id, vv) in &cp.version.sublayers {
             versions.insert(id.as_str(), vv.encode())?;
         }
-        self.commit(author, "checkpoint.create");
-        Ok(cp)
+        Ok(map)
     }
 
-    /// All named versions, oldest first.
+    /// Delete checkpoints (not committed); returns how many existed.
+    pub(crate) fn remove_checkpoints(&self, ids: &[CheckpointId]) -> Result<usize, SyncError> {
+        let map = self.checkpoints_map();
+        let mut n = 0;
+        for id in ids {
+            if map.get(&id.0).is_some() {
+                map.delete(&id.0)?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
+    /// All checkpoints (named versions and automatic snapshots), oldest first.
     pub fn checkpoints(&self) -> Vec<Checkpoint> {
+        self.entries().into_iter().map(|(cp, _)| cp).collect()
+    }
+
+    /// Named versions only (everything that is not an automatic snapshot),
+    /// oldest first.
+    pub fn named_checkpoints(&self) -> Vec<Checkpoint> {
+        self.checkpoints_where(|c| !c.is_auto())
+    }
+
+    /// Automatic snapshots only, oldest first.
+    pub fn auto_snapshots(&self) -> Vec<Checkpoint> {
+        self.checkpoints_where(Checkpoint::is_auto)
+    }
+
+    /// The checkpoints `keep` accepts, oldest first.
+    pub fn checkpoints_where(&self, mut keep: impl FnMut(&Checkpoint) -> bool) -> Vec<Checkpoint> {
+        let mut out = self.checkpoints();
+        out.retain(|c| keep(c));
+        out
+    }
+
+    /// Every checkpoint with its `prev` (automatic snapshots), oldest first.
+    pub(crate) fn entries(&self) -> Vec<(Checkpoint, Option<CheckpointId>)> {
         let LoroValue::Map(all) = self.checkpoints_map().get_deep_value() else {
             return Vec::new();
         };
-        let mut out: Vec<Checkpoint> = all
+        let mut out: Vec<_> = all
             .iter()
-            .filter_map(|(id, v)| parse_checkpoint(id, v))
+            .filter_map(|(id, v)| parse_entry(id, v))
             .collect();
-        out.sort_by(|a, b| (a.created_ms, &a.id).cmp(&(b.created_ms, &b.id)));
+        out.sort_by(|(a, _), (b, _)| (a.created_ms, &a.id).cmp(&(b.created_ms, &b.id)));
         out
     }
 
@@ -269,9 +397,11 @@ impl History {
         let ValueOrContainer::Container(c) = self.checkpoints_map().get(&id.0)? else {
             return None;
         };
-        parse_checkpoint(&id.0, &c.into_map().ok()?.get_deep_value())
+        parse_entry(&id.0, &c.into_map().ok()?.get_deep_value()).map(|(cp, _)| cp)
     }
 
+    /// Rename a checkpoint and optionally change its note. Renaming an
+    /// automatic snapshot keeps it: it becomes a named version.
     pub fn rename_checkpoint(
         &mut self,
         id: &CheckpointId,
@@ -289,11 +419,20 @@ impl History {
         if let Some(note) = note {
             map.insert(K_NOTE, note)?;
         }
+        let auto = matches!(
+            map.get(K_KIND),
+            Some(ValueOrContainer::Value(LoroValue::String(k))) if k.as_str() == KIND_AUTO
+        );
+        if auto {
+            for key in [K_KIND, K_AUTO_NAME, K_PREV] {
+                map.delete(key)?;
+            }
+        }
         self.commit(author, "checkpoint.rename");
         Ok(())
     }
 
-    /// Remove a named version (the project history itself is untouched).
+    /// Remove a checkpoint (the project history itself is untouched).
     pub fn delete_checkpoint(
         &mut self,
         id: &CheckpointId,
@@ -366,7 +505,8 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn parse_checkpoint(id: &str, v: &LoroValue) -> Option<Checkpoint> {
+/// A checkpoint and, for automatic snapshots, its `prev`.
+fn parse_entry(id: &str, v: &LoroValue) -> Option<(Checkpoint, Option<CheckpointId>)> {
     let LoroValue::Map(m) = v else {
         return None;
     };
@@ -394,17 +534,31 @@ fn parse_checkpoint(id: &str, v: &LoroValue) -> Option<Checkpoint> {
             }
         }
     }
-    Some(Checkpoint {
+    let name = string(K_NAME).unwrap_or_default();
+    let note = string(K_NOTE).unwrap_or_default();
+    let (kind, prev) = match string(K_KIND).as_deref() {
+        None => (CheckpointKind::Named, None),
+        Some(KIND_AUTO) if note.is_empty() && string(K_AUTO_NAME).as_ref() == Some(&name) => {
+            let prev = string(K_PREV).filter(|p| !p.is_empty()).map(CheckpointId);
+            (CheckpointKind::Auto, prev)
+        }
+        // Renamed (or given a note) by a client that predates kinds.
+        Some(KIND_AUTO) => (CheckpointKind::Named, None),
+        Some(other) => (CheckpointKind::Other(other.to_owned()), None),
+    };
+    let cp = Checkpoint {
         id: CheckpointId(id.to_owned()),
-        name: string(K_NAME).unwrap_or_default(),
-        note: string(K_NOTE).unwrap_or_default(),
+        kind,
+        name,
+        note,
         author: string(K_AUTHOR)
             .and_then(|a| AuthorId::new(&a).ok())
             .unwrap_or_else(AuthorId::system),
         created_ms,
         layer_stack,
         version: ProjectVersion { sublayers },
-    })
+    };
+    Some((cp, prev))
 }
 
 // ---- read-only views ----

@@ -306,7 +306,7 @@ pub fn builtin_tools() -> Vec<ToolEntry> {
         builtin(
             HISTORY_LIST,
             "List Versions",
-            "Named versions of the project (oldest first): id, name, note, author, time, layer stack. Pass an id as checkpoint to stage_describe or prim_get to look at that version.",
+            "Named versions and automatic snapshots of the project (oldest first): id, kind (named or auto), name, note, author, time, layer stack. Pass an id as checkpoint to stage_describe or prim_get to look at that version.",
             true,
             schema_of::<NoParams>(),
         ),

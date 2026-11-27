@@ -469,6 +469,7 @@ async fn agent_builds_animates_renders_and_proposes() {
     );
     let list = ok_json(&call(&client, "history_list", json!({})).await);
     assert_eq!(list["checkpoints"][0]["name"], "v1");
+    assert_eq!(list["checkpoints"][0]["kind"], "named");
 
     // Module commands are tools too, and their times accept frames.
     let tools = client.list_all_tools().await.unwrap();

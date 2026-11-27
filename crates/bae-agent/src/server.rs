@@ -845,8 +845,14 @@ fn checkpoint_view(
 }
 
 fn checkpoint_json(cp: &bae_sync::Checkpoint) -> Json {
+    let kind = match &cp.kind {
+        bae_sync::CheckpointKind::Named => "named",
+        bae_sync::CheckpointKind::Auto => "auto",
+        bae_sync::CheckpointKind::Other(k) => k.as_str(),
+    };
     json!({
         "id": cp.id.0,
+        "kind": kind,
         "name": cp.name,
         "note": cp.note,
         "author": cp.author,
