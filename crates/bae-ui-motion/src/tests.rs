@@ -3735,3 +3735,63 @@ fn add_footage_separate_dimensions_and_layer_controls() {
         "motion.view.show_layer_controls"
     ));
 }
+
+/// Composition ▸ Crop Comp to Selected Layer(s) Bounds and Region of Interest;
+/// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest / to Layer, Set
+/// Focus Distance to Layer.
+#[test]
+fn crop_comp_and_camera_focus() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_LAYERS));
+    assert_eq!(r.invocations[0].id, "comp.crop");
+    // The solid fills the 640×360 comp.
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([0.0, 0.0, 640.0, 360.0])
+    );
+    // No region of interest: nothing to crop to.
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().roi = Some((comp.clone(), [10.0, 20.0, 110.0, 220.0]));
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI));
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([10.0, 20.0, 110.0, 220.0])
+    );
+    assert!(h.session().lock().roi_cropped);
+
+    let camera = PrimPath::new(
+        h.run("layer.create", json!({"comp": comp, "kind": "camera"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().selected_layers = vec![camera.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::FOCUS_TO_POI));
+    assert_eq!(r.invocations[0].id, "attr.set_expressions");
+    assert_eq!(
+        r.invocations[0].params["items"][0]["source"],
+        "length(position, pointOfInterest)"
+    );
+    h.session().lock().selected_layers = vec![camera.clone(), solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::LINK_FOCUS_TO_LAYER));
+    let source = r.invocations[0].params["items"][0]["source"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(source.starts_with("m = thisComp.layer(\""), "{source}");
+    let r = h.action(&mut viewer, Invocation::new(ids::SET_FOCUS_TO_LAYER));
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    let d = r.invocations[0].params["edits"][0]["value"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(d > 0.0, "{d}");
+}
