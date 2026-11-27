@@ -342,7 +342,10 @@ impl StoreNotes {
 /// `hub_max` it is the hub's, and raising it helps only below what clients
 /// take (the default `max_incoming`, 256 MiB; `HubConfig::validate` refuses
 /// more, and it is the default): at that limit the layer cannot go through
-/// the hub at all.
+/// the hub at all. What does not fit is every op of the layer the client
+/// lacks (`SyncSession` sends Loro updates, not the current state), so
+/// deleting content does not help, it adds ops: only new layers with a
+/// shorter history do.
 fn too_large_hint(max: usize, hub_max: usize) -> String {
     let clients_take = HubLimits::default().max_incoming;
     if max < hub_max {
@@ -360,7 +363,8 @@ fn too_large_hint(max: usize, hub_max: usize) -> String {
     } else {
         format!(
             "{} is the most clients take in one message, so the layer cannot sync through \
-             the hub until it is split or made smaller",
+             the hub; deleting content from it does not help (what does not fit is its edit \
+             history, not its current size): move the content into new, smaller layers",
             mib(clients_take)
         )
     }
@@ -848,7 +852,9 @@ mod tests {
     /// client says what helps. It used to tell the admin to raise
     /// `max_message_mib` in every case: at the default (256 MiB) the hub then
     /// refuses to start, and when the client's own limit is the smaller one
-    /// the hub's setting changes nothing.
+    /// the hub's setting changes nothing. At the default it then said the
+    /// layer could sync once "made smaller", but deleting content from it
+    /// only adds to the ops the client lacks.
     #[test]
     fn the_too_large_warning_says_what_helps() {
         let check = |hub_max_mib: u64| {
@@ -868,7 +874,16 @@ mod tests {
         let hint = too_large_hint(default, default);
         assert!(!check((default >> 20) as u64 + 1));
         assert!(!hint.contains("raising"), "{hint}");
-        assert!(hint.contains("256 MiB") && hint.contains("split"), "{hint}");
+        assert!(hint.contains("256 MiB"), "{hint}");
+        // Deleting content only adds ops: what does not fit is the layer's
+        // history (all the ops the client lacks), so only new layers help.
+        assert!(
+            !hint.contains("made smaller")
+                && hint.contains("deleting content")
+                && hint.contains("history")
+                && hint.contains("new, smaller layers"),
+            "{hint}"
+        );
         // A hub configured below that: raising it may help, as far as the
         // hub takes it.
         let hint = too_large_hint(64 << 20, 64 << 20);
