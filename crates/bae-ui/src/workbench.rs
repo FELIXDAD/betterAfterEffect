@@ -983,6 +983,15 @@ impl Workbench {
         for id in std::mem::take(&mut self.requests.open) {
             self.open_panel(id);
         }
+        for (id, beside) in std::mem::take(&mut self.requests.split) {
+            self.dock
+                .open_near(id.clone(), std::slice::from_ref(&beside));
+            if let Some(frame) = self.dock.frame_of(&beside) {
+                self.dock
+                    .move_panel(&id, frame, crate::dock::DropZone::Right, None);
+            }
+            self.dock.focus_panel(&id);
+        }
     }
 
     /// Open (or bring to front) a panel: back where it was, else where the

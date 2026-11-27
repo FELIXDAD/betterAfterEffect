@@ -669,6 +669,7 @@ dependencies = [
  "bae-plugin",
  "bae-render",
  "bae-text",
+ "bae-vision",
  "chrono",
  "exr",
  "glam",
@@ -815,6 +816,7 @@ dependencies = [
  "bae-interop-psd",
  "bae-model",
  "bae-vector",
+ "bae-vision",
  "schemars",
  "serde",
  "serde_json",
@@ -1023,11 +1025,13 @@ dependencies = [
  "bae-text",
  "bae-ui",
  "bae-vector",
+ "bae-vision",
  "cap-std",
  "chrono",
  "egui",
  "egui-wgpu",
  "flate2",
+ "png",
  "roxmltree",
  "serde",
  "serde_json",
@@ -1055,6 +1059,13 @@ dependencies = [
  "tracing",
  "vello",
  "vello_cpu",
+]
+
+[[package]]
+name = "bae-vision"
+version = "0.1.0"
+dependencies = [
+ "bae-model",
 ]
 
 [[package]]

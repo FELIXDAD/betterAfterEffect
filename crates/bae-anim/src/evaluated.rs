@@ -34,6 +34,8 @@ pub struct EvaluatedComp {
     pub motion_blur: MotionBlur,
     /// The comp's Enable Frame Blending switch.
     pub frame_blending: bool,
+    /// The comp renders 3D with Advanced 3D (models, extrusion …).
+    pub advanced_3d: bool,
     /// Layers in AE stacking order: `layers[0]` is the top layer (AE index 1). The
     /// renderer composites from the last to the first. Every layer is listed, including
     /// invisible ones (track mattes, parents, cameras), so indices are stable.
@@ -114,6 +116,8 @@ pub struct EvaluatedLayer {
     pub light: Option<LightState>,
     /// 3D layers' Material Options.
     pub material: Option<MaterialState>,
+    /// Text and shape layers' Geometry Options (Advanced 3D).
+    pub geometry: Option<GeometryState>,
     /// Other layers this layer's expressions read at this time (`thisComp.layer(…)`,
     /// `parent`, `comp(…)`), so caches can invalidate it when they change.
     pub depends_on: Vec<PrimPath>,
@@ -350,6 +354,19 @@ pub struct MaterialState {
     /// Percent.
     pub transparency_rolloff: f64,
     pub index_of_refraction: f64,
+}
+
+/// Geometry Options of a text or shape layer (Advanced 3D).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct GeometryState {
+    /// 1 None, 2 Angular, 3 Concave, 4 Convex.
+    pub bevel_style: u8,
+    pub bevel_direction: u8,
+    pub bevel_depth: f64,
+    /// Percent.
+    pub hole_bevel_depth: f64,
+    /// Pixels.
+    pub extrusion_depth: f64,
 }
 
 /// Camera layer state (AE-ANI-009/022).

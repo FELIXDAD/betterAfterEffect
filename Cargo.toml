@@ -76,6 +76,7 @@ bae-plugin-sdk = { path = "crates/bae-plugin-sdk" }
 bae-script = { path = "crates/bae-script" }
 bae-package = { path = "crates/bae-package" }
 bae-motion = { path = "crates/bae-motion" }
+bae-vision = { path = "crates/bae-vision" }
 bae-vector = { path = "crates/bae-vector" }
 bae-ui-motion = { path = "crates/bae-ui-motion" }
 bae-effects = { path = "crates/bae-effects" }
