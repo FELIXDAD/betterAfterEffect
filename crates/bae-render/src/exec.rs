@@ -509,6 +509,14 @@ pub(crate) fn execute(
                         })
                     })
                     .collect();
+                let planes: Vec<_> = mesh
+                    .planes
+                    .iter()
+                    .map(|p| match p.image {
+                        Some(id) => (graph.nodes[id.index()].key, outputs[id.index()].clone()),
+                        None => (0, None),
+                    })
+                    .collect();
                 let pipelines = ctx.pipelines.mesh();
                 ctx.draw_calls += mesh::encode(
                     &mut pipelines.lock(),
@@ -518,6 +526,7 @@ pub(crate) fn execute(
                     format,
                     mesh,
                     &environments,
+                    &planes,
                     &target,
                     &depth_out,
                 );
@@ -829,7 +838,12 @@ fn needed_nodes(
             }
         }
     }
-    (0..n).map(|i| reached[i] || !env_only[i]).collect()
+    // Model passes whose models joined another pass draw nothing.
+    let emptied =
+        |i: usize| matches!(&graph.nodes[i].kind, NodeKind::Mesh(m) if m.models.is_empty());
+    (0..n)
+        .map(|i| reached[i] || !(env_only[i] || emptied(i)))
+        .collect()
 }
 
 struct ExecCtx<'a> {
