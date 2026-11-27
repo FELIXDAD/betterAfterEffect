@@ -144,3 +144,42 @@ fn basic_3d_back_face_mirrors_the_layer_without_losing_alpha() {
         assert!((actual[3] - expected[3]).abs() < 0.00001);
     }
 }
+
+#[test]
+fn camera_points_render_the_selected_observations_into_the_image() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(32, 24);
+    let plate = Pixels::new(rect, |_, _| [0., 0., 0., 1.]);
+    let fx = builtin("ADBE 3D Tracker");
+    use bae_model::effect::camera_tracks::{DISPLAY_POINTS, TrackPoint};
+    let mut rows = Vec::new();
+    TrackPoint {
+        id: 1,
+        source: [8.5, 8.5],
+        projected: [20.5, 14.5],
+        error: 0.,
+    }
+    .append(&mut rows);
+    let render = |mode: i64, enabled: bool| {
+        run(
+            &gpu,
+            F32,
+            fx,
+            vec![
+                (DISPLAY_POINTS, Value::Bytes(rows.clone())),
+                (406, Value::Bool(enabled)),
+                (405, Value::Int(mode)),
+            ],
+            &plate,
+            rect,
+            1.,
+        )
+    };
+    assert_eq!(render(1, false).get(8, 8), [0., 0., 0., 1.]);
+    let source = render(1, true);
+    let solved = render(2, true);
+    assert!(source.get(8, 8)[1] > 0.8 && solved.get(20, 14)[1] > 0.8);
+    assert_eq!(source.get(20, 14), plate.get(20, 14));
+}
