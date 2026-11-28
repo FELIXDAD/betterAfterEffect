@@ -659,6 +659,22 @@ impl GpuPreview {
     /// The viewer shows `texture` (a frame of the background renderer or
     /// its cache): the Info panel and snapshots read it until the next
     /// [`Self::frame`].
+    /// What the Info pixel reads, for a test that times out waiting for it.
+    #[cfg(test)]
+    pub(crate) fn debug_state(&self) -> String {
+        format!(
+            "cached={:?} target={:?} rect={:?} sampled={:?} pending={} playback: {}",
+            self.cached
+                .as_ref()
+                .map(|(t, r, _)| (r, [t.width(), t.height()])),
+            self.target.as_ref().map(OutputTarget::size),
+            self.rect,
+            self.sampled,
+            self.pending_pixel.is_some(),
+            self.playback.debug_state(),
+        )
+    }
+
     pub(crate) fn show_cached(&mut self, frame: crate::playback::ShownFrame) {
         // Told apart by frame, not by texture: playback recycles textures.
         if self

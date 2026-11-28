@@ -131,6 +131,14 @@ fn tools_follow_the_preferences() {
 
 #[test]
 fn contrasting_mask_uses_the_rendered_pixel_at_the_start_of_the_drag() {
+    // EXPERIMENT (do not merge): repeat to catch the Windows WARP timeout.
+    for round in 0..40 {
+        eprintln!("contrasting round {round}");
+        contrasting_round();
+    }
+}
+
+fn contrasting_round() {
     let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
@@ -170,8 +178,14 @@ fn contrasting_mask_uses_the_rendered_pixel_at_the_start_of_the_drag() {
         }
         assert!(
             std::time::Instant::now() < timeout,
-            "viewer pixel {:?}",
-            h.session().lock().info.color
+            "viewer pixel {:?} at {:?}, stage revision {}, {}",
+            h.session().lock().info.color,
+            h.session().lock().info.pos,
+            h.stage.revision(),
+            h.viewer
+                .gpu
+                .as_ref()
+                .map_or("no GPU preview".into(), |g| g.debug_state()),
         );
         // Slow adapters (WARP on CI) finish the frame and its pixel readback
         // only when waited on (as in #727).
